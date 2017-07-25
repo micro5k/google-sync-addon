@@ -1,0 +1,22 @@
+CONTENTS
+========
+
+Android 6+
+----------
+- **files/priv-app/GoogleBackupTransport.apk** => Google Backup Transport 7.1.2
+- **files/app/GoogleContactsSyncAdapter.apk** => Google Contacts Sync O (From O Developer Preview 1)
+- **files/app/GoogleCalendarSyncAdapter.apk** => Google Calendar Sync 5.2.3-99827563 (2015080710)
+
+
+Android 4.4 - 4.4.4
+-------------------
+- **files/priv-app-4.4/GoogleBackupTransport.apk** => Google Backup Transport 4.4.4-1227136
+- **files/app-4.4/GoogleContactsSyncAdapter.apk** => Google Contacts Sync 4.4.4-1227136
+- **files/app-4.4/GoogleCalendarSyncAdapter.apk** => Google Calendar Sync 4.0.4-278776
+
+
+Used during setup (not installed)
+---------------------------------
+- BusyBox 1.26.2+ - git branch 1_26_stable - 2017-05-09 (compiled by [YashdSaraf][1]) - Available [here](https://forum.xda-developers.com/showthread.php?t=3348543).
+
+[1]: https://forum.xda-developers.com/member.php?u=5423715  "YashdSaraf"
