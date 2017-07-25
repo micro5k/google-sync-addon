@@ -132,12 +132,12 @@ fi
 ui_print 'Installing...'
 if [[ $API -ge 23 ]]; then
   copy_dir_content "${TMP_PATH}/files/priv-app" "${PRIVAPP_PATH}"
-  copy_dir_content "${TMP_PATH}/files/app" '{SYS_PATH}/app'
+  copy_dir_content "${TMP_PATH}/files/app" "${SYS_PATH}/app"
 elif [[ $API -ge 21 ]]; then
   ui_error 'ERROR: Unsupported Android version'
 elif [[ $API -ge 19 ]]; then
   copy_dir_content "${TMP_PATH}/files/priv-app-4.4" "${PRIVAPP_PATH}"
-  copy_dir_content "${TMP_PATH}/files/app-4.4" '{SYS_PATH}/app'
+  copy_dir_content "${TMP_PATH}/files/app-4.4" "${SYS_PATH}/app"
 fi
 
 # Install survival script
