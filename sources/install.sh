@@ -109,7 +109,7 @@ if ! is_mounted '/data'; then
   if ! is_mounted '/data'; then ui_error 'ERROR: /data cannot be mounted'; fi
 fi
 if [[ -e '/data/system/users/0/runtime-permissions.xml' ]]; then
-  if ! grep -q 'com.google.android.gms' /data/system/users/*/runtime-permissions.xml; then
+  if ! grep -q 'com.google.android.syncadapters.contacts' /data/system/users/*/runtime-permissions.xml; then
     # Purge the runtime permissions to prevent issues when the user flash this for the first time on a dirty install
     ui_debug "Resetting Android runtime permissions..."
     delete /data/system/users/*/runtime-permissions.xml
@@ -129,7 +129,6 @@ if [[ $OLD_ANDROID != true ]]; then
   done
 fi
 
-ui_print 'Installing...'
 if [[ $API -ge 23 ]]; then
   copy_dir_content "${TMP_PATH}/files/priv-app" "${PRIVAPP_PATH}"
   copy_dir_content "${TMP_PATH}/files/app" "${SYS_PATH}/app"
