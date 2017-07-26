@@ -79,7 +79,7 @@ ui_debug 'Setting permissions...'
 set_std_perm_recursive "${TMP_PATH}/files"
 
 ui_msg_sameline_start 'Verifying files...'
-if verify_sha1 "${TMP_PATH}/files/priv-app/GoogleBackupTransport.apk" '2bdf65e98dbd115473cd72db8b6a13d585a65d8d' &&
+if #verify_sha1 "${TMP_PATH}/files/priv-app/GoogleBackupTransport.apk" '2bdf65e98dbd115473cd72db8b6a13d585a65d8d' &&  # Disabled for now
    verify_sha1 "${TMP_PATH}/files/app/GoogleContactsSyncAdapter.apk" 'c06a412df009beb2e9e014542ad5cd2e876bafc0' &&
    verify_sha1 "${TMP_PATH}/files/app/GoogleCalendarSyncAdapter.apk" 'aa482580c87a43c83882c05a4757754917d47f32' &&
    verify_sha1 "${TMP_PATH}/files/priv-app-4.4/GoogleBackupTransport.apk" '6f186d368014022b0038ad2f5d8aa46bb94b5c14' &&
@@ -130,7 +130,7 @@ if [[ $OLD_ANDROID != true ]]; then
 fi
 
 if [[ $API -ge 23 ]]; then
-  copy_dir_content "${TMP_PATH}/files/priv-app" "${PRIVAPP_PATH}"
+  #copy_dir_content "${TMP_PATH}/files/priv-app" "${PRIVAPP_PATH}"  # Disabled for now
   copy_dir_content "${TMP_PATH}/files/app" "${SYS_PATH}/app"
 elif [[ $API -ge 21 ]]; then
   ui_error 'ERROR: Unsupported Android version'
