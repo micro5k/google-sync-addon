@@ -45,7 +45,7 @@ PRIVAPP_PATH="${SYS_PATH}/app"
 if [[ -d "${SYS_PATH}/priv-app" ]]; then PRIVAPP_PATH="${SYS_PATH}/priv-app"; fi  # Detect the position of the privileged apps folder
 
 API=$(build_getprop 'build\.version\.sdk')
-if [[ $API -ge 23 ]]; then
+if [[ $API -ge 24 ]]; then  # 23
   :  ### New Android versions
 elif [[ $API -ge 21 ]]; then
   ui_error 'ERROR: Unsupported Android version'
