@@ -11,7 +11,7 @@ Android 4.4 - 4.4.4
 -------------------
 - **files/priv-app-4.4/GoogleBackupTransport.apk** => Google Backup Transport 4.4.4-1227136
 - **files/app-4.4/GoogleContactsSyncAdapter.apk** => Google Contacts Sync 4.4.4-1227136
-- **files/app-4.4/GoogleCalendarSyncAdapter.apk** => Google Calendar Sync 4.0.4-278776
+- **files/app-4.4/GoogleCalendarSyncAdapter.apk** => Google Calendar Sync 4.1.2-509230
 
 
 Used during setup (not installed)
