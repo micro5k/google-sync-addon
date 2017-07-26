@@ -127,6 +127,12 @@ if [[ $OLD_ANDROID != true ]]; then
     create_dir "$path_without_ext"
     mv -f "$entry" "$path_without_ext"/
   done
+  for entry in "${TMP_PATH}/files/app"/*; do
+    path_without_ext=$(remove_ext "$entry")
+
+    create_dir "$path_without_ext"
+    mv -f "$entry" "$path_without_ext"/
+  done
 fi
 
 if [[ $API -ge 23 ]]; then
