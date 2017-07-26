@@ -3,7 +3,6 @@ CONTENTS
 
 Android 6+
 ----------
-- **files/priv-app/GoogleBackupTransport.apk** => Google Backup Transport 7.1.2
 - **files/app/GoogleContactsSyncAdapter.apk** => Google Contacts Sync O (From O Developer Preview 1)
 - **files/app/GoogleCalendarSyncAdapter.apk** => Google Calendar Sync 5.2.3-99827563 (2015080710)
 
