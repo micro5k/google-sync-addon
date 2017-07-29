@@ -61,7 +61,7 @@ ZIP_PATH=$(dirname "$ZIP_FILE")
 # Info
 ui_msg '------------------'
 ui_msg 'Google Sync Add-on'
-ui_msg 'v1.0.2-alpha'
+ui_msg 'v1.0.3-beta'
 ui_msg '(by ale5000)'
 ui_msg '------------------'
 ui_msg ''
