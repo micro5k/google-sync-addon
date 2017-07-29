@@ -25,6 +25,32 @@ ui_error()
   exit 1
 }
 
+verify_sha1()
+{
+  local file_name="$1"
+  local hash="$2"
+  local file_hash=$(sha1sum "$file_name" | cut -d ' ' -f 1)
+
+  if [[ $hash != "$file_hash" ]]; then return 1; fi  # Failed
+  return 0  # Success
+}
+
+corrupted_file()
+{
+  rm -f "$1" || echo 'Failed to remove the corrupted file.'
+  ui_error "The file '$1' is corrupted."
+}
+
+dl_file()
+{
+  if [[ ! -e "$3/$2/$1" ]]; then
+    mkdir -p "$3/$2"
+    wget -O "$3/$2/$1" -U 'Mozilla/5.0 (X11; Linux x86_64; rv:54.0) Gecko/20100101 Firefox/54.0' "$4" || ui_error "Failed to download the file '$2/$1'."
+    echo ''
+  fi
+  verify_sha1 "$3/$2/$1" "$5" || corrupted_file "$3/$2/$1"
+}
+
 # Detect OS
 UNAME=$(uname)
 if [[ "$UNAME" == 'Linux' ]]; then
@@ -61,6 +87,14 @@ TEMP_DIR=$(mktemp -d -t ZIPBUILDER-XXXXXX)
 # Set filename and version
 VER=$(cat "$BASEDIR/sources/inc/VERSION")
 FILENAME="$NAME-v$VER-signed"
+
+# Download files if they are missing
+dl_file 'GoogleContactsSyncAdapter.apk' 'app' "$BASEDIR/sources/files" 'http://www.apkmirror.com/wp-content/themes/APKMirror/download.php?id=246810' '3b3dcbc77d81fc56f20af93cf453ad9da2f2276f'
+dl_file 'GoogleCalendarSyncAdapter.apk' 'app' "$BASEDIR/sources/files" 'http://www.apkmirror.com/wp-content/themes/APKMirror/download.php?id=72565' 'aa482580c87a43c83882c05a4757754917d47f32'
+
+dl_file 'GoogleBackupTransport.apk' 'priv-app-4.4' "$BASEDIR/sources/files" 'http://www.apkmirror.com/wp-content/themes/APKMirror/download.php?id=152392' '6f186d368014022b0038ad2f5d8aa46bb94b5c14'
+dl_file 'GoogleContactsSyncAdapter.apk' 'app-4.4' "$BASEDIR/sources/files" 'http://www.apkmirror.com/wp-content/themes/APKMirror/download.php?id=152374' '68597be59f16d2e26a79def6fa20bc85d1d2c3b3'
+dl_file 'GoogleCalendarSyncAdapter.apk' 'app-4.4' "$BASEDIR/sources/files" 'http://www.apkmirror.com/wp-content/themes/APKMirror/download.php?id=99188' 'cf9fa487dfe0ead8576d6af897687e7fa2ae00fa'
 
 # Copy data
 cp -rf "$BASEDIR/sources" "$TEMP_DIR/" || ui_error 'Failed to copy data to the temp dir'
