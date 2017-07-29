@@ -1,9 +1,9 @@
 CONTENTS
 ========
 
-Android 6+
+Android 7+
 ----------
-- **files/app/GoogleContactsSyncAdapter.apk** => Google Contacts Sync O (From O Developer Preview 1)
+- **files/app/GoogleContactsSyncAdapter.apk** => Google Contacts Sync 8.0.0 (26)
 - **files/app/GoogleCalendarSyncAdapter.apk** => Google Calendar Sync 5.2.3-99827563 (2015080710)
 
 

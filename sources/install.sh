@@ -79,7 +79,7 @@ set_std_perm_recursive "${TMP_PATH}/files"
 
 ui_msg_sameline_start 'Verifying files...'
 if #verify_sha1 "${TMP_PATH}/files/priv-app/GoogleBackupTransport.apk" '2bdf65e98dbd115473cd72db8b6a13d585a65d8d' &&  # Disabled for now
-   verify_sha1 "${TMP_PATH}/files/app/GoogleContactsSyncAdapter.apk" 'c06a412df009beb2e9e014542ad5cd2e876bafc0' &&
+   verify_sha1 "${TMP_PATH}/files/app/GoogleContactsSyncAdapter.apk" '3b3dcbc77d81fc56f20af93cf453ad9da2f2276f' &&
    verify_sha1 "${TMP_PATH}/files/app/GoogleCalendarSyncAdapter.apk" 'aa482580c87a43c83882c05a4757754917d47f32' &&
    verify_sha1 "${TMP_PATH}/files/priv-app-4.4/GoogleBackupTransport.apk" '6f186d368014022b0038ad2f5d8aa46bb94b5c14' &&
    verify_sha1 "${TMP_PATH}/files/app-4.4/GoogleContactsSyncAdapter.apk" '68597be59f16d2e26a79def6fa20bc85d1d2c3b3' &&
