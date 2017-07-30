@@ -20,7 +20,7 @@ enable_debug_log()
 {
   exec 3>&1 4>&2  # Backup stdout and stderr
   ZIP_PATH=$(dirname "$ZIP_FILE")
-  exec 1>>"${ZIP_PATH}/debug-a5k.log" 2>&1
+  exec 1>>"$ZIP_PATH/debug-a5k.log" 2>&1
 }
 
 disable_debug_log()
@@ -83,7 +83,7 @@ package_extract_file_unsafe()
 
 package_extract_file()
 {
-  "${BASE_TMP_PATH}/busybox" unzip -opq "$ZIP_FILE" "$1" > "$2" || ui_error "Failed to extract the file '$1' from this archive" 83
+  "$BASE_TMP_PATH/busybox" unzip -opq "$ZIP_FILE" "$1" > "$2" || ui_error "Failed to extract the file '$1' from this archive" 83
 }
 
 create_dir()
@@ -117,32 +117,32 @@ ABI_LIST=','$(getprop 'product.cpu.abilist')','$(getprop 'product.cpu.abi')','$(
 
 if is_substring ',x86,' "$ABI_LIST"; then
   ui_debug 'Extracting x86 BusyBox...'
-  package_extract_file_unsafe 'misc/busybox/busybox-x86' "${BASE_TMP_PATH}/busybox"
+  package_extract_file_unsafe 'misc/busybox/busybox-x86' "$BASE_TMP_PATH/busybox"
 elif is_substring ',armeabi,' "$ABI_LIST"; then
   ui_debug 'Extracting ARM BusyBox...'
-  package_extract_file_unsafe 'misc/busybox/busybox-arm' "${BASE_TMP_PATH}/busybox"
+  package_extract_file_unsafe 'misc/busybox/busybox-arm' "$BASE_TMP_PATH/busybox"
 else
   ui_error 'Unsupported CPU'
 fi
-set_perm 0 0 0755 "${BASE_TMP_PATH}/busybox"  # Give it execution rights
+set_perm 0 0 0755 "$BASE_TMP_PATH/busybox"  # Give it execution rights
 
 delete_recursive "$TMP_PATH"
 create_dir "$TMP_PATH"
 
 ui_debug 'Extracting scripts...'
 create_dir "$TMP_PATH/inc"
-package_extract_file 'inc/common.sh' "${TMP_PATH}/inc/common.sh"
-package_extract_file 'uninstall.sh' "${TMP_PATH}/uninstall.sh"
-package_extract_file 'install.sh' "${TMP_PATH}/install.sh"
-set_perm 0 0 0755 "${TMP_PATH}/inc/common.sh"  # Give it execution rights
-set_perm 0 0 0755 "${TMP_PATH}/uninstall.sh"  # Give it execution rights
-set_perm 0 0 0755 "${TMP_PATH}/install.sh"  # Give it execution rights
+package_extract_file 'inc/common.sh' "$TMP_PATH/inc/common.sh"
+package_extract_file 'uninstall.sh' "$TMP_PATH/uninstall.sh"
+package_extract_file 'install.sh' "$TMP_PATH/install.sh"
+set_perm 0 0 0755 "$TMP_PATH/inc/common.sh"  # Give it execution rights
+set_perm 0 0 0755 "$TMP_PATH/uninstall.sh"  # Give it execution rights
+set_perm 0 0 0755 "$TMP_PATH/install.sh"  # Give it execution rights
 
 ui_debug 'Starting installation script...'
-"${BASE_TMP_PATH}/busybox" bash -c "'${TMP_PATH}/install.sh' Preloader '${RECOVERY_API_VER}' '${RECOVERY_PIPE}' '${ZIP_FILE}' '${TMP_PATH}'"; STATUS="$?"
+"$BASE_TMP_PATH/busybox" bash -c "'$TMP_PATH/install.sh' Preloader '${RECOVERY_API_VER}' '${RECOVERY_PIPE}' '${ZIP_FILE}' '$TMP_PATH'"; STATUS="$?"
 
-test -f "${TMP_PATH}/installed" || GENER_ERROR=1
-delete_recursive "${TMP_PATH}"
+test -f "$TMP_PATH/installed" || GENER_ERROR=1
+delete_recursive "$TMP_PATH"
 
 test "$DEBUG_LOG" -ne 0 && disable_debug_log  # Restore status
 
