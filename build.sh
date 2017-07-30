@@ -1,21 +1,21 @@
 #!/usr/bin/env bash
 
 <<LICENSE
-    Copyright (C) 2017  ale5000
-    This file is part of Google Sync Add-on by @ale5000.
+  Copyright (C) 2017  ale5000
+  This file is part of Google Sync Add-on by @ale5000.
 
-    Google Sync Add-on is free software: you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation, either version 3 of the License, or
-    (at your option) any later version, w/Google Sync Add-on zip exception.
+  Google Sync Add-on is free software: you can redistribute it and/or modify
+  it under the terms of the GNU General Public License as published by
+  the Free Software Foundation, either version 3 of the License, or
+  (at your option) any later version, w/Google Sync Add-on zip exception.
 
-    Google Sync Add-on is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
+  Google Sync Add-on is distributed in the hope that it will be useful,
+  but WITHOUT ANY WARRANTY; without even the implied warranty of
+  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  GNU General Public License for more details.
 
-    You should have received a copy of the GNU General Public License
-    along with Google Sync Add-on.  If not, see <http://www.gnu.org/licenses/>.
+  You should have received a copy of the GNU General Public License
+  along with Google Sync Add-on.  If not, see <http://www.gnu.org/licenses/>.
 LICENSE
 
 ui_error()
@@ -102,6 +102,8 @@ cp -rf "$BASEDIR/"LICENSE* "$TEMP_DIR/sources/" || ui_error 'Failed to copy lice
 
 # Remove the previous file
 rm -f "$OUT_DIR/$FILENAME.zip" || ui_error 'Failed to remove the previous zip file'
+
+### IMPORTANT: Keep using 'zip' for compression since 'zipadjust' isn't compatible with zip archives created by '7za' and it will corrupt them
 
 # Compress and sign
 cd "$TEMP_DIR/sources" || ui_error 'Failed to change folder'

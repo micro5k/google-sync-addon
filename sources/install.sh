@@ -1,22 +1,31 @@
 #!/sbin/sh
 
+<<LICENSE
+  Copyright (C) 2017  ale5000
+  This file is part of Google Sync Add-on by @ale5000.
+
+  Google Sync Add-on is free software: you can redistribute it and/or modify
+  it under the terms of the GNU General Public License as published by
+  the Free Software Foundation, either version 3 of the License, or
+  (at your option) any later version, w/Google Sync Add-on zip exception.
+
+  Google Sync Add-on is distributed in the hope that it will be useful,
+  but WITHOUT ANY WARRANTY; without even the implied warranty of
+  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  GNU General Public License for more details.
+
+  You should have received a copy of the GNU General Public License
+  along with Google Sync Add-on.  If not, see <http://www.gnu.org/licenses/>.
+LICENSE
+
 ### GLOBAL VARIABLES ###
 
-RECOVERY_API_VER="$2"
-RECOVERY_PIPE="$3"
-ZIP_FILE="$4"
-TMP_PATH="$5"
+export INSTALLER=1
+TMP_PATH="$2"
 
-INSTALLER=1
 OLD_ANDROID=false
 SYS_ROOT_IMAGE=''
 SYS_PATH='/system'
-ZIP_PATH=false
-
-mkdir "$TMP_PATH/bin"
-/tmp/busybox --install -s "$TMP_PATH/bin"
-# Clean search path so BusyBox will use only internal applets
-PATH="$TMP_PATH/bin"
 
 
 ### FUNCTIONS ###
@@ -55,8 +64,6 @@ elif [[ $API -ge 1 ]]; then
 else
   ui_error 'ERROR: Invalid API level'
 fi
-
-ZIP_PATH=$(dirname "$ZIP_FILE")
 
 # Info
 ui_msg '------------------'

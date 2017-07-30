@@ -1,3 +1,3 @@
 #!/usr/bin/env bash
 
-NAME='google-sync-addon-ale5000'
+export NAME='google-sync-addon-ale5000'
