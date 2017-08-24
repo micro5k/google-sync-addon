@@ -1,7 +1,7 @@
 #!/sbin/sh
 
 <<LICENSE
-  Copyright (C) 2017  ale5000
+  Copyright (C) 2016-2017  ale5000
   This file is part of Google Sync Add-on by @ale5000.
 
   Google Sync Add-on is free software: you can redistribute it and/or modify
@@ -18,10 +18,13 @@
   along with Google Sync Add-on.  If not, see <http://www.gnu.org/licenses/>.
 LICENSE
 
+### GLOBAL VARIABLES ###
+
 if [[ -z "$RECOVERY_PIPE" || -z "$ZIP_FILE" || -z "$TMP_PATH" ]]; then
   echo 'Some variables are NOT set.'
   exit 90
 fi
+
 
 ### FUNCTIONS ###
 
@@ -64,9 +67,9 @@ validate_return_code()
 # Mounting related functions
 is_mounted()
 {
-  case `mount` in
+  case $(mount) in
     *" $1 "*) return 0;;  # Mounted
-  esac;
+  esac
   return 1  # NOT mounted
 }
 
@@ -96,7 +99,7 @@ remount_read_only()
 # Getprop related functions
 getprop()
 {
-  test -e '/sbin/getprop' && /sbin/getprop "ro.${1}" || grep "^ro\.${1}=" '/default.prop' | head -n1 | cut -d '=' -f 2
+  (test -e '/sbin/getprop' && /sbin/getprop "ro.${1}") || (grep "^ro\.${1}=" '/default.prop' | head -n1 | cut -d '=' -f 2)
 }
 
 build_getprop()
@@ -182,6 +185,41 @@ delete()
 delete_recursive()
 {
   rm -rf "$@" || ui_error "Failed to delete files/folders" 99
+}
+
+# Input related functions
+check_key()
+{
+  case "$1" in
+  42)  # Vol +
+    return 3;;
+  21)  # Vol -
+    return 2;;
+  143)  # Nothing selected
+    return 1;;
+  *)
+    return 0;;
+  esac
+}
+
+choose_timeout()
+{
+  timeout -t "$1" keycheck
+  check_key "$?"
+  return "$?"
+}
+
+choose()
+{
+  local result=1
+  ui_msg "QUESTION: $1"
+  ui_msg "$2"
+  ui_msg "$3"
+  while true; do
+    timeout -t 10 keycheck; result="$?"
+    if [ "$result" -ne 143 ]; then check_key "$result"; return "$?"; fi
+    sleep 0.03
+  done
 }
 
 # Other
