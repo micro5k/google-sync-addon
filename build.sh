@@ -51,12 +51,16 @@ dl_file()
   verify_sha1 "$3/$2/$1" "$5" || corrupted_file "$3/$2/$1"
 }
 
-# Detect OS
+# Detect OS and set OS specific info
+SEP='/'
+PATHSEP=':'
 UNAME=$(uname)
 if [[ "$UNAME" == 'Linux' ]]; then
   PLATFORM='linux'
 elif [[ "$UNAME" == 'Windows_NT' ]]; then
   PLATFORM='win'
+  SEP='\'
+  PATHSEP=';'
 #elif [[ "$UNAME" == 'Darwin' ]]; then
   #PLATFORM='macos'
 #elif [[ "$UNAME" == 'FreeBSD' ]]; then
@@ -74,8 +78,13 @@ else
   if [[ "$BASEDIR" == '.' ]]; then BASEDIR=''; else BASEDIR="/$BASEDIR"; fi
   if [[ "$CURDIR" != '/' ]]; then BASEDIR="$CURDIR$BASEDIR"; fi
 fi
+TOOLS_DIR="${BASEDIR}${SEP}tools${SEP}${PLATFORM}"
+PATH="${TOOLS_DIR}${PATHSEP}${PATH}"
 
 . "$BASEDIR/conf.sh"
+
+# Check dependencies
+type -p 'zip' || ui_error 'zip command is missing'
 
 # Create the output dir
 OUT_DIR="$BASEDIR/output"
@@ -95,6 +104,8 @@ dl_file 'GoogleCalendarSyncAdapter.apk' 'sources/files/app' "$BASEDIR" 'http://w
 dl_file 'GoogleBackupTransport.apk' 'sources/files/priv-app-4.4' "$BASEDIR" 'http://www.apkmirror.com/wp-content/themes/APKMirror/download.php?id=152392' '6f186d368014022b0038ad2f5d8aa46bb94b5c14'
 dl_file 'GoogleContactsSyncAdapter.apk' 'sources/files/app-4.4' "$BASEDIR" 'http://www.apkmirror.com/wp-content/themes/APKMirror/download.php?id=152374' '68597be59f16d2e26a79def6fa20bc85d1d2c3b3'
 dl_file 'GoogleCalendarSyncAdapter.apk' 'sources/files/app-4.4' "$BASEDIR" 'http://www.apkmirror.com/wp-content/themes/APKMirror/download.php?id=99188' 'cf9fa487dfe0ead8576d6af897687e7fa2ae00fa'
+
+dl_file 'keycheck-arm' 'sources/misc/keycheck' "$BASEDIR" 'https://github.com/someone755/kerneller/raw/9bb15ca2e73e8b81e412d595b52a176bdeb7c70a/extract/tools/keycheck' '77d47e9fb79bf4403fddab0130f0b4237f6acdf0'
 
 # Copy data
 cp -rf "$BASEDIR/sources" "$TEMP_DIR/" || ui_error 'Failed to copy data to the temp dir'
