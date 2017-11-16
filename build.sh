@@ -103,7 +103,7 @@ VER=$(cat "$BASEDIR/sources/inc/VERSION")
 FILENAME="$NAME-v$VER-signed"
 
 # Download files if they are missing
-dl_file 'GoogleContactsSyncAdapter.apk' 'sources/files/app' "$BASEDIR" 'http://www.apkmirror.com/wp-content/themes/APKMirror/download.php?id=246810' '3b3dcbc77d81fc56f20af93cf453ad9da2f2276f'
+dl_file 'GoogleContactsSyncAdapter.apk' 'sources/files/app' "$BASEDIR" 'http://www.apkmirror.com/wp-content/themes/APKMirror/download.php?id=290062' 'c46d9bbe31f85a5263eb6a2a0932abbf9ac3ecc9'
 dl_file 'GoogleCalendarSyncAdapter.apk' 'sources/files/app' "$BASEDIR" 'http://www.apkmirror.com/wp-content/themes/APKMirror/download.php?id=72565' 'aa482580c87a43c83882c05a4757754917d47f32'
 
 dl_file 'GoogleBackupTransport.apk' 'sources/files/priv-app-4.4' "$BASEDIR" 'http://www.apkmirror.com/wp-content/themes/APKMirror/download.php?id=152392' '6f186d368014022b0038ad2f5d8aa46bb94b5c14'
