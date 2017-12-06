@@ -1,6 +1,9 @@
 Google Sync Add-on
 ==================
+[![License](https://img.shields.io/github/license/micro-a5k/google-sync-addon.svg)](https://github.com/micro-a5k/google-sync-addon)
 
+Description
+-----------
 Google Sync Add-on simplify the installation of Google sync adapters (all the included files are the original versions).
 
 Code analysis
