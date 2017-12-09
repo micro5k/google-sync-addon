@@ -99,22 +99,22 @@ mkdir -p "$OUT_DIR" || ui_error 'Failed to create the output dir'
 TEMP_DIR=$(mktemp -d -t ZIPBUILDER-XXXXXX)
 
 # Set filename and version
-VER=$(cat "$BASEDIR/sources/inc/VERSION")
+VER=$(cat "$BASEDIR/zip-content/inc/VERSION")
 FILENAME="$NAME-v$VER-signed"
 
 # Download files if they are missing
-dl_file 'GoogleContactsSyncAdapter.apk' 'sources/files/app' "$BASEDIR" 'https://www.apkmirror.com/wp-content/themes/APKMirror/download.php?id=290062' 'c46d9bbe31f85a5263eb6a2a0932abbf9ac3ecc9'
-dl_file 'GoogleCalendarSyncAdapter.apk' 'sources/files/app' "$BASEDIR" 'https://www.apkmirror.com/wp-content/themes/APKMirror/download.php?id=72565' 'aa482580c87a43c83882c05a4757754917d47f32'
+dl_file 'GoogleContactsSyncAdapter.apk' 'zip-content/files/app' "$BASEDIR" 'https://www.apkmirror.com/wp-content/themes/APKMirror/download.php?id=290062' 'c46d9bbe31f85a5263eb6a2a0932abbf9ac3ecc9'
+dl_file 'GoogleCalendarSyncAdapter.apk' 'zip-content/files/app' "$BASEDIR" 'https://www.apkmirror.com/wp-content/themes/APKMirror/download.php?id=72565' 'aa482580c87a43c83882c05a4757754917d47f32'
 
-dl_file 'GoogleBackupTransport.apk' 'sources/files/priv-app-4.4' "$BASEDIR" 'https://www.apkmirror.com/wp-content/themes/APKMirror/download.php?id=152392' '6f186d368014022b0038ad2f5d8aa46bb94b5c14'
-dl_file 'GoogleContactsSyncAdapter.apk' 'sources/files/app-4.4' "$BASEDIR" 'https://www.apkmirror.com/wp-content/themes/APKMirror/download.php?id=152374' '68597be59f16d2e26a79def6fa20bc85d1d2c3b3'
-dl_file 'GoogleCalendarSyncAdapter.apk' 'sources/files/app-4.4' "$BASEDIR" 'https://www.apkmirror.com/wp-content/themes/APKMirror/download.php?id=99188' 'cf9fa487dfe0ead8576d6af897687e7fa2ae00fa'
+dl_file 'GoogleBackupTransport.apk' 'zip-content/files/priv-app-4.4' "$BASEDIR" 'https://www.apkmirror.com/wp-content/themes/APKMirror/download.php?id=152392' '6f186d368014022b0038ad2f5d8aa46bb94b5c14'
+dl_file 'GoogleContactsSyncAdapter.apk' 'zip-content/files/app-4.4' "$BASEDIR" 'https://www.apkmirror.com/wp-content/themes/APKMirror/download.php?id=152374' '68597be59f16d2e26a79def6fa20bc85d1d2c3b3'
+dl_file 'GoogleCalendarSyncAdapter.apk' 'zip-content/files/app-4.4' "$BASEDIR" 'https://www.apkmirror.com/wp-content/themes/APKMirror/download.php?id=99188' 'cf9fa487dfe0ead8576d6af897687e7fa2ae00fa'
 
-dl_file 'keycheck-arm' 'sources/misc/keycheck' "$BASEDIR" 'https://github.com/someone755/kerneller/raw/9bb15ca2e73e8b81e412d595b52a176bdeb7c70a/extract/tools/keycheck' '77d47e9fb79bf4403fddab0130f0b4237f6acdf0'
+dl_file 'keycheck-arm' 'zip-content/misc/keycheck' "$BASEDIR" 'https://github.com/someone755/kerneller/raw/9bb15ca2e73e8b81e412d595b52a176bdeb7c70a/extract/tools/keycheck' '77d47e9fb79bf4403fddab0130f0b4237f6acdf0'
 
 # Copy data
-cp -rf "$BASEDIR/sources" "$TEMP_DIR/" || ui_error 'Failed to copy data to the temp dir'
-cp -rf "$BASEDIR/"LICENSE* "$TEMP_DIR/sources/" || ui_error 'Failed to copy license to the temp dir'
+cp -rf "$BASEDIR/zip-content" "$TEMP_DIR/" || ui_error 'Failed to copy data to the temp dir'
+cp -rf "$BASEDIR/"LICENSE* "$TEMP_DIR/zip-content/" || ui_error 'Failed to copy license to the temp dir'
 
 # Remove the previous file
 rm -f "$OUT_DIR/$FILENAME.zip" || ui_error 'Failed to remove the previous zip file'
@@ -122,7 +122,7 @@ rm -f "$OUT_DIR/$FILENAME.zip" || ui_error 'Failed to remove the previous zip fi
 ### IMPORTANT: Keep using 'zip' for compression since 'zipadjust' isn't compatible with zip archives created by '7za' and it will corrupt them
 
 # Compress and sign
-cd "$TEMP_DIR/sources" || ui_error 'Failed to change folder'
+cd "$TEMP_DIR/zip-content" || ui_error 'Failed to change folder'
 zip -r9X "$TEMP_DIR/zip-1.zip" * || ui_error 'Failed compressing'
 echo ''
 java -jar "$BASEDIR/tools/signapk.jar" "$BASEDIR/certs"/*.x509.pem "$BASEDIR/certs"/*.pk8 "$TEMP_DIR/zip-1.zip" "$TEMP_DIR/zip-2.zip" || ui_error 'Failed signing'
