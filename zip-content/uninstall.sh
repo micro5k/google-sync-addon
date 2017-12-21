@@ -34,6 +34,9 @@ fi
 DELETE_LIST="
 ${SYS_PATH}/etc/default-permissions/google-sync-permissions.xml
 
+${PRIVAPP_PATH}/CalendarGooglePrebuilt/
+${PRIVAPP_PATH}/CalendarGooglePrebuilt.apk
+
 ${PRIVAPP_PATH}/GoogleBackupTransport/
 ${PRIVAPP_PATH}/GoogleBackupTransport.apk
 ${PRIVAPP_PATH}/GoogleBackupTransport.odex
