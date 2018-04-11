@@ -1,7 +1,7 @@
 #!/sbin/sh
 
 <<LICENSE
-  Copyright (C) 2017  ale5000
+  Copyright (C) 2016-2018  ale5000
   This file is part of Google Sync Add-on by @ale5000.
 
   Google Sync Add-on is free software: you can redistribute it and/or modify
