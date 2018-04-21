@@ -14,8 +14,8 @@ Android 4.4 - 4.4.4
 - **files/app-4.4/GoogleCalendarSyncAdapter.apk** => Google Calendar Sync 4.1.2-509230
 
 
-Used during setup (not installed)
----------------------------------
-- BusyBox 1.26.2+ - git branch 1_26_stable - 2017-05-09 (compiled by [YashdSaraf][1]) - Available [here](https://forum.xda-developers.com/showthread.php?t=3348543).
+Components used only during setup (not installed)
+-------------------------------------------------
+- BusyBox 1.28.3-YDS-201804091805 (compiled by [YashdSaraf][1]) - Available [here](https://forum.xda-developers.com/showthread.php?t=3348543).
 
 [1]: https://forum.xda-developers.com/member.php?u=5423715  "YashdSaraf"
