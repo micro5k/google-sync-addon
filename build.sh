@@ -2,6 +2,8 @@
 
 <<LICENSE
   Copyright (C) 2017-2018  ale5000
+  LICENSE: GPL-3.0-or-later
+
   This file was created by ale5000 (ale5000-git on GitHub).
 
   This program is free software: you can redistribute it and/or modify
@@ -29,15 +31,26 @@ ui_error()
 SEP='/'
 PATHSEP=':'
 UNAME=$(uname)
-if [[ "$UNAME" == 'Linux' ]]; then
+compare_start_uname()
+{
+  case "$UNAME" in
+    "$1"*) return 0;;  # Found
+  esac
+  return 1  # NOT found
+}
+
+if compare_start_uname 'Linux'; then
   PLATFORM='linux'
-elif [[ "$UNAME" == 'Windows_NT' ]]; then
+elif compare_start_uname 'Windows_NT' || compare_start_uname 'MINGW32_NT-' || compare_start_uname 'MINGW64_NT-'; then
   PLATFORM='win'
-  SEP='\'
-  PATHSEP=';'
-#elif [[ "$UNAME" == 'Darwin' ]]; then
-  #PLATFORM='macos'
-#elif [[ "$UNAME" == 'FreeBSD' ]]; then
+  if [[ $(uname -o) == 'Msys' ]]; then
+    :            # MSYS under Windows
+  else
+    PATHSEP=';'  # BusyBox under Windows
+  fi
+elif compare_start_uname 'Darwin'; then
+  PLATFORM='macos'
+#elif compare_start_uname 'FreeBSD'; then
   #PLATFORM='freebsd'
 else
   ui_error 'Unsupported OS'
@@ -98,6 +111,8 @@ TEMP_DIR=$(mktemp -d -t ZIPBUILDER-XXXXXX)
 VER=$(cat "$BASEDIR/zip-content/inc/VERSION")
 FILENAME="$NAME-v$VER-signed"
 
+. "$BASEDIR/addition.sh"
+
 # Download files if they are missing
 files_to_download | while IFS='|' read DL_FILENAME DL_PATH DL_HASH DL_URL; do
   dl_file "$DL_FILENAME" "$DL_PATH" "$DL_HASH" "$DL_URL"
@@ -117,7 +132,6 @@ rm -f "$OUT_DIR/$FILENAME.zip" || ui_error 'Failed to remove the previous zip fi
 # Compress and sign
 cd "$TEMP_DIR/zip-content" || ui_error 'Failed to change folder'
 zip -r9X "$TEMP_DIR/zip-1.zip" * || ui_error 'Failed compressing'
-echo ''
 java -jar "$BASEDIR/tools/zipsigner.jar" "$TEMP_DIR/zip-1.zip" "$TEMP_DIR/$FILENAME.zip" || ui_error 'Failed signing'
 cd "$OUT_DIR"
 
