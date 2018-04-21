@@ -74,12 +74,12 @@ corrupted_file()
 
 dl_file()
 {
-  if [[ ! -e "$3/$2/$1" ]]; then
-    mkdir -p "$3/$2"
-    "$WGET_CMD" -O "$3/$2/$1" -U 'Mozilla/5.0 (X11; Linux x86_64; rv:56.0) Gecko/20100101 Firefox/56.0' "$4" || ui_error "Failed to download the file '$2/$1'."
+  if [[ ! -e "$BASEDIR/$2/$1" ]]; then
+    mkdir -p "$BASEDIR/$2"
+    "$WGET_CMD" -O "$BASEDIR/$2/$1" -U 'Mozilla/5.0 (X11; Linux x86_64; rv:56.0) Gecko/20100101 Firefox/56.0' "$4" || ui_error "Failed to download the file '$2/$1'."
     echo ''
   fi
-  verify_sha1 "$3/$2/$1" "$5" || corrupted_file "$3/$2/$1"
+  verify_sha1 "$BASEDIR/$2/$1" "$3" || corrupted_file "$BASEDIR/$2/$1"
 }
 
 . "$BASEDIR/conf.sh"
@@ -99,14 +99,11 @@ VER=$(cat "$BASEDIR/zip-content/inc/VERSION")
 FILENAME="$NAME-v$VER-signed"
 
 # Download files if they are missing
-dl_file 'GoogleContactsSyncAdapter.apk' 'zip-content/files/app' "$BASEDIR" 'https://www.apkmirror.com/wp-content/themes/APKMirror/download.php?id=290062' 'c46d9bbe31f85a5263eb6a2a0932abbf9ac3ecc9'
-dl_file 'GoogleCalendarSyncAdapter.apk' 'zip-content/files/app' "$BASEDIR" 'https://www.apkmirror.com/wp-content/themes/APKMirror/download.php?id=72565' 'aa482580c87a43c83882c05a4757754917d47f32'
+files_to_download | while IFS='|' read DL_FILENAME DL_PATH DL_HASH DL_URL; do
+  dl_file "$DL_FILENAME" "$DL_PATH" "$DL_HASH" "$DL_URL"
+done
 
-dl_file 'GoogleBackupTransport.apk' 'zip-content/files/priv-app-4.4' "$BASEDIR" 'https://www.apkmirror.com/wp-content/themes/APKMirror/download.php?id=152392' '6f186d368014022b0038ad2f5d8aa46bb94b5c14'
-dl_file 'GoogleContactsSyncAdapter.apk' 'zip-content/files/app-4.4' "$BASEDIR" 'https://www.apkmirror.com/wp-content/themes/APKMirror/download.php?id=152374' '68597be59f16d2e26a79def6fa20bc85d1d2c3b3'
-dl_file 'GoogleCalendarSyncAdapter.apk' 'zip-content/files/app-4.4' "$BASEDIR" 'https://www.apkmirror.com/wp-content/themes/APKMirror/download.php?id=99188' 'cf9fa487dfe0ead8576d6af897687e7fa2ae00fa'
-
-dl_file 'keycheck-arm' 'zip-content/misc/keycheck' "$BASEDIR" 'https://github.com/someone755/kerneller/raw/9bb15ca2e73e8b81e412d595b52a176bdeb7c70a/extract/tools/keycheck' '77d47e9fb79bf4403fddab0130f0b4237f6acdf0'
+dl_file 'keycheck-arm' 'zip-content/misc/keycheck' '77d47e9fb79bf4403fddab0130f0b4237f6acdf0' 'https://github.com/someone755/kerneller/raw/9bb15ca2e73e8b81e412d595b52a176bdeb7c70a/extract/tools/keycheck'
 
 # Copy data
 cp -rf "$BASEDIR/zip-content" "$TEMP_DIR/" || ui_error 'Failed to copy data to the temp dir'
