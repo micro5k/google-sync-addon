@@ -15,7 +15,7 @@
   GNU General Public License for more details.
 
   You should have received a copy of the GNU General Public License
-  along with this program.  If not, see <http://www.gnu.org/licenses/>.
+  along with this program.  If not, see <https://www.gnu.org/licenses/>.
 LICENSE
 
 ### GLOBAL VARIABLES ###
@@ -29,33 +29,47 @@ fi
 ### FUNCTIONS ###
 
 # Message related functions
-ui_msg()
+_show_text_on_recovery()
 {
   echo -e "ui_print $1\nui_print" >> $RECOVERY_PIPE
-  if [[ "$DEBUG_LOG" -ne 0 ]]; then echo "$1"; fi
+}
+
+ui_error()
+{
+  ERROR_CODE=91
+  if test -n "$2"; then ERROR_CODE="$2"; fi
+  >&2 echo "ERROR ${ERROR_CODE}: $1"
+  _show_text_on_recovery "ERROR: $1"
+  exit "${ERROR_CODE}"
+}
+
+ui_warning()
+{
+  >&2 echo "WARNING: $1"
+  _show_text_on_recovery "WARNING: $1"
+}
+
+ui_msg()
+{
+  if [ "$DEBUG_LOG" -ne 0 ]; then echo "$1"; fi
+  echo -e "ui_print $1\nui_print" >> $RECOVERY_PIPE
 }
 
 ui_msg_sameline_start()
 {
+  if [ "$DEBUG_LOG" -ne 0 ]; then echo -n "$1"; fi
   echo -n "ui_print $1" >> $RECOVERY_PIPE
 }
 
 ui_msg_sameline_end()
 {
+  if [ "$DEBUG_LOG" -ne 0 ]; then echo "$1"; fi
   echo -e " $1\nui_print" >> $RECOVERY_PIPE
 }
 
 ui_debug()
 {
   echo "$1"
-}
-
-ui_error()
-{
-  #>&2 echo "ERROR: $1"
-  ui_msg "ERROR: $1"
-  test -n "$2" && exit "$2"
-  exit 91
 }
 
 # Error checking functions
@@ -96,6 +110,16 @@ remount_read_only()
   mount -v -o remount,ro "$1" "$1"
 }
 
+unmount()
+{
+  umount "$1" || ui_msg "WARNING: Failed to unmount '$1'"
+}
+
+unmount_safe()
+{
+  "$BASE_TMP_PATH/busybox" umount "$1" || ui_error "Failed to unmount '$1'" 106
+}
+
 # Getprop related functions
 getprop()
 {
@@ -112,8 +136,24 @@ is_substring()
 {
   case "$2" in
     *"$1"*) return 0;;  # Found
-  esac;
+  esac
   return 1  # NOT found
+}
+
+replace_string()
+{
+  echo "${1//$2/$3}"
+}
+
+replace_slash_with_at()
+{
+  echo $(echo $1 | sed -e 's/\//@/g')
+}
+
+custom_replace_string_in_file()  # $1 => This function replace %PLACEHOLDER-1% with this string   $2 => File to process
+{
+  local replacement="${1//#/?}"  # Remove the character that would break sed
+  sed -i "s#%PLACEHOLDER-1%#${replacement}#" "$2" || ui_error "Failed to replace a string in the file '$2'" 92
 }
 
 # Permission related functions
@@ -157,6 +197,7 @@ zip_extract_dir()
 # Hash related functions
 verify_sha1()
 {
+  ui_debug "$1"
   local file_name="$1"
   local hash="$2"
   local file_hash=$(sha1sum "$file_name" | cut -d ' ' -f 1)
@@ -165,7 +206,7 @@ verify_sha1()
   return 0  # Success
 }
 
-# File related functions
+# File / folder related functions
 create_dir()
 {
   mkdir -p "$1" || ui_error "Failed to create the dir '$dir'" 97
@@ -174,28 +215,80 @@ create_dir()
 
 copy_dir_content()
 {
+  if [[ ! -e "$2" ]]; then create_dir "$2"; fi
   cp -rpf "$1"/* "$2"/ || ui_error "Failed to copy dir content from '$1' to '$2'" 98
+}
+
+copy_file()
+{
+  cp -pf "$1" "$2"/ || ui_error "Failed to copy the file '$1' to '$2'" 99
+}
+
+move_file()
+{
+  mv -f "$1" "$2"/ || ui_error "Failed to move the file '$1' to '$2'" 100
+}
+
+move_rename_file()
+{
+  mv -f "$1" "$2" || ui_error "Failed to move/rename the file from '$1' to '$2'" 101
+}
+
+move_rename_dir()
+{
+  mv -f "$1"/ "$2" || ui_error "Failed to move/rename the folder from '$1' to '$2'" 101
+}
+
+move_dir_content()
+{
+  mv -f "$1"/* "$2"/ || ui_error "Failed to move dir content from '$1' to '$2'" 102
 }
 
 delete()
 {
-  rm -f "$@" || ui_error "Failed to delete files" 99
+  rm -f "$@" || ui_error "Failed to delete files" 103
 }
 
 delete_recursive()
 {
-  rm -rf "$@" || ui_error "Failed to delete files/folders" 99
+  if test -e "$1"; then
+    ui_debug "Deleting '$1'..."
+    rm -rf "$1" || ui_error "Failed to delete files/folders" 104
+  fi
+}
+
+delete_recursive_wildcard()
+{
+  for filename in "$@"; do
+    if test -e "$filename"; then
+      ui_debug "Deleting '$filename'...."
+      rm -rf "$filename" || ui_error "Failed to delete files/folders" 105
+    fi
+  done
+}
+
+list_files()  # $1 => Folder to scan   $2 => Prefix to remove
+{
+  test -d "$1" || return
+  for entry in "$1"/*; do
+    if test -d "${entry}"; then
+      list_files "${entry}" "$2"
+    else
+      entry="${entry#$2}" || ui_error "Failed to remove prefix, entry => ${entry}, prefix to remove => $2" 106
+      printf '%s\\n' "${entry}" || ui_error "File listing failed, entry => ${entry}, folder => $1" 106
+    fi
+  done
 }
 
 # Input related functions
 check_key()
 {
   case "$1" in
-  42)  # Vol +
+  42)   # Vol +
     return 3;;
-  21)  # Vol -
+  21)   # Vol -
     return 2;;
-  143)  # Nothing selected
+  132)  # Error (example: Illegal instruction)
     return 1;;
   *)
     return 0;;
@@ -204,22 +297,31 @@ check_key()
 
 choose_timeout()
 {
-  timeout -t "$1" keycheck
-  check_key "$?"
+  local key_code=1
+  timeout -t "$1" keycheck; key_code="$?"  # Timeout return 127 when it cannot execute the binary
+  if test "$key_code" -eq 143; then
+    ui_msg 'Key code: No key pressed'
+    return 0
+  elif test "$key_code" -eq 127 || test "$key_code" -eq 132; then
+    ui_msg 'WARNING: Key detection failed'
+    return 1
+  fi
+
+  ui_msg "Key code: $key_code"
+  check_key "$key_code"
   return "$?"
 }
 
 choose()
 {
-  local result=1
+  local key_code=1
   ui_msg "QUESTION: $1"
   ui_msg "$2"
   ui_msg "$3"
-  while true; do
-    timeout -t 10 keycheck; result="$?"
-    if [ "$result" -ne 143 ]; then check_key "$result"; return "$?"; fi
-    sleep 0.03
-  done
+  keycheck; key_code="$?"
+  ui_msg "Key code: $key_code"
+  check_key "$key_code"
+  return "$?"
 }
 
 # Other
