@@ -2,7 +2,18 @@
 Google Sync Add-on
 ==================
 :Author: `ale5000 <https://github.com/ale5000-git>`_
-:License: `GPL-3.0-or-later <LICENSE.rst>`_
+
+
+Description
+-----------
+Google Sync Add-on simplify the installation of Google sync adapters (all the included files are the original versions).
+
+
+License
+-------
+Copyright © 2016-2018 ale5000
+
+License: `GPLv3.0 or later <https://www.gnu.org/licenses/gpl-3.0.html>`_
 
 
 Releases
@@ -10,11 +21,6 @@ Releases
 .. image:: https://img.shields.io/github/release/micro-a5k/google-sync-addon/all.svg?maxAge=3600
    :alt: GitHub (pre-)release
    :target: https://github.com/micro-a5k/google-sync-addon/releases/latest
-
-
-Description
------------
-Google Sync Add-on simplify the installation of Google sync adapters (all the included files are the original versions).
 
 
 Code analysis
