@@ -16,6 +16,6 @@ Android 4.4 - 4.4.4
 
 Components used only during setup (not installed)
 -------------------------------------------------
-- BusyBox 1.28.3-YDS-201804091805 (compiled by [YashdSaraf][1]) - Available [here](https://forum.xda-developers.com/showthread.php?t=3348543).
+- BusyBox 1.29.1-YDS-201807291348 (compiled by [YashdSaraf][1]) - Available [here](https://forum.xda-developers.com/showthread.php?t=3348543).
 
 [1]: https://forum.xda-developers.com/member.php?u=5423715  "YashdSaraf"
