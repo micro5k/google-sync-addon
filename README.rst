@@ -32,6 +32,6 @@ Releases
 
 Code analysis
 -------------
-.. image:: https://api.codacy.com/project/badge/Grade/cc5ad5a161f7473597a964c5e46cab61
+.. image:: https://api.codacy.com/project/badge/Grade/5a218ccd7930424c94e1dce221065b9e
    :alt: Codacy Badge
-   :target: https://www.codacy.com/app/ale5000-git/google-sync-addon?utm_source=github.com&amp;utm_medium=referral&amp;utm_content=micro-a5k/google-sync-addon&amp;utm_campaign=Badge_Grade
+   :target: https://www.codacy.com/app/micro5k/google-sync-addon
