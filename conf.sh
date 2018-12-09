@@ -1,5 +1,13 @@
 #!/usr/bin/env bash
 
+export NAME='google-sync-addon-ale5000'
+
+oss_files_to_download()
+{
+cat <<EOF
+EOF
+}
+
 files_to_download()
 {
 cat <<EOF
@@ -10,5 +18,3 @@ GoogleContactsSyncAdapter.apk|zip-content/files/app-4.4|68597be59f16d2e26a79def6
 GoogleCalendarSyncAdapter.apk|zip-content/files/app-4.4|cf9fa487dfe0ead8576d6af897687e7fa2ae00fa|https://www.apkmirror.com/wp-content/themes/APKMirror/download.php?id=99188
 EOF
 }
-
-export NAME='google-sync-addon-ale5000'

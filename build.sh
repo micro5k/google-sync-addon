@@ -1,10 +1,8 @@
 #!/usr/bin/env bash
 
 <<LICENSE
-  Copyright (C) 2017-2018  ale5000
-  LICENSE: GPL-3.0-or-later
-
-  This file was created by ale5000 (ale5000-git on GitHub).
+  Copyright (C) 2017-2018 ale5000
+  SPDX-License-Identifer: GPL-3.0-or-later
 
   This program is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -57,13 +55,13 @@ else
 fi
 
 # Detect script dir (with absolute path)
-CURDIR=$(pwd)
+INIT_DIR=$(pwd)
 BASEDIR=$(dirname "$0")
 if [[ "${BASEDIR:0:1}" == '/' ]] || [[ "$PLATFORM" == 'win' && "${BASEDIR:1:1}" == ':' ]]; then
   :  # If already absolute leave it as is
 else
   if [[ "$BASEDIR" == '.' ]]; then BASEDIR=''; else BASEDIR="/$BASEDIR"; fi
-  if [[ "$CURDIR" != '/' ]]; then BASEDIR="$CURDIR$BASEDIR"; fi
+  if [[ "$INIT_DIR" != '/' ]]; then BASEDIR="$INIT_DIR$BASEDIR"; fi
 fi
 WGET_CMD='wget'
 TOOLS_DIR="${BASEDIR}${SEP}tools${SEP}${PLATFORM}"
@@ -87,12 +85,11 @@ corrupted_file()
 
 dl_file()
 {
-  if [[ ! -e "$BASEDIR/$2/$1" ]]; then
-    mkdir -p "$BASEDIR/$2"
-    "$WGET_CMD" -O "$BASEDIR/$2/$1" -U 'Mozilla/5.0 (X11; Linux x86_64; rv:56.0) Gecko/20100101 Firefox/56.0' "$4" || ui_error "Failed to download the file '$2/$1'."
+  if [[ ! -e "$BASEDIR/cache/$1" ]]; then
+    "$WGET_CMD" -O "$BASEDIR/cache/$1" -U 'Mozilla/5.0 (X11; Linux x86_64; rv:63.0) Gecko/20100101 Firefox/63.0' "$3" || ui_error "Failed to download the file => 'cache/$1'."
     echo ''
   fi
-  verify_sha1 "$BASEDIR/$2/$1" "$3" || corrupted_file "$BASEDIR/$2/$1"
+  verify_sha1 "$BASEDIR/cache/$1" "$2" || corrupted_file "$BASEDIR/cache/$1"
 }
 
 . "$BASEDIR/conf.sh"
@@ -105,40 +102,93 @@ OUT_DIR="$BASEDIR/output"
 mkdir -p "$OUT_DIR" || ui_error 'Failed to create the output dir'
 
 # Create the temp dir
-TEMP_DIR=$(mktemp -d -t ZIPBUILDER-XXXXXX)
+TEMP_DIR=$(mktemp -d -t ZIPBUILDER-XXXXXX) || ui_error 'Failed to create our temp dir'
+if test -z "$TEMP_DIR"; then ui_error 'Failed to create our temp dir'; fi
+
+# Empty our temp dir (should be already empty, but we must be sure)
+rm -rf "$TEMP_DIR"/* || ui_error 'Failed to empty our temp dir'
 
 # Set filename and version
 VER=$(cat "$BASEDIR/zip-content/inc/VERSION")
-FILENAME="$NAME-v$VER-signed"
+FILENAME="$NAME-v$VER"
+if test -n "${OPENSOURCE_ONLY}"; then FILENAME="$FILENAME-OSS"; fi
 
 . "$BASEDIR/addition.sh"
 
 # Download files if they are missing
-files_to_download | while IFS='|' read DL_FILENAME DL_PATH DL_HASH DL_URL; do
-  dl_file "$DL_FILENAME" "$DL_PATH" "$DL_HASH" "$DL_URL"
+mkdir -p "$BASEDIR/cache"
+
+oss_files_to_download | while IFS='|' read LOCAL_FILENAME _ DL_HASH DL_URL; do
+  dl_file "$LOCAL_FILENAME" "$DL_HASH" "$DL_URL"
 done
 
-dl_file 'keycheck-arm' 'zip-content/misc/keycheck' '77d47e9fb79bf4403fddab0130f0b4237f6acdf0' 'https://github.com/someone755/kerneller/raw/9bb15ca2e73e8b81e412d595b52a176bdeb7c70a/extract/tools/keycheck'
+if test -z "${OPENSOURCE_ONLY}"; then
+  files_to_download | while IFS='|' read LOCAL_FILENAME _ DL_HASH DL_URL; do
+    dl_file "$LOCAL_FILENAME" "$DL_HASH" "$DL_URL"
+  done
+  dl_file 'keycheck-arm' '77d47e9fb79bf4403fddab0130f0b4237f6acdf0' 'https://github.com/someone755/kerneller/raw/9bb15ca2e73e8b81e412d595b52a176bdeb7c70a/extract/tools/keycheck'
+else
+  echo 'Skipped not OSS files!'
+fi
 
 # Copy data
 cp -rf "$BASEDIR/zip-content" "$TEMP_DIR/" || ui_error 'Failed to copy data to the temp dir'
-cp -rf "$BASEDIR/"LICENSE* "$TEMP_DIR/zip-content/" || ui_error 'Failed to copy license to the temp dir'
+cp -rf "$BASEDIR"/LIC* "$TEMP_DIR/zip-content/" || ui_error 'Failed to copy the license to the temp dir'
+cp -rf "$BASEDIR"/CHANGELOG* "$TEMP_DIR/zip-content/" || ui_error 'Failed to copy the changelog to the temp dir'
 
-# Remove the previous file
-rm -f "$OUT_DIR/$FILENAME.zip" || ui_error 'Failed to remove the previous zip file'
+if test -n "${OPENSOURCE_ONLY}"; then
+  touch "$TEMP_DIR/zip-content/OPENSOURCE-ONLY"
+else
+  files_to_download | while IFS='|' read LOCAL_FILENAME LOCAL_PATH _; do
+    mkdir -p "$TEMP_DIR/zip-content/$LOCAL_PATH"
+    cp -f "$BASEDIR/cache/$LOCAL_FILENAME" "$TEMP_DIR/zip-content/$LOCAL_PATH/" || ui_error "Failed to copy to the temp dir the file => '$LOCAL_FILENAME'"
+  done
 
-### IMPORTANT: Keep using 'zip' for compression since 'zipadjust' isn't compatible with zip archives created by '7za' and it will corrupt them
+  mkdir -p "$TEMP_DIR/zip-content/misc/keycheck"
+  cp -f "$BASEDIR/cache/keycheck-arm" "$TEMP_DIR/zip-content/misc/keycheck/" || ui_error "Failed to copy to the temp dir the file => 'keycheck-arm'"
+fi
+
+# Useful for reproducible builds
+find "$TEMP_DIR/zip-content/" -exec touch -c -t 197911300100.00 '{}' + || ui_error 'Failed to set modification date'
+
+# Remove the previously built files (if they exist)
+rm -f "$OUT_DIR/${FILENAME}".zip* || ui_error 'Failed to remove the previously built files'
+rm -f "$OUT_DIR/${FILENAME}-signed".zip* || ui_error 'Failed to remove the previously built files'
 
 # Compress and sign
-cd "$TEMP_DIR/zip-content" || ui_error 'Failed to change folder'
-zip -r9X "$TEMP_DIR/zip-1.zip" * || ui_error 'Failed compressing'
-java -jar "$BASEDIR/tools/zipsigner.jar" "$TEMP_DIR/zip-1.zip" "$TEMP_DIR/$FILENAME.zip" || ui_error 'Failed signing'
-cd "$OUT_DIR"
+cd "$TEMP_DIR/zip-content" || ui_error 'Failed to change the folder'
+zip -r9X -ic "$TEMP_DIR/flashable.zip" . -i "*" || ui_error 'Failed compressing'  # Note: There are quotes around the wildcard to use the zip globbing instead of the shell globbing
+FILENAME="$FILENAME-signed"
 
+# Sign and zipalign
+mkdir -p "$TEMP_DIR/zipsign"
+java -Djava.io.tmpdir="$TEMP_DIR/zipsign" -jar "$BASEDIR/tools/zipsigner.jar" "$TEMP_DIR/flashable.zip" "$TEMP_DIR/$FILENAME.zip" || ui_error 'Failed signing and zipaligning'
+
+echo ''
+zip -T "$TEMP_DIR/$FILENAME.zip" || ui_error 'The zip is corrupted'
 cp -f "$TEMP_DIR/$FILENAME.zip" "$OUT_DIR/$FILENAME.zip" || ui_error 'Failed to copy the final file'
 
+cd "$OUT_DIR" || ui_error 'Failed to change the folder'
+
 # Cleanup remnants
-rm -rf "$TEMP_DIR" || ui_error 'Failed to cleanup'
+rm -rf "$TEMP_DIR" &
+pid="$!"
+
+# Create checksum files
+echo ''
+sha256sum "$FILENAME.zip" > "$OUT_DIR/$FILENAME.zip.sha256" || ui_error 'Failed to compute the sha256 hash'
+echo 'SHA-256:'
+cat "$OUT_DIR/$FILENAME.zip.sha256"
+
+echo ''
+md5sum "$FILENAME.zip" > "$OUT_DIR/$FILENAME.zip.md5" || ui_error 'Failed to compute the md5 hash'
+echo 'MD5:'
+cat "$OUT_DIR/$FILENAME.zip.md5"
+
+cd "$INIT_DIR" || ui_error 'Failed to change back the folder'
 
 echo ''
 echo 'Done.'
+
+wait "$pid"
+exit "$?"

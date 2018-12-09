@@ -1,0 +1,86 @@
+/*
+ * Copyright (C) 2018 ale5000
+ * SPDX-License-Identifer: GPL-3.0-or-later
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version, w/ zip exception.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+plugins {
+    id 'com.gradle.build-scan' version '1.16'
+    id 'base'
+}
+
+buildScan {
+    termsOfServiceUrl = 'https://gradle.com/terms-of-service'
+    termsOfServiceAgree = 'yes'
+    publishAlwaysIf(System.getenv('CI') != null)
+}
+
+def isWindows() {
+    return System.properties['os.name'].toLowerCase(Locale.ROOT).contains('windows')
+}
+
+def is64BitArch() {
+    return System.properties['os.arch'].contains('64')
+}
+
+def getBuildScriptName() {
+    if(isWindows()) {
+        return './build-win.bat'
+    } else {
+        return './build.sh'
+    }
+}
+
+task configure() {
+    buildDir = "${projectDir}/output"
+    println 'OS: '+System.properties['os.name']
+    println '64 bit: '+is64BitArch()
+}
+
+task cleanAll(type: Delete) {
+    delete buildDir, "${projectDir}/cache"
+}
+clean.finalizedBy cleanAll
+
+task buildOta(group: '- OTA build', description: 'Build the flashable OTA zip.') {
+    doLast {
+        println 'Building the flashable OTA zip with Gradle...'
+        exec {
+            executable = getBuildScriptName()
+            args 'Gradle'
+        }
+    }
+}
+
+/*task buildOtaOSS(group: '- OTA build', description: 'Build the flashable OTA zip (open-source components only).') {
+    doLast {
+        println 'Building the flashable OTA zip (open-source components only) with Gradle...'
+        exec {
+            executable = getBuildScriptName()
+            args 'Gradle'
+            environment OPENSOURCE_ONLY: "1"
+        }
+    }
+}
+build.finalizedBy buildOtaOSS*/
+
+task install(dependsOn: ':build') {
+}
+
+wrapper {
+    gradleVersion = '4.10.2'
+    distributionType = Wrapper.DistributionType.ALL
+    distributionSha256Sum = 'b7aedd369a26b177147bcb715f8b1fc4fe32b0a6ade0d7fd8ee5ed0c6f731f2c'
+}

@@ -1,0 +1,47 @@
+language: android
+jdk: openjdk8
+
+cache:
+  directories:
+  - cache/
+  - "$HOME/.gradle/caches/"
+  - "$HOME/.gradle/wrapper/"
+  - "$HOME/.android/build-cache/"
+
+git:
+  depth: 3
+
+android:
+  components:
+  - build-tools-27.0.3
+  - android-27
+
+matrix:
+  include:
+    #- env: OSS=true
+    #  script: ./gradlew buildOtaOSS
+    - env: OSS=false
+      script: ./gradlew buildOta
+  fast_finish: true
+
+before_cache:
+- rm -f  $HOME/.gradle/caches/modules-2/modules-2.lock
+- rm -fr $HOME/.gradle/caches/*/plugin-resolution/
+- rm -f  $HOME/.gradle/caches/*/fileHashes/fileHashes.bin
+- rm -f  $HOME/.gradle/caches/*/fileHashes/fileHashes.lock
+- rm -f  $HOME/.gradle/caches/journal-1/file-access.bin
+- rm -f  $HOME/.gradle/caches/journal-1/journal-1.lock
+- rm -f  $HOME/.gradle/caches/user-id.txt
+- rm -f  $HOME/.gradle/caches/user-id.txt.lock
+
+deploy:
+  provider: releases
+  #api_key:
+  #  secure: 
+  file_glob: true
+  file: output/*
+  skip_cleanup: true
+  on:
+    repo: micro5k/google-sync-addon
+    tags: true
+    condition: $OSS = true
