@@ -102,12 +102,12 @@ get_mount_status()
 
 remount_read_write()
 {
-  mount -v -o remount,rw "$1" "$1"
+  mount -o remount,rw "$1" "$1"
 }
 
 remount_read_only()
 {
-  mount -v -o remount,ro "$1" "$1"
+  mount -o remount,ro "$1" "$1"
 }
 
 unmount()
@@ -150,10 +150,10 @@ replace_slash_with_at()
   echo $(echo $1 | sed -e 's/\//@/g')
 }
 
-custom_replace_string_in_file()  # $1 => This function replace %PLACEHOLDER-1% with this string   $2 => File to process
+replace_line_in_file()  # $1 => File to process  $2 => Line to replace  $3 => File to read for replacement text
 {
-  local replacement="${1//#/?}"  # Remove the character that would break sed
-  sed -i "s#%PLACEHOLDER-1%#${replacement}#" "$2" || ui_error "Failed to replace a string in the file '$2'" 92
+  sed -i "/$2/r $3" "$1" || ui_error "Failed to replace (1) a line in the file => '$1'" 92
+  sed -i "/$2/d" "$1" || ui_error "Failed to replace (2) a line in the file => '$1'" 92
 }
 
 # Permission related functions
@@ -197,6 +197,8 @@ zip_extract_dir()
 # Hash related functions
 verify_sha1()
 {
+  if ! test -e "$1"; then ui_debug "This file to verify is missing => '$1'"; return 0; fi
+
   ui_debug "$1"
   local file_name="$1"
   local hash="$2"
@@ -246,6 +248,7 @@ move_dir_content()
 
 delete()
 {
+  ui_debug "Deleting '$@'..."
   rm -f "$@" || ui_error "Failed to delete files" 103
 }
 
@@ -278,6 +281,29 @@ list_files()  # $1 => Folder to scan   $2 => Prefix to remove
       printf '%s\\n' "${entry}" || ui_error "File listing failed, entry => ${entry}, folder => $1" 106
     fi
   done
+}
+
+append_file_list()  # $1 => Folder to scan  $2 => Prefix to remove  $3 => Output filename
+{
+  local dir="$1"
+  test -d "$dir" || return
+
+  shift
+  # After shift: $1 => Prefix to remove  $2 => Output filename
+  for entry in "$dir"/*; do
+    if test -d "${entry}"; then
+      append_file_list "${entry}" "$@"
+    else
+      entry="${entry#$1}" || ui_error "Failed to remove prefix from the entry => ${entry}" 106
+      echo "${entry}" >> "$2" || ui_error "File listing failed, current entry => ${entry}, folder => $dir" 106
+    fi
+  done
+}
+
+write_file_list()  # $1 => Folder to scan  $2 => Prefix to remove  $3 => Output filename
+{
+  delete "$3"
+  append_file_list "$@"
 }
 
 # Input related functions

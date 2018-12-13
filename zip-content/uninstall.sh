@@ -19,12 +19,30 @@
 LICENSE
 
 if [[ -z "$INSTALLER" ]]; then
-  ui_msg()
+  ui_debug()
   {
     echo "$1"
   }
 
-  ui_msg 'Uninstalling...'
+  delete_recursive()
+  {
+    if test -e "$1"; then
+      ui_debug "Deleting '$1'..."
+      rm -rf "$1" || ui_debug "Failed to delete files/folders"
+    fi
+  }
+
+  delete_recursive_wildcard()
+  {
+    for filename in "$@"; do
+      if test -e "$filename"; then
+        ui_debug "Deleting '$filename'...."
+        rm -rf "$filename" || ui_debug "Failed to delete files/folders"
+      fi
+    done
+  }
+
+  ui_debug 'Uninstalling...'
 
   SYS_PATH='/system'
   PRIVAPP_PATH="${SYS_PATH}/app"
@@ -65,5 +83,5 @@ ${SYS_PATH}/app/GoogleCalendarSyncAdapter.odex
 rm -rf ${DELETE_LIST}  # Filenames cannot contain spaces
 
 if [[ -z "$INSTALLER" ]]; then
-  ui_msg 'Done.'
+  ui_debug 'Done.'
 fi
