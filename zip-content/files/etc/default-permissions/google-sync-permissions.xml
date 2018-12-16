@@ -47,6 +47,8 @@
         <permission name="android.permission.GET_ACCOUNTS" fixed="false"/>
         <permission name="android.permission.READ_CONTACTS" fixed="false"/>
         <permission name="android.permission.WRITE_CONTACTS" fixed="false"/>
+        <!-- Others -->
+        <permission name="com.google.android.googleapps.permission.GOOGLE_AUTH.cp" fixed="false"/>
     </exception>
 
     <exception
