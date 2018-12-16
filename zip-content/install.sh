@@ -181,7 +181,7 @@ if [[ -d "${SYS_PATH}/addon.d" ]]; then
     :  ### Not ready yet
   else
     #ui_msg 'Installing survival script...'
-    ### Not ready yet
+    : ### Not ready yet
     #write_file_list "$TMP_PATH/files" "$TMP_PATH/files/" "$TMP_PATH/backup-filelist.lst"
     #replace_line_in_file "$TMP_PATH/addon.d/00-1-google-sync.sh" '%PLACEHOLDER-1%' "$TMP_PATH/backup-filelist.lst"
     #copy_file "$TMP_PATH/addon.d/00-1-google-sync.sh" "$SYS_PATH/addon.d"
