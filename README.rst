@@ -32,6 +32,6 @@ Releases
 
 Code analysis
 -------------
-.. image:: https://api.codacy.com/project/badge/Grade/6697357a0508477bb5c1bd37a0c461e3
+.. image:: https://app.codacy.com/project/badge/Grade/a490a45291bb45208c025b26421402f5
    :alt: Codacy Badge
-   :target: https://www.codacy.com/app/micro5k/google-sync-addon
+   :target: https://www.codacy.com/gh/micro5k/google-sync-addon/dashboard
