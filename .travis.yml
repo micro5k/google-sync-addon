@@ -1,46 +1,51 @@
-language: android
-jdk: openjdk8
+---
+# SPDX-FileCopyrightText: Copyright (C) 2021 ale5000
+# SPDX-License-Identifer: GPL-3.0-or-later
+# SPDX-FileType: SOURCE
+
+os: linux
+dist: bionic
+virt: lxd
+
+language: "java"
+jdk: "openjdk8"
 
 cache:
   directories:
-  - cache/
-  - "$HOME/.gradle/caches/"
-  - "$HOME/.gradle/wrapper/"
-  - "$HOME/.android/build-cache/"
+    - "cache/"
+    - "$HOME/.gradle/caches/"
+    - "$HOME/.gradle/wrapper/"
 
 git:
-  depth: 3
+  depth: 1
 
-android:
-  components:
-  - build-tools-27.0.3
-  - android-27
+addons:
+  apt:
+    packages:
+      - unzip=6.0*
+      - zip=3.0*
 
-matrix:
+before_script:
+  - export TERM=dumb
+  - export UPLOAD_BUILD_SCAN=true
+
+jobs:
   include:
-    #- env: OSS=true
-    #  script: ./gradlew buildOtaOSS
     - env: OSS=false
-      script: ./gradlew buildOta
+      script: "./gradlew buildOta"
   fast_finish: true
 
 before_cache:
-- rm -f  $HOME/.gradle/caches/modules-2/modules-2.lock
-- rm -fr $HOME/.gradle/caches/*/plugin-resolution/
-- rm -f  $HOME/.gradle/caches/*/fileHashes/fileHashes.bin
-- rm -f  $HOME/.gradle/caches/*/fileHashes/fileHashes.lock
-- rm -f  $HOME/.gradle/caches/journal-1/file-access.bin
-- rm -f  $HOME/.gradle/caches/journal-1/journal-1.lock
-- rm -f  $HOME/.gradle/caches/user-id.txt
-- rm -f  $HOME/.gradle/caches/user-id.txt.lock
+  - rm -f  "$HOME/.gradle/caches/modules-2/modules-2.lock"
+  - rm -fr "$HOME/.gradle/caches/*/plugin-resolution/"
 
 deploy:
   provider: releases
-  #api_key:
-  #  secure: 
+  # token:
+    # secure:
   file_glob: true
   file: output/*
-  skip_cleanup: true
+  edge: true
   on:
     repo: micro5k/google-sync-addon
     tags: true

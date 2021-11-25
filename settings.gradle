@@ -1,12 +1,12 @@
-/*
- * The settings file is used to specify which projects to include in your build.
- * 
- * Copyright (C) 2018 ale5000
- * SPDX-License-Identifer: GPL-3.0-or-later
- */
+// SPDX-FileCopyrightText: Copyright (C) 2016-2019, 2021 ale5000
+// SPDX-License-Identifer: GPL-3.0-or-later
+// SPDX-FileType: SOURCE
 
-rootProject.name = 'google-sync-addon'
-println 'Google Sync Add-on'
+plugins {
+    id 'com.gradle.enterprise' version '3.7'  /* New name of com.gradle.build-scan */
+}
 
-// Enable stack trace
-gradle.startParameter.showStacktrace = org.gradle.api.logging.configuration.ShowStacktrace.ALWAYS
+rootProject.name = 'Google Sync Add-on'
+println rootProject.name
+
+//gradle.startParameter.showStacktrace = org.gradle.api.logging.configuration.ShowStacktrace.ALWAYS  /* Always enable stack trace */

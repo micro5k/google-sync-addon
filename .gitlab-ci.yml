@@ -1,38 +1,38 @@
-image: openjdk:8-jdk
+---
+# SPDX-FileCopyrightText: Copyright (C) 2021 ale5000
+# SPDX-License-Identifer: GPL-3.0-or-later
+# SPDX-FileType: SOURCE
+
+image: "openjdk:8-jdk"
 
 cache:
-  key: ${CI_COMMIT_REF_SLUG}
+  key: "${CI_COMMIT_REF_SLUG}"
   paths:
-    - cache/
-    - .gradle/caches/
-    - .gradle/wrapper/
-    #- .android/build-cache/
-    - .apt-cache/
+    - "cache/"
+    - ".gradle/caches/"
+    - ".gradle/wrapper/"
+    - ".apt-cache/"
 
 variables:
   GIT_DEPTH: "1"
 
 before_script:
-  - export APT_CACHE="$CI_PROJECT_DIR/.apt-cache"; mkdir -p "$APT_CACHE/lists/partial"; mkdir -p "$APT_CACHE/archives/partial"
+  - export APT_CACHE="$CI_PROJECT_DIR/.apt-cache"
+  - mkdir -p "$APT_CACHE/lists/partial"; mkdir -p "$APT_CACHE/archives/partial"
   - export GRADLE_USER_HOME="$PWD/.gradle"
   - apt-get -o Dir::State::Lists="$APT_CACHE/lists" update
-  - apt-get -o Dir::State::Lists="$APT_CACHE/lists" -o Dir::Cache::Archives="$APT_CACHE/archives" install -y unzip zip
+  - >-
+    apt-get -o Dir::State::Lists="$APT_CACHE/lists" -o
+    Dir::Cache::Archives="$APT_CACHE/archives" install -y unzip zip
 
 stages:
   - build
-  #- execute
 
 build:
   stage: build
-  #script: ./gradlew buildOtaOSS
-  script: ./gradlew tasks
+  # script: "./gradlew buildOtaOSS"
+  script: "./gradlew tasks"
 
 after_script:
-  - rm -f  $GRADLE_USER_HOME/caches/modules-2/modules-2.lock
-  - rm -fr $GRADLE_USER_HOME/caches/*/plugin-resolution/
-  - rm -f  $GRADLE_USER_HOME/caches/*/fileHashes/fileHashes.bin
-  - rm -f  $GRADLE_USER_HOME/caches/*/fileHashes/fileHashes.lock
-  - rm -f  $GRADLE_USER_HOME/caches/journal-1/file-access.bin
-  - rm -f  $GRADLE_USER_HOME/caches/journal-1/journal-1.lock
-  - rm -f  $GRADLE_USER_HOME/caches/user-id.txt
-  - rm -f  $GRADLE_USER_HOME/caches/user-id.txt.lock
+  - rm -f  "$GRADLE_USER_HOME/caches/modules-2/modules-2.lock"
+  - rm -fr "$GRADLE_USER_HOME/caches/*/plugin-resolution/"

@@ -1,58 +1,48 @@
-/*
- * Copyright (C) 2018 ale5000
- * SPDX-License-Identifer: GPL-3.0-or-later
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version, w/ zip exception.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
- */
+// SPDX-FileCopyrightText: Copyright (C) 2016-2019, 2021 ale5000
+// SPDX-License-Identifer: GPL-3.0-or-later
+// SPDX-FileType: SOURCE
 
 plugins {
-    id 'com.gradle.build-scan' version '1.16'
     id 'base'
+    id 'com.github.hierynomus.license-report' version '0.15.0'
+    id 'com.github.spotbugs' version '4.7.6'
 }
 
-buildScan {
-    termsOfServiceUrl = 'https://gradle.com/terms-of-service'
-    termsOfServiceAgree = 'yes'
-    publishAlwaysIf(System.getenv('CI') != null)
+task configure() {
+    defaultTasks 'tasks'
+    version = rootProject.file('zip-content/inc/VERSION.dat').text.trim()
+    ext.isBeta = version.endsWith("-beta")
+    ext.isSnapshot = version.endsWith("-snapshot")
+
+    rootProject.buildDir = "${projectDir}/output"
+    println 'Version: '+version
+    println 'OS: '+System.properties['os.name']
 }
+
+gradleEnterprise {
+    buildScan {
+        termsOfServiceUrl = 'https://gradle.com/terms-of-service'
+        termsOfServiceAgree = 'yes'
+        publishAlwaysIf(System.getenv('UPLOAD_BUILD_SCAN') != null)
+    }
+}
+
+task cleanCache(type: Delete) {
+    delete "${projectDir}/cache"
+}
+clean.finalizedBy cleanCache
 
 def isWindows() {
     return System.properties['os.name'].toLowerCase(Locale.ROOT).contains('windows')
 }
 
-def is64BitArch() {
-    return System.properties['os.arch'].contains('64')
-}
-
 def getBuildScriptName() {
     if(isWindows()) {
-        return './build-win.bat'
+        return './build.bat'
     } else {
         return './build.sh'
     }
 }
-
-task configure() {
-    buildDir = "${projectDir}/output"
-    println 'OS: '+System.properties['os.name']
-    println '64 bit: '+is64BitArch()
-}
-
-task cleanAll(type: Delete) {
-    delete buildDir, "${projectDir}/cache"
-}
-clean.finalizedBy cleanAll
 
 task buildOta(group: '- OTA build', description: 'Build the flashable OTA zip.') {
     doLast {
@@ -76,11 +66,11 @@ task buildOta(group: '- OTA build', description: 'Build the flashable OTA zip.')
 }
 build.finalizedBy buildOtaOSS*/
 
-task install(dependsOn: ':build') {
+task install(dependsOn: build) {
 }
 
 wrapper {
-    gradleVersion = '4.10.2'
+    gradleVersion = '6.5'
     distributionType = Wrapper.DistributionType.ALL
-    distributionSha256Sum = 'b7aedd369a26b177147bcb715f8b1fc4fe32b0a6ade0d7fd8ee5ed0c6f731f2c'
+    distributionSha256Sum = 'c9910513d0eed63cd8f5c7fec4cb4a05731144770104a0871234a4edc3ba3cef'
 }

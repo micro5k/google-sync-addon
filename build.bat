@@ -1,10 +1,13 @@
+@REM SPDX-FileCopyrightText: Copyright (C) 2016-2019, 2021 ale5000
+@REM SPDX-License-Identifer: GPL-3.0-or-later
+@REM SPDX-FileType: SOURCE
+
 @echo off
-REM Copyright (C) 2017-2018 ale5000
-REM SPDX-License-Identifer: GPL-3.0-or-later
 
 TITLE Building the flashable OTA zip... 2> nul
 SETLOCAL 2> nul
-"%~dp0tools\win\busybox.exe" bash "%~dp0build.sh"
+CHCP 858 >nul || ECHO "Changing the codepage failed"
+"%~dp0tools\win\busybox.exe" sh "%~dp0build.sh" %*
 ENDLOCAL 2> nul
 SET "EXIT_CODE=%ERRORLEVEL%"
 TITLE Done 2> nul
