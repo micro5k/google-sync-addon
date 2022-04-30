@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC3043
+last_command="${_}"  # IMPORTANT: This line must be at the start of the script before any other command otherwise it will not work
 
 <<LICENSE
   Copyright (C) 2017-2018 ale5000
@@ -17,6 +19,32 @@
   You should have received a copy of the GNU General Public License
   along with this program.  If not, see <https://www.gnu.org/licenses/>.
 LICENSE
+echo ''
+
+detect_script_dir()
+{
+  local this_script
+
+  # shellcheck disable=SC3028,SC2128
+  if test "${#BASH_SOURCE}" -ge 1; then this_script="${BASH_SOURCE}"  # Expanding an array without an index gives the first element (it is intended)
+  else
+    local current_shell
+    # shellcheck disable=SC2009
+    current_shell="$(ps -o 'pid,comm' | grep -Fw "$$" | while IFS=' ' read -r _ current_shell; do echo "${current_shell}"; done || true)"
+
+    if test -n "$0" && test -n "${current_shell}" && test "$0" != "${current_shell}" && test "$0" != "-${current_shell}"; then this_script="$0"
+    elif test -n "${last_command}"; then this_script="${last_command}"
+    else echo 'ERROR: The script filename cannot be found'; return 1; fi
+  fi
+  unset last_command
+
+  this_script="$(realpath "${this_script}" 2>&-)" || return 1
+  SCRIPT_DIR="$(dirname "${this_script}")" || return 1
+}
+detect_script_dir || return 1 2>&- || exit 1
+
+# shellcheck disable=SC2154
+if test -z "${CI}"; then printf '\033]0;%s\007' 'Building the flashable OTA zip...' && printf '\r                                             \r'; fi
 
 ui_error()
 {
@@ -54,60 +82,24 @@ else
   ui_error 'Unsupported OS'
 fi
 
-# Detect script dir (with absolute path)
-INIT_DIR=$(pwd)
-SCRIPT_DIR=$(dirname "$0")
-if [[ "${SCRIPT_DIR:0:1}" == '/' ]] || [[ "$PLATFORM" == 'win' && "${SCRIPT_DIR:1:1}" == ':' ]]; then
-  :  # If already absolute leave it as is
-else
-  if [[ "$SCRIPT_DIR" == '.' ]]; then SCRIPT_DIR=''; else SCRIPT_DIR="/$SCRIPT_DIR"; fi
-  if [[ "$INIT_DIR" != '/' ]]; then SCRIPT_DIR="$INIT_DIR$SCRIPT_DIR"; fi
-fi
-WGET_CMD='wget'
-TOOLS_DIR="${SCRIPT_DIR}${SEP}tools${SEP}${PLATFORM}"
-PATH="${TOOLS_DIR}${PATHSEP}${PATH}"
-
-verify_sha1()
-{
-  local file_name="$1"
-  local hash="$2"
-  local file_hash=$(sha1sum "$file_name" | cut -d ' ' -f 1)
-
-  if [[ $hash != "$file_hash" ]]; then return 1; fi  # Failed
-  return 0  # Success
-}
-
-corrupted_file()
-{
-  rm -f "$1" || echo 'Failed to remove the corrupted file.'
-  ui_error "The file '$1' is corrupted."
-}
-
-dl_file()
-{
-  if [[ ! -e "$SCRIPT_DIR/cache/$1/$2" ]]; then
-    mkdir -p "$SCRIPT_DIR/cache/$1"
-    "$WGET_CMD" -O "$SCRIPT_DIR/cache/$1/$2" -U 'Mozilla/5.0 (X11; Linux x86_64; rv:63.0) Gecko/20100101 Firefox/63.0' "$4" || ui_error "Failed to download the file => 'cache/$1/$2'."
-    echo ''
-  fi
-  verify_sha1 "$SCRIPT_DIR/cache/$1/$2" "$3" || corrupted_file "$SCRIPT_DIR/cache/$1/$2"
-}
-
-. "$SCRIPT_DIR/conf.sh"
+# shellcheck source=SCRIPTDIR/scripts/common.sh
+if test "${A5K_FUNCTIONS_INCLUDED:-false}" = 'false'; then . "${SCRIPT_DIR}/scripts/common.sh"; fi
+# shellcheck source=SCRIPTDIR/conf.sh
+. "${SCRIPT_DIR}/conf.sh"
 
 # Check dependencies
 which 'zip' || ui_error 'zip command is missing'
 
 # Create the output dir
-OUT_DIR="$SCRIPT_DIR/output"
-mkdir -p "$OUT_DIR" || ui_error 'Failed to create the output dir'
+OUT_DIR="${SCRIPT_DIR}/output"
+mkdir -p "${OUT_DIR}" || ui_error 'Failed to create the output dir'
 
 # Create the temp dir
-TEMP_DIR=$(mktemp -d -t ZIPBUILDER-XXXXXX) || ui_error 'Failed to create our temp dir'
-if test -z "$TEMP_DIR"; then ui_error 'Failed to create our temp dir'; fi
+TEMP_DIR="$(mktemp -d -t ZIPBUILDER-XXXXXX)" || ui_error 'Failed to create our temp dir'
+if test -z "${TEMP_DIR}"; then ui_error 'Failed to create our temp dir'; fi
 
 # Empty our temp dir (should be already empty, but we must be sure)
-rm -rf "$TEMP_DIR"/* || ui_error 'Failed to empty our temp dir'
+rm -rf "${TEMP_DIR:?}"/* || ui_error 'Failed to empty our temp dir'
 
 # Set filename and version
 VER=$(cat "$SCRIPT_DIR/zip-content/inc/VERSION.dat")

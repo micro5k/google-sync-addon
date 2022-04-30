@@ -3,21 +3,23 @@
 
 # SC3043: In POSIX sh, local is undefined
 
-# SPDX-FileCopyrightText: Copyright (C) 2016-2019, 2021 ale5000
-# SPDX-License-Identifer: GPL-3.0-or-later
+# SPDX-FileCopyrightText: (c) 2016-2019, 2021 ale5000
+# SPDX-License-Identifier: GPL-3.0-or-later
 # SPDX-FileType: SOURCE
 
-export A5K_FUNCTIONS_INCLUDED=true
-readonly A5K_FUNCTIONS_INCLUDED
+set -o pipefail
+
+if test "${A5K_FUNCTIONS_INCLUDED:-false}" = 'false'; then readonly A5K_FUNCTIONS_INCLUDED=true; fi
 export TZ=UTC
-export LANG=en_US
+export LC_ALL=C
+export LANG=C
 
 unset LANGUAGE
-unset LC_ALL
 unset LC_MESSAGES
 unset UNZIP
 unset UNZIP_OPTS
 unset UNZIPOPT
+unset JAVA_TOOL_OPTIONS
 unset CDPATH
 
 ui_error()
@@ -35,6 +37,11 @@ compare_start_uname()
     *)                 # NOT found
   esac
   return 1  # NOT found
+}
+
+simple_get_prop()
+{
+  grep -F "${1}=" "${2}" | head -n1 | cut -d '=' -f 2
 }
 
 verify_sha1()
@@ -62,7 +69,7 @@ dl_file()
 
   if [[ ! -e "${SCRIPT_DIR}/cache/$1/$2" ]]; then
     mkdir -p "${SCRIPT_DIR}/cache/$1"
-    "${WGET_CMD}" -c -O "${SCRIPT_DIR}/cache/$1/$2" -U 'Mozilla/5.0 (X11; Linux x86_64; rv:92.0) Gecko/20100101 Firefox/92.0' "$4" || ( if ! test -z "$5"; then dl_file "$1" "$2" "$3" "$5"; else ui_error "Failed to download the file => 'cache/$1/$2'."; fi )
+    "${WGET_CMD}" -c -O "${SCRIPT_DIR}/cache/$1/$2" -U 'Mozilla/5.0 (X11; Linux x86_64; rv:99.0) Gecko/20100101 Firefox/99.0' "$4" || { if test -n "$5"; then dl_file "$1" "$2" "$3" "$5"; else ui_error "Failed to download the file => 'cache/$1/$2'."; fi; }
     echo ''
   fi
   verify_sha1 "${SCRIPT_DIR}/cache/$1/$2" "$3" || corrupted_file "${SCRIPT_DIR}/cache/$1/$2"

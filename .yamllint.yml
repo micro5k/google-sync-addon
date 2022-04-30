@@ -1,5 +1,11 @@
 ---
+# SPDX-FileCopyrightText: none
+# SPDX-License-Identifier: CC0-1.0
+# SPDX-FileType: SOURCE
 extends: default
 rules:
   truthy:
     allowed-values: ["true", "false", "on"]
+  line-length:
+    max: 89
+    level: warning
