@@ -6,7 +6,7 @@ plugins {
     id 'com.gradle.enterprise' version '3.10'  /* New name of com.gradle.build-scan */
 }
 
-rootProject.name = 'Google Sync Add-on'
+rootProject.name = 'Google Sync add-on'
 println rootProject.name
 
 //gradle.startParameter.showStacktrace = org.gradle.api.logging.configuration.ShowStacktrace.ALWAYS  /* Always enable stack trace */

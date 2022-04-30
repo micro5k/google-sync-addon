@@ -1,12 +1,12 @@
 ==================
-Google Sync Add-on
+Google Sync add-on
 ==================
 :Author: `ale5000 <https://github.com/ale5000-git>`_
 
 
 Description
 -----------
-Google Sync Add-on simplify the installation of Google sync adapters (all the included files are the original versions).
+Google Sync add-on simplify the installation of Google sync adapters (all the included files are the original versions).
 
 
 Donations
@@ -18,7 +18,7 @@ Donations
 
 License
 -------
-Copyright © 2016-2018 ale5000
+Copyright © 2016-2019, 2021-2022 ale5000
 
 License: `GPLv3.0 or later <https://www.gnu.org/licenses/gpl-3.0.html>`_
 
