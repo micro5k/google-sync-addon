@@ -1,3 +1,7 @@
+..
+   SPDX-License-Identifier: GPL-3.0-or-later
+   SPDX-FileType: DOCUMENTATION
+
 ==================
 Google Sync add-on
 ==================
