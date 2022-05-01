@@ -7,7 +7,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # SPDX-FileType: SOURCE
 
-if [[ -z "$INSTALLER" ]]; then
+if [[ -z "${INSTALLER}" ]]; then
   ui_debug()
   {
     echo "$1"
@@ -24,9 +24,9 @@ if [[ -z "$INSTALLER" ]]; then
   delete_recursive_wildcard()
   {
     for filename in "$@"; do
-      if test -e "$filename"; then
-        ui_debug "Deleting '$filename'...."
-        rm -rf "$filename" || ui_debug "Failed to delete files/folders"
+      if test -e "${filename}"; then
+        ui_debug "Deleting '${filename}'...."
+        rm -rf "${filename:?}" || ui_debug "Failed to delete files/folders"
       fi
     done
   }
@@ -71,6 +71,6 @@ ${SYS_PATH}/app/GoogleCalendarSyncAdapter.odex
 
 rm -rf ${DELETE_LIST}  # Filenames cannot contain spaces
 
-if [[ -z "$INSTALLER" ]]; then
+if [[ -z "${INSTALLER}" ]]; then
   ui_debug 'Done.'
 fi

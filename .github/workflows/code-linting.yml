@@ -2,21 +2,20 @@
 # SPDX-FileCopyrightText: (c) 2021 ale5000
 # SPDX-License-Identifier: GPL-3.0-or-later
 # SPDX-FileType: SOURCE
-name: "Security checks"
+name: "Code linting"
 on:
   - push
   - pull_request
+  - workflow_dispatch
 jobs:
-  security:
-    name: "Security checks"
+  shellchecker:
+    name: "ShellChecker"
     runs-on: ubuntu-latest
 
     steps:
       - name: "Check out code"
         uses: actions/checkout@v2
+      - name: "ShellChecker"
+        uses: a5k-actions/shellchecker@v0
         with:
-          fetch-depth: "20"
-      - name: "Gitleaks"
-        uses: zricethezav/gitleaks-action@v1
-      - name: "Gradle Wrapper validation"
-        uses: gradle/wrapper-validation-action@master
+          ignore-files: "gradlew"
