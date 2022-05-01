@@ -14,58 +14,67 @@ gradleEnterprise.buildScan {
     publishAlwaysIf System.getenv('UPLOAD_BUILD_SCAN') != null
 }
 
-task configure() {
+void configure() {
     defaultTasks 'tasks'
-    version = rootProject.file('zip-content/inc/VERSION.dat').text.trim()
-    ext.isBeta = version.endsWith("-beta")
-    ext.isSnapshot = version.endsWith("-snapshot")
 
+    Properties props = new Properties()
+    file('zip-content/module.prop').withInputStream { props.load(it) }
+
+    description = props.getProperty('description')
+    version = props.getProperty('version').trim()
+    archivesBaseName = props.getProperty('id')
+    //ext.isBeta = version.endsWith('-beta')
+    //ext.isAlpha = version.endsWith('-alpha')
+    //ext.isSnapshot = version.endsWith('-snapshot')
     rootProject.buildDir = "${projectDir}/output"
-    println 'Version: '+version
-    println 'OS: '+System.properties['os.name']
-}
 
-task cleanCache(type: Delete) {
+    println 'Version: ' + version
+    println 'OS: ' + System.properties['os.name']
+}
+configure()
+
+tasks.register('cleanCache', Delete) {
     delete "${projectDir}/cache"
 }
-clean.finalizedBy cleanCache
 
-def isWindows() {
-    return System.properties['os.name'].toLowerCase(Locale.ROOT).contains('windows')
+tasks.named('clean').configure {
+    finalizedBy tasks.named('cleanCache')
 }
 
-def getBuildScriptName() {
-    if(isWindows()) {
-        return './build.bat'
+static String getScriptExt() {
+    if(System.properties['os.name'].toLowerCase(Locale.ROOT).contains('windows')) {
+        return '.bat'
     } else {
-        return './build.sh'
+        return '.sh'
     }
 }
 
-task buildOta(group: '- OTA build', description: 'Build the flashable OTA zip.') {
-    doLast {
+tasks.register('buildOta', Exec) {
+    group '- OTA build'
+    description 'Build the flashable OTA zip.'
+
+    doFirst {
         println 'Building the flashable OTA zip with Gradle...'
-        exec {
-            executable = getBuildScriptName()
-            args 'Gradle'
-        }
+        executable "${projectDir}/build" + getScriptExt()
     }
 }
 
-/*task buildOtaOSS(group: '- OTA build', description: 'Build the flashable OTA zip (open-source components only).') {
-    doLast {
+/*tasks.register('buildOtaOSS', Exec) {
+    group '- OTA build'
+    description 'Build the flashable OTA zip (open-source components only).'
+
+    doFirst {
         println 'Building the flashable OTA zip (open-source components only) with Gradle...'
-        exec {
-            executable = getBuildScriptName()
-            args 'Gradle'
-            environment OPENSOURCE_ONLY: "1"
-        }
+        executable "${projectDir}/build" + getScriptExt()
+        environment OPENSOURCE_ONLY: '1'
     }
+}*/
+tasks.named('build').configure {
+    finalizedBy buildOta
 }
-build.finalizedBy buildOtaOSS*/
 
-task install(dependsOn: build) {
-}
+// Dummy task
+tasks.register('install')
 
 wrapper {
     gradleVersion = '6.5'
