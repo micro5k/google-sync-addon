@@ -22,7 +22,7 @@ along with this program.  If not, see https://www.gnu.org/licenses/.
 
 
 Google Sync add-on zip exception
-=========================================
+================================
 
 This Google Sync add-on GPLv3 licensed scripts exception ("Exception") is an additional
 permission under section 7 of the GNU General Public License, version 3 ("GPLv3").
@@ -77,6 +77,6 @@ is in itself still licensed as GPLv3 and retains its copyleft permissions.
 It is to be treated as an "aggregate" as specified in the GPLv3.
 
 3. No Weakening of Google Sync add-on Copyleft.
---------------------------------------------------------
+-----------------------------------------------
 The availability of this Exception does not imply any general presumption that third-party software
 is unaffected by the copyleft requirements of the license of Google Sync add-on.
