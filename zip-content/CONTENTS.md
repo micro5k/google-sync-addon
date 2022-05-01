@@ -4,7 +4,6 @@
   SPDX-FileType: DOCUMENTATION
 -->
 
-========
 CONTENTS
 ========
 
