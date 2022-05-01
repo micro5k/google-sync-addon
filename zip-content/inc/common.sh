@@ -1,18 +1,15 @@
 #!/sbin/sh
-# shellcheck disable=SC3043,SC3037,SC3010,SC3060
 
-# SC3043: In POSIX sh, local is undefined
-# SC3037: In POSIX sh, echo flags are undefined
-# SC3010: In POSIX sh, [[ ]] is undefined
-# SC3060: In POSIX sh, string replacement is undefined
-
-# SPDX-FileCopyrightText: Copyright (C) 2016-2019, 2021 ale5000
-# SPDX-License-Identifer: GPL-3.0-or-later
+# SPDX-FileCopyrightText: (c) 2016-2019, 2021 ale5000
+# SPDX-License-Identifier: GPL-3.0-or-later
 # SPDX-FileType: SOURCE
+
+# shellcheck disable=SC3043
+# SC3043: In POSIX sh, local is undefined
 
 ### GLOBAL VARIABLES ###
 
-if [[ -z "${RECOVERY_PIPE}" || -z "${ZIP_FILE}" || -z "${TMP_PATH}" ]]; then
+if test -z "${RECOVERY_PIPE}" || test -z "${ZIP_FILE}" || test -z "${TMP_PATH}"; then
   echo 'Some variables are NOT set.'
   exit 90
 fi
@@ -23,7 +20,11 @@ fi
 # Message related functions
 _show_text_on_recovery()
 {
-  echo -e "ui_print $1\nui_print" >> "${RECOVERY_PIPE}"
+  if test -e "${RECOVERY_PIPE}"; then
+    printf "ui_print %s\nui_print \n" "${1}" >> "${RECOVERY_PIPE}"
+  else
+    printf "ui_print %s\nui_print \n" "${1}" 1>&"${OUTFD}"
+  fi
 }
 
 ui_error()
@@ -43,20 +44,32 @@ ui_warning()
 
 ui_msg()
 {
-  if [ "${DEBUG_LOG}" -ne 0 ]; then echo "$1"; fi
-  echo -e "ui_print $1\nui_print" >> "${RECOVERY_PIPE}"
+  if test "${DEBUG_LOG}" -ne 0; then echo "$1"; fi
+  if test -e "${RECOVERY_PIPE}"; then
+    printf "ui_print %s\nui_print \n" "${1}" >> "${RECOVERY_PIPE}"
+  else
+    printf "ui_print %s\nui_print \n" "${1}" 1>&"${OUTFD}"
+  fi
 }
 
 ui_msg_sameline_start()
 {
-  if [ "${DEBUG_LOG}" -ne 0 ]; then echo -n "$1"; fi
-  echo -n "ui_print $1" >> "${RECOVERY_PIPE}"
+  if test "${DEBUG_LOG}" -ne 0; then printf '%s\n' "${1}"; fi
+  if test -e "${RECOVERY_PIPE}"; then
+    printf 'ui_print %s' "${1}" >> "${RECOVERY_PIPE}"
+  else
+    printf 'ui_print %s' "${1}" 1>&"${OUTFD}"
+  fi
 }
 
 ui_msg_sameline_end()
 {
-  if [ "${DEBUG_LOG}" -ne 0 ]; then echo "$1"; fi
-  echo -e " $1\nui_print" >> "${RECOVERY_PIPE}"
+  if test "${DEBUG_LOG}" -ne 0; then printf '%s\n' "${1}"; fi
+  if test -e "${RECOVERY_PIPE}"; then
+    printf '%s\nui_print \n' "${1}" >> "${RECOVERY_PIPE}"
+  else
+    printf '%s\nui_print \n' "${1}" 1>&"${OUTFD}"
+  fi
 }
 
 ui_debug()
@@ -67,17 +80,43 @@ ui_debug()
 # Error checking functions
 validate_return_code()
 {
-  if [[ "$1" != 0 ]]; then ui_error "ERROR: $2"; fi
+  if test "${1}" -ne 0; then ui_error "${2}"; fi
+}
+
+validate_return_code_warning()
+{
+  if test "${1}" -ne 0; then ui_warning "${2}"; fi
 }
 
 # Mounting related functions
+mount_partition()
+{
+  local partition
+  partition="$(readlink -f "${1}")" || { partition="${1}"; ui_warning "Failed to canonicalize '${1}'"; }
+
+  mount "${partition}" || ui_warning "Failed to mount '${1}'"
+}
+
 is_mounted()
 {
-  case $(mount) in
-    *" $1 "*) return 0;;  # Mounted
-    *)                    # NOT mounted
+  local _partition _mount_result
+  _partition="$(readlink -f "${1}")" || { _partition="${1}"; ui_warning "Failed to canonicalize '${1}'"; }
+  _mount_result="$(mount)" || { test -e '/proc/mounts' && _mount_result="$(cat /proc/mounts)"; } || { test -n "${DEVICE_MOUNT:-}" && _mount_result="$("${DEVICE_MOUNT:-}")"; } || ui_error 'is_mounted has failed'
+
+  case "${_mount_result}" in
+    *[[:blank:]]"${_partition}"[[:blank:]]*) return 0;;  # Mounted
+    *)                                                   # NOT mounted
   esac
   return 1  # NOT mounted
+}
+
+ensure_system_is_mounted()
+{
+  if ! is_mounted '/system'; then
+    mount '/system'
+    if ! is_mounted '/system'; then ui_error '/system cannot be mounted'; fi
+  fi
+  return 0;  # OK
 }
 
 is_mounted_read_write()
@@ -88,8 +127,8 @@ is_mounted_read_write()
 get_mount_status()
 {
   local mount_line
-  mount_line=$(mount | grep " $1 " | head -n1)
-  if [[ -z "${mount_line}" ]]; then return 1; fi  # NOT mounted
+  mount_line="$(mount | grep " $1 " | head -n1)"
+  if test -z "${mount_line}"; then return 1; fi  # NOT mounted
   if echo "${mount_line}" | grep -qi -e "[(\s,]rw[\s,)]"; then return 0; fi  # Mounted read-write (RW)
   return 2  # Mounted read-only (RO)
 }
@@ -109,11 +148,6 @@ unmount()
   umount "$1" || ui_msg "WARNING: Failed to unmount '$1'"
 }
 
-unmount_safe()
-{
-  "${BASE_TMP_PATH}/busybox" umount "$1" || ui_error "Failed to unmount '$1'" 106
-}
-
 # Getprop related functions
 getprop()
 {
@@ -123,6 +157,11 @@ getprop()
 build_getprop()
 {
   grep "^ro\.$1=" "${TMP_PATH}/build.prop" | head -n1 | cut -d '=' -f 2
+}
+
+simple_get_prop()
+{
+  grep -F "${1}=" "${2}" | head -n1 | cut -d '=' -f 2
 }
 
 # String related functions
@@ -137,6 +176,7 @@ is_substring()
 
 replace_string()
 {
+  # shellcheck disable=SC3060
   echo "${1//$2/$3}"
 }
 
@@ -168,7 +208,7 @@ search_ascii_string_in_file()
 search_ascii_string_as_utf16_in_file()
 {
   local SEARCH_STRING
-  SEARCH_STRING=$(echo -n "$1" | od -A n -t x1 | LC_ALL=C tr -d '\n' | LC_ALL=C sed -e 's/^ //g;s/ /00/g')
+  SEARCH_STRING="$(printf '%s' "${1}" | od -A n -t x1 | LC_ALL=C tr -d '\n' | LC_ALL=C sed -e 's/^ //g;s/ /00/g')"
   od -A n -t x1 "$2" | LC_ALL=C tr -d ' \n' | LC_ALL=C grep -qF "${SEARCH_STRING}" && return 0  # Found
   return 1  # NOT found
 }
@@ -179,7 +219,9 @@ set_perm()
   local uid="$1"; local gid="$2"; local mod="$3"
   shift 3
   # Quote: Previous versions of the chown utility used the dot (.) character to distinguish the group name; this has been changed to be a colon (:) character, so that user and group names may contain the dot character
-  chown "${uid}:${gid}" "$@" || chown "${uid}.${gid}" "$@" || ui_error "chown failed on: $*" 81
+  if test "${TEST_INSTALL:-false}" = 'false'; then
+    chown "${uid}:${gid}" "$@" || chown "${uid}.${gid}" "$@" || ui_error "chown failed on: $*" 81
+  fi
   chmod "${mod}" "$@" || ui_error "chmod failed on: $*" 81
 }
 
@@ -223,15 +265,17 @@ zip_extract_dir()
 # Data reset functions
 reset_gms_data_of_all_apps()
 {
-  ui_debug 'Resetting GMS data of all apps...'
-  find /data/data/*/shared_prefs -name "com.google.android.gms.*.xml" -delete
-  validate_return_code "$?" 'Failed to reset GMS data of all apps'
+  if test -e '/data/data/'; then
+    ui_debug 'Resetting GMS data of all apps...'
+    find /data/data/*/shared_prefs -name 'com.google.android.gms.*.xml' -delete
+    validate_return_code_warning "$?" 'Failed to reset GMS data of all apps'
+  fi
 }
 
 # Hash related functions
 verify_sha1()
 {
-  if ! test -e "$1"; then ui_debug "This file to verify is missing => '$1'"; return 0; fi
+  if ! test -e "$1"; then ui_debug "The file to verify is missing => '$1'"; return 1; fi  # Failed
   ui_debug "$1"
 
   local file_name="$1"
@@ -244,7 +288,7 @@ verify_sha1()
 }
 
 # File / folder related functions
-create_dir()
+create_dir() # Ensure dir exists
 {
   test -d "$1" && return
   mkdir -p "$1" || ui_error "Failed to create the dir '$1'" 97
@@ -286,7 +330,7 @@ move_dir_content()
 
 delete()
 {
-  ui_debug "Deleting $*..."
+  ui_debug "Deleting '$*'..."
   rm -f "$@" || ui_error "Failed to delete files" 103
 }
 
