@@ -1,3 +1,8 @@
+..
+   SPDX-FileCopyrightText: (c) 2016-2019, 2021 ale5000
+   SPDX-License-Identifier: GPL-3.0-or-later
+   SPDX-FileType: DOCUMENTATION
+
 ===================
 License declaration
 ===================
@@ -16,15 +21,15 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see https://www.gnu.org/licenses/.
 
 
-Google Sync Add-on zip exception
-================================
+Google Sync add-on zip exception
+=========================================
 
-This Google Sync Add-on GPLv3 licensed scripts exception ("Exception") is an additional
+This Google Sync add-on GPLv3 licensed scripts exception ("Exception") is an additional
 permission under section 7 of the GNU General Public License, version 3 ("GPLv3").
 It applies to a given file (the "GPLv3 licensed scripts") that bears a notice placed by the
 copyright holder of the file stating that the file is governed by GPLv3 along with this Exception.
 
-When you use Google Sync Add-on to compile an installable zip,
+When you use Google Sync add-on to compile an installable zip,
 it combines portions of GPLv3 licensed scripts in this zip.
 The purpose of this Exception is to allow generation of non-GPL zips,
 in this way, these scripts are covered by this Exception.
@@ -35,13 +40,13 @@ A file is an "Independent Module" if it either requires the GPLv3 licensed scrip
 or installation after a Compilation Process, or makes use of an interface provided
 by the GPLv3 licensed scripts, but is not otherwise based on these GPLv3 scripts.
 
-"Google Sync Add-on" means a version of The Google Sync Add-on Project, with
+"Google Sync add-on" means a version of The Google Sync add-on Project, with
 or without modifications, governed by version 3 (or a specified later version) of the
 GNU General Public License (GPL) with the option of using any subsequent versions published by the FSF.
 
 "GPL-compatible Software" is software whose conditions of propagation,
-modification and use would permit combination with Google Sync Add-on in accord with
-the license of Google Sync Add-on.
+modification and use would permit combination with Google Sync add-on in accord with
+the license of Google Sync add-on.
 
 "Installable zip" refers to output from any scripts that can be executed on Android compatible devices.
 Notwithstanding that, "Installable zip" does not include data in any format that is used as
@@ -50,10 +55,10 @@ an intermediate representation, or used for producing an intermediate representa
 The "Compilation Process" transforms code entirely represented in non-intermediate languages
 designed for human-written code, into an Installable Zip.
 
-A Compilation Process is "Eligible" if it is done using Google Sync Add-on,
+A Compilation Process is "Eligible" if it is done using Google Sync add-on,
 alone or with other GPL-compatible software, or if it is done without using any work
-based on Google Sync Add-on.
-For example, using non-GPL-compatible Software to optimize any Google Sync Add-on
+based on Google Sync add-on.
+For example, using non-GPL-compatible Software to optimize any Google Sync add-on
 intermediate representations would not qualify as an Eligible Compilation Process.
 
 1. Grant of Additional Permission.
@@ -71,7 +76,7 @@ Any file within the installable zip that is part of the GPLv3 licensed scripts,
 is in itself still licensed as GPLv3 and retains its copyleft permissions.
 It is to be treated as an "aggregate" as specified in the GPLv3.
 
-3. No Weakening of Google Sync Add-on Copyleft.
------------------------------------------------
+3. No Weakening of Google Sync add-on Copyleft.
+--------------------------------------------------------
 The availability of this Exception does not imply any general presumption that third-party software
-is unaffected by the copyleft requirements of the license of Google Sync Add-on.
+is unaffected by the copyleft requirements of the license of Google Sync add-on.
