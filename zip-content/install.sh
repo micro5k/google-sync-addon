@@ -107,7 +107,7 @@ else
   ui_error 'Verification failed'
 fi
 
-# Clean some Google Apps, microG and previous installations
+# Clean previous installations
 # shellcheck source=SCRIPTDIR/uninstall.sh
 . "${TMP_PATH}/uninstall.sh"
 
