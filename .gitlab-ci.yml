@@ -1,37 +1,63 @@
 ---
-# SPDX-FileCopyrightText: Copyright (C) 2021 ale5000
-# SPDX-License-Identifer: GPL-3.0-or-later
+# SPDX-FileCopyrightText: (c) 2016-2019, 2021 ale5000
+# SPDX-License-Identifier: GPL-3.0-or-later
 # SPDX-FileType: SOURCE
 
-image: "openjdk:8-jdk"
+image: "openjdk:17-jdk-alpine"
 
 cache:
-  key: "${CI_COMMIT_REF_SLUG}"
+  key:
+    files:
+      - gradle/wrapper/gradle-wrapper.properties
   paths:
-    - "cache/"
-    - ".gradle/caches/"
-    - ".gradle/wrapper/"
-    - ".apt-cache/"
+    - cache/
+    - .gradle/caches/
+    - .gradle/notifications/
+    - .gradle/wrapper/
 
 variables:
   GIT_DEPTH: "1"
+  FAST_BUILD: "true"
+  # UPLOAD_BUILD_SCAN: "true"
 
 before_script:
-  - export APT_CACHE="$CI_PROJECT_DIR/.apt-cache"
-  - mkdir -p "$APT_CACHE/lists/partial"; mkdir -p "$APT_CACHE/archives/partial"
   - export GRADLE_USER_HOME="$PWD/.gradle"
-  - apt-get -o Dir::State::Lists="$APT_CACHE/lists" update
-  - >-
-    apt-get -o Dir::State::Lists="$APT_CACHE/lists" -o
-    Dir::Cache::Archives="$APT_CACHE/archives" install -y unzip zip
+  - apk add bash zip~=3.0
+
+include:
+  # - template: Security/Dependency-Scanning.gitlab-ci.yml
+  # - template: Security/License-Scanning.gitlab-ci.yml
+  - template: Security/SAST.gitlab-ci.yml
+  # - template: Security/Secret-Detection.gitlab-ci.yml
 
 stages:
   - build
+  - test
+  # - execute
+  # - package
 
 build:
   stage: build
   # script: "./gradlew buildOtaOSS"
   script: "./gradlew tasks"
+  # artifacts:
+  #   paths:
+  #     - output/*.zip*
+  #   expire_in: 1 week
+  # only:
+  #   - main
+
+# license_scanning:
+#   stage: test
+#   artifacts:
+#     paths:
+#       - gl-license-scanning-report.json
+
+sast:
+  stage: test
+  artifacts:
+    paths:
+      - gl-sast-report.json
 
 after_script:
   - rm -f  "$GRADLE_USER_HOME/caches/modules-2/modules-2.lock"
