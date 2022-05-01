@@ -4,6 +4,9 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # SPDX-FileType: SOURCE
 
+# shellcheck disable=SC3010
+# SC3010: In POSIX sh, [[ ]] is undefined
+
 ### INIT ENV ###
 export TZ=UTC
 export LANG=en_US
@@ -27,7 +30,8 @@ INSTALLATION_SETTINGS_FILE='google-sync.prop'
 
 ### FUNCTIONS ###
 
-. "$TMP_PATH/inc/common.sh"
+# shellcheck source=SCRIPTDIR/inc/common.sh
+. "${TMP_PATH}/inc/common.sh"
 
 
 ### CODE ###
@@ -103,8 +107,9 @@ else
   ui_error 'Verification failed'
 fi
 
-# Clean some Google Apps and previous installations
-. "$TMP_PATH/uninstall.sh"
+# Clean some Google Apps, microG and previous installations
+# shellcheck source=SCRIPTDIR/uninstall.sh
+. "${TMP_PATH}/uninstall.sh"
 
 # Configuring default Android permissions
 ui_debug 'Configuring default Android permissions...'
