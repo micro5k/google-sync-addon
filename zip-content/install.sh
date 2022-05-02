@@ -23,7 +23,6 @@ export INSTALLER=1
 TMP_PATH="$2"
 
 OLD_ANDROID=false
-SYS_ROOT_IMAGE=''
 SYS_PATH='/system'
 
 
@@ -35,19 +34,31 @@ SYS_PATH='/system'
 
 ### CODE ###
 
-if ! is_mounted '/system'; then
-  mount '/system'
-  if ! is_mounted '/system'; then ui_error '/system cannot be mounted'; fi
-fi
+SYS_INIT_STATUS=0
 
-SYS_ROOT_IMAGE=$(getprop 'build.system_root_image')
-if [[ -z "$SYS_ROOT_IMAGE" ]]; then
-  SYS_ROOT_IMAGE=false;
-elif [[ $SYS_ROOT_IMAGE == true && -e '/system/system' ]]; then
-  SYS_PATH='/system/system';
-fi
+if test -f "${ANDROID_ROOT:-/system_root/system}/build.prop"; then
+  SYS_PATH="${ANDROID_ROOT:-/system_root/system}"
+elif test -f '/system_root/system/build.prop'; then
+  SYS_PATH='/system_root/system'
+elif test -f '/system/system/build.prop'; then
+  SYS_PATH='/system/system'
+elif test -f '/system/build.prop'; then
+  SYS_PATH='/system'
+else
+  SYS_INIT_STATUS=1
 
-test -f "${SYS_PATH}/build.prop" || ui_error 'The ROM cannot be found'
+  if test -n "${ANDROID_ROOT:-}" && test "${ANDROID_ROOT:-}" != '/system_root' && test "${ANDROID_ROOT:-}" != '/system' && mount_partition "${ANDROID_ROOT:-}" && test -f "${ANDROID_ROOT:-}/build.prop"; then
+    SYS_PATH="${ANDROID_ROOT:-}"
+  elif test -e '/system_root' && mount_partition '/system_root' && test -f '/system_root/system/build.prop'; then
+    SYS_PATH='/system_root/system'
+  elif test -e '/system' && mount_partition '/system' && test -f '/system/system/build.prop'; then
+    SYS_PATH='/system/system'
+  elif test -f '/system/build.prop'; then
+    SYS_PATH='/system'
+  else
+    ui_error 'The ROM cannot be found'
+  fi
+fi
 
 cp -pf "${SYS_PATH}/build.prop" "${TMP_PATH}/build.prop"  # Cache the file for faster access
 package_extract_file 'module.prop' "${TMP_PATH}/module.prop"
@@ -58,7 +69,7 @@ install_version_code="$(simple_get_prop 'versionCode' "${TMP_PATH}/module.prop")
 INSTALLATION_SETTINGS_FILE="${install_id}.prop"
 
 PRIVAPP_PATH="${SYS_PATH}/app"
-if [[ -d "${SYS_PATH}/priv-app" ]]; then PRIVAPP_PATH="${SYS_PATH}/priv-app"; fi  # Detect the position of the privileged apps folder
+if test -e "${SYS_PATH}/priv-app"; then PRIVAPP_PATH="${SYS_PATH}/priv-app"; fi  # Detect the position of the privileged apps folder
 
 API=$(build_getprop 'build\.version\.sdk')
 if [[ $API -ge 24 ]]; then  # 23
@@ -77,12 +88,11 @@ fi
 ui_msg ''
 ui_msg '------------------'
 ui_msg 'Google Sync Add-on'
-ui_msg 'v1.0.3-beta'
+ui_msg "${install_version}"
 ui_msg '(by ale5000)'
 ui_msg '------------------'
 ui_msg ''
 ui_msg "API: ${API}"
-ui_msg "System root image: ${SYS_ROOT_IMAGE}"
 ui_msg "System path: ${SYS_PATH}"
 ui_msg "Privileged apps: ${PRIVAPP_PATH}"
 ui_msg ''
@@ -132,11 +142,20 @@ if ! is_mounted '/data'; then
 fi
 
 # Resetting Android runtime permissions
-if [[ -e '/data/system/users/0/runtime-permissions.xml' ]]; then
-  if ! grep -q 'com.google.android.syncadapters.contacts' /data/system/users/*/runtime-permissions.xml; then
-    # Purge the runtime permissions to prevent issues when the user flash this for the first time on a dirty install
-    ui_debug "Resetting Android runtime permissions..."
-    delete /data/system/users/*/runtime-permissions.xml
+if test "${API}" -ge 23; then
+  if test -e '/data/system/users/0/runtime-permissions.xml'; then
+    if ! grep -q 'com.google.android.syncadapters.contacts' /data/system/users/*/runtime-permissions.xml; then
+      # Purge the runtime permissions to prevent issues when the user flash this on a dirty install
+      ui_msg "Resetting legacy Android runtime permissions..."
+      delete /data/system/users/*/runtime-permissions.xml
+    fi
+  fi
+  if test -e '/data/misc_de/0/apexdata/com.android.permission/runtime-permissions.xml'; then
+    if ! grep -q 'com.google.android.syncadapters.contacts' /data/misc_de/*/apexdata/com.android.permission/runtime-permissions.xml; then
+      # Purge the runtime permissions to prevent issues when the user flash this on a dirty install
+      ui_msg "Resetting Android runtime permissions..."
+      delete /data/misc_de/*/apexdata/com.android.permission/runtime-permissions.xml
+    fi
   fi
 fi
 
@@ -209,7 +228,10 @@ if [[ -d "${SYS_PATH}/addon.d" ]]; then
   fi
 fi
 
-unmount '/system'
+if test "${SYS_INIT_STATUS}" = '1'; then
+  if test -e '/system_root'; then unmount '/system_root'; fi
+  if test -e '/system'; then unmount '/system'; fi
+fi
 
 touch "$TMP_PATH/installed"
 ui_msg 'Done.'
