@@ -25,7 +25,6 @@ TMP_PATH="$2"
 OLD_ANDROID=false
 SYS_ROOT_IMAGE=''
 SYS_PATH='/system'
-INSTALLATION_SETTINGS_FILE='google-sync.prop'
 
 
 ### FUNCTIONS ###
@@ -49,7 +48,14 @@ elif [[ $SYS_ROOT_IMAGE == true && -e '/system/system' ]]; then
 fi
 
 test -f "${SYS_PATH}/build.prop" || ui_error 'The ROM cannot be found'
-cp -pf "${SYS_PATH}/build.prop" "$TMP_PATH/build.prop"  # Cache the file for faster access
+
+cp -pf "${SYS_PATH}/build.prop" "${TMP_PATH}/build.prop"  # Cache the file for faster access
+package_extract_file 'module.prop' "${TMP_PATH}/module.prop"
+install_id="$(simple_get_prop 'id' "${TMP_PATH}/module.prop")" || ui_error 'Failed to parse id string'
+install_version="$(simple_get_prop 'version' "${TMP_PATH}/module.prop")" || ui_error 'Failed to parse version string'
+install_version_code="$(simple_get_prop 'versionCode' "${TMP_PATH}/module.prop")" || ui_error 'Failed to parse version code'
+
+INSTALLATION_SETTINGS_FILE="${install_id}.prop"
 
 PRIVAPP_PATH="${SYS_PATH}/app"
 if [[ -d "${SYS_PATH}/priv-app" ]]; then PRIVAPP_PATH="${SYS_PATH}/priv-app"; fi  # Detect the position of the privileged apps folder
@@ -169,15 +175,22 @@ elif [[ $API -ge 19 ]]; then
 fi
 
 USED_SETTINGS_PATH="$TMP_PATH/files/etc/zips"
-
 create_dir "${USED_SETTINGS_PATH}"
-echo 'type="Google Sync"' > "${USED_SETTINGS_PATH}/${INSTALLATION_SETTINGS_FILE}"
+
+{
+  echo 'install.type=recovery'
+  echo "install.version.code=${install_version_code}"
+  echo "install.version=${install_version}"
+} > "${USED_SETTINGS_PATH}/${INSTALLATION_SETTINGS_FILE}"
 set_perm 0 0 0640 "${USED_SETTINGS_PATH}/${INSTALLATION_SETTINGS_FILE}"
 
 create_dir "${SYS_PATH}/etc/zips"
 set_perm 0 0 0750 "${SYS_PATH}/etc/zips"
 
 copy_dir_content "${USED_SETTINGS_PATH}" "${SYS_PATH}/etc/zips"
+
+# Clean legacy file
+delete "${SYS_PATH}/etc/zips/google-sync.prop"
 
 # Install survival script
 if [[ -d "${SYS_PATH}/addon.d" ]]; then
