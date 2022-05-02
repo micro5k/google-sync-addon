@@ -1,11 +1,14 @@
-<!---
-  SPDX-FileCopyrightText: (c) 2016-2019, 2021 ale5000
-  SPDX-License-Identifier: GPL-3.0-or-later
-  SPDX-FileType: DOCUMENTATION
--->
+..
+   SPDX-FileCopyrightText: (c) 2016-2019, 2021 ale5000
+   SPDX-License-Identifier: GPL-3.0-or-later
+   SPDX-FileType: DOCUMENTATION
 
+========
 CONTENTS
 ========
+.. |star| replace:: ⭐️
+.. |fire| replace:: 🔥
+.. |boom| replace:: 💥
 
 Android 7+
 ----------
@@ -20,6 +23,4 @@ Android 4.4 - 4.4.4
 
 Components used only during setup (not installed)
 -------------------------------------------------
-- BusyBox 1.29.1-YDS-201807291348 (compiled by [YashdSaraf][1]) - Available [here](https://forum.xda-developers.com/showthread.php?t=3348543).
-
-[1]: https://forum.xda-developers.com/member.php?u=5423715  "YashdSaraf"
+- BusyBox 1.29.1-YDS-201807291348 (compiled by `@YashdSaraf <https://github.com/yashdsaraf>`_) - Available `here <https://forum.xda-developers.com/showthread.php?t=3348543>`_.
