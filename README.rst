@@ -24,8 +24,8 @@ This project is available on GitHub_, on GitLab_ as well as on XDA_.
    :target: https://liberapay.com/microg-by-ale5000/donate
 
 
-Releases
---------
+Release
+-------
 .. image:: https://img.shields.io/github/v/release/micro5k/google-sync-addon.svg?include_prereleases&cacheSeconds=3600
    :alt: GitHub (pre-)release
    :target: https://github.com/micro5k/google-sync-addon/releases/latest
