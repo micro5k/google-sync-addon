@@ -11,7 +11,8 @@ Google Sync add-on
 
 Description
 -----------
-Google Sync add-on simplify the installation of Google sync adapters (all the included files are the original versions).
+Google Sync add-on is a flashable zip made to simplify the installation of Google sync adapters.
+All the included files are the original versions.
 
 This project is available on GitHub_, on GitLab_ as well as on XDA_.
 
@@ -33,7 +34,7 @@ Release
 
 Copyright
 ---------
-Copyright © 2016-2019, 2021-2022 ale5000
+© 2016-2019, 2021-2022 ale5000
 
 
 Code analysis
