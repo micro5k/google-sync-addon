@@ -111,7 +111,7 @@ set_std_perm_recursive "$TMP_PATH/files"
 # Verifying
 ui_msg_sameline_start 'Verifying... '
 if #verify_sha1 "$TMP_PATH/files/priv-app/GoogleBackupTransport.apk" '2bdf65e98dbd115473cd72db8b6a13d585a65d8d' &&  # Disabled for now
-   verify_sha1 "$TMP_PATH/files/app/GoogleContactsSyncAdapter.apk" 'd6913b4a2fa5377b2b2f9e43056599b5e987df83' &&
+   verify_sha1 "$TMP_PATH/files/priv-app/GoogleContactsSyncAdapter.apk" 'd6913b4a2fa5377b2b2f9e43056599b5e987df83' &&
    verify_sha1 "$TMP_PATH/files/app/GoogleCalendarSyncAdapter.apk" 'aa482580c87a43c83882c05a4757754917d47f32' &&
    verify_sha1 "$TMP_PATH/files/priv-app-4.4/GoogleBackupTransport.apk" '6f186d368014022b0038ad2f5d8aa46bb94b5c14' &&
    verify_sha1 "$TMP_PATH/files/app-4.4/GoogleContactsSyncAdapter.apk" '68597be59f16d2e26a79def6fa20bc85d1d2c3b3' &&
@@ -183,8 +183,13 @@ fi
 
 # Installing
 ui_msg 'Installing...'
+if test "${API}" -lt 26; then
+  delete "${TMP_PATH}/files/etc/permissions/privapp-permissions-com.google.android.syncadapters.contacts.xml"
+  delete_dir_if_empty "${TMP_PATH}/files/etc/permissions"
+fi
 if [[ $API -ge 23 ]]; then
-  #copy_dir_content "$TMP_PATH/files/priv-app" "${PRIVAPP_PATH}"  # Disabled for now
+  if test -e "${TMP_PATH}/files/etc/permissions"; then copy_dir_content "${TMP_PATH}/files/etc/permissions" "${SYS_PATH}/etc/permissions"; fi
+  copy_dir_content "$TMP_PATH/files/priv-app" "${PRIVAPP_PATH}"
   copy_dir_content "$TMP_PATH/files/app" "${SYS_PATH}/app"
 elif [[ $API -ge 21 ]]; then
   ui_error 'ERROR: Unsupported Android version'
