@@ -1,6 +1,6 @@
 #!/sbin/sh
 
-# SPDX-FileCopyrightText: (c) 2016-2019, 2021 ale5000
+# SPDX-FileCopyrightText: (c) 2016 ale5000
 # SPDX-License-Identifier: GPL-3.0-or-later
 # SPDX-FileType: SOURCE
 
@@ -23,7 +23,7 @@ export INSTALLER=1
 TMP_PATH="$2"
 
 OLD_ANDROID=false
-SYS_PATH='/system'
+SYS_PATH=''
 
 
 ### FUNCTIONS ###
@@ -85,7 +85,6 @@ else
 fi
 
 # Info
-ui_msg ''
 ui_msg '------------------'
 ui_msg 'Google Sync Add-on'
 ui_msg "${install_version}"
@@ -123,20 +122,10 @@ else
   ui_error 'Verification failed'
 fi
 
-# Clean previous installations
-# shellcheck source=SCRIPTDIR/uninstall.sh
-. "${TMP_PATH}/uninstall.sh"
-
-# Configuring default Android permissions
-ui_debug 'Configuring default Android permissions...'
-if [[ ! -e "${SYS_PATH}/etc/default-permissions" ]]; then
-  ui_msg 'Creating the default permissions folder...'
-  create_dir "${SYS_PATH}/etc/default-permissions"
-fi
-copy_dir_content "${TMP_PATH}/files/etc/default-permissions" "${SYS_PATH}/etc/default-permissions"
-
 # MOUNT /data PARTITION
-if ! is_mounted '/data'; then
+DATA_INIT_STATUS=0
+if test "${TEST_INSTALL:-false}" = 'false' && ! is_mounted '/data'; then
+  DATA_INIT_STATUS=1
   mount '/data'
   if ! is_mounted '/data'; then ui_error '/data cannot be mounted'; fi
 fi
@@ -159,8 +148,20 @@ if test "${API}" -ge 23; then
   fi
 fi
 
+# Clean previous installations
+# shellcheck source=SCRIPTDIR/uninstall.sh
+. "${TMP_PATH}/uninstall.sh"
+
+# Configuring default Android permissions
+ui_debug 'Configuring default Android permissions...'
+if [[ ! -e "${SYS_PATH}/etc/default-permissions" ]]; then
+  ui_msg 'Creating the default permissions folder...'
+  create_dir "${SYS_PATH}/etc/default-permissions"
+fi
+copy_dir_content "${TMP_PATH}/files/etc/default-permissions" "${SYS_PATH}/etc/default-permissions"
+
 # UNMOUNT /data PARTITION
-unmount '/data'
+if test "${DATA_INIT_STATUS}" = '1'; then unmount '/data'; fi
 
 # Preparing
 ui_msg 'Preparing...'
