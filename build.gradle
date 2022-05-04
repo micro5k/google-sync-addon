@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: (c) 2016-2019, 2021 ale5000
+// SPDX-FileCopyrightText: (c) 2016 ale5000
 // SPDX-License-Identifier: GPL-3.0-or-later
 // SPDX-FileType: SOURCE
 
@@ -37,6 +37,10 @@ tasks.register('cleanCache', Delete) {
     delete "${projectDir}/cache"
 }
 
+tasks.register('cleanRecoveryOutput', Delete) {
+    delete "${projectDir}/recovery-simulator/output"
+}
+
 tasks.named('clean').configure {
     finalizedBy tasks.named('cleanCache')
 }
@@ -66,7 +70,7 @@ tasks.register('buildOta', Exec) {
     doFirst {
         println 'Building the flashable OTA zip (open-source components only) with Gradle...'
         executable "${projectDir}/build" + getScriptExt()
-        environment OPENSOURCE_ONLY: '1'
+        environment OPENSOURCE_ONLY: 'true'
     }
 }*/
 tasks.named('build').configure {

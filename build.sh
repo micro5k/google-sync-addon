@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
+
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileType: SOURCE
+
 # shellcheck disable=SC3043
+
 last_command="${_}"  # IMPORTANT: This line must be at the start of the script before any other command otherwise it will not work
 
 cat <<'LICENSE'
   SPDX-FileCopyrightText: (c) 2016-2019, 2021-2022 ale5000
-  SPDX-License-Identifier: GPL-3.0-or-later
-  SPDX-FileType: SOURCE
 
   This program is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -51,6 +54,8 @@ if test -z "${CI}"; then printf '\033]0;%s\007' 'Building the flashable OTA zip.
 if test "${A5K_FUNCTIONS_INCLUDED:-false}" = 'false'; then . "${SCRIPT_DIR}/scripts/common.sh"; fi
 # shellcheck source=SCRIPTDIR/conf-1.sh
 . "${SCRIPT_DIR}/conf-1.sh"
+# shellcheck source=SCRIPTDIR/conf-2.sh
+if test "${OPENSOURCE_ONLY:-false}" = 'false'; then . "${SCRIPT_DIR}/conf-2.sh"; fi
 
 # Check dependencies
 hash 'zip' 2>&- || ui_error 'Zip is missing'
@@ -68,11 +73,12 @@ if test -z "${TEMP_DIR}"; then ui_error 'Failed to create our temp dir'; fi
 rm -rf "${TEMP_DIR:?}"/* || ui_error 'Failed to empty our temp dir'
 
 # Set filename and version
-VER="$(simple_get_prop 'version' "${SCRIPT_DIR:?}/zip-content/module.prop")" || ui_error 'Failed to parse the version string'
-AUTHOR="$(simple_get_prop 'author' "${SCRIPT_DIR:?}/zip-content/module.prop")" || ui_error 'Failed to parse the author string'
-FILENAME="${NAME:?}-${VER:?}-by-${AUTHOR:?}"
+MODULE_ID="$(simple_get_prop 'id' "${SCRIPT_DIR:?}/zip-content/module.prop")" || ui_error 'Failed to parse the module id string'
+MODULE_VER="$(simple_get_prop 'version' "${SCRIPT_DIR:?}/zip-content/module.prop")" || ui_error 'Failed to parse the module version string'
+MODULE_AUTHOR="$(simple_get_prop 'author' "${SCRIPT_DIR:?}/zip-content/module.prop")" || ui_error 'Failed to parse the module author string'
+FILENAME="${MODULE_ID:?}-${MODULE_VER:?}-by-${MODULE_AUTHOR:?}"
 # shellcheck disable=SC2154
-if test -n "${OPENSOURCE_ONLY}"; then FILENAME="${FILENAME:?}-OSS"; fi
+if test "${OPENSOURCE_ONLY:-false}" != 'false'; then FILENAME="${FILENAME:?}-OSS"; fi
 
 # shellcheck source=SCRIPTDIR/addition.sh
 . "${SCRIPT_DIR}/addition.sh"
@@ -85,7 +91,7 @@ oss_files_to_download | while IFS='|' read -r LOCAL_FILENAME LOCAL_PATH DL_HASH 
 done
 STATUS="$?"; if test "${STATUS}" -ne 0; then return "${STATUS}" 2>&- || exit "${STATUS}"; fi
 
-if test -z "${OPENSOURCE_ONLY}"; then
+if test "${OPENSOURCE_ONLY:-false}" = 'false'; then
   files_to_download | while IFS='|' read -r LOCAL_FILENAME LOCAL_PATH DL_HASH DL_URL DL_MIRROR _; do
     dl_file "${LOCAL_PATH}" "${LOCAL_FILENAME}" "${DL_HASH}" "${DL_URL}" "${DL_MIRROR}"
   done
@@ -108,7 +114,7 @@ rm -rf "${TEMP_DIR}/zip-content/misc/aapt" || ui_error 'Failed to delete unused 
 rm -f "${TEMP_DIR}/zip-content/misc/busybox/busybox-"mips* || ui_error 'Failed to delete unused files in the temp dir'
 rm -f "${TEMP_DIR}/zip-content/LICENSES/Info-ZIP.txt" || ui_error 'Failed to delete unused files in the temp dir'
 
-if test -n "${OPENSOURCE_ONLY}"; then
+if test "${OPENSOURCE_ONLY:-false}" != 'false'; then
   printf '%s\n%s\n\n%s\n' '# SPDX-FileCopyrightText: none' '# SPDX-License-Identifier: CC0-1.0' 'Include only Open source components.' > "${TEMP_DIR}/zip-content/OPENSOURCE-ONLY" || ui_error 'Failed to create the OPENSOURCE-ONLY file'
 else
   files_to_download | while IFS='|' read -r LOCAL_FILENAME LOCAL_PATH _; do
@@ -120,6 +126,9 @@ else
   mkdir -p "${TEMP_DIR}/zip-content/misc/keycheck"
   cp -f "${SCRIPT_DIR}/cache/misc/keycheck/keycheck-arm" "${TEMP_DIR}/zip-content/misc/keycheck/" || ui_error "Failed to copy to the temp dir the file => 'misc/keycheck/keycheck-arm'"
 fi
+
+# Remove the cache folder only if it is empty
+rmdir --ignore-fail-on-non-empty "${SCRIPT_DIR}/cache" || ui_error 'Failed to remove the empty cache folder'
 
 # Prepare the data before compression (also uniform attributes - useful for reproducible builds)
 BASE_TMP_SCRIPT_DIR="${TEMP_DIR}/zip-content/META-INF/com/google/android"

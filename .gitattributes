@@ -11,8 +11,9 @@
 *.yml           text eol=lf
 *.xml           text eol=lf
 *.json          text eol=lf
-*.simplecov     text eol=lf
 *.dis           text eol=lf
+.simplecov      text eol=lf
+.shellcheckrc   text eol=lf
 
 .reuse/dep5     text eol=lf
 *.license       text eol=lf
@@ -31,10 +32,10 @@
 *.py            text eol=lf
 
 # Our custom files
-build                               text eol=lf
-recovery-simulator/overrides/mount  text eol=lf
-recovery-simulator/overrides/umount text eol=lf
-recovery-simulator/overrides/chown  text eol=lf
+build                              text eol=lf
+recovery-simulator/override/mount  text eol=lf
+recovery-simulator/override/umount text eol=lf
+recovery-simulator/override/chown  text eol=lf
 
 # Text
 *.rst           text eol=lf

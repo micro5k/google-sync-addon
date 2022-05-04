@@ -1,9 +1,13 @@
 ---
-# SPDX-FileCopyrightText: (c) 2016-2019, 2021 ale5000
+# SPDX-FileCopyrightText: (c) 2016 ale5000
 # SPDX-License-Identifier: GPL-3.0-or-later
 # SPDX-FileType: SOURCE
-
 image: "openjdk:17-jdk-alpine"
+
+variables:
+  GIT_DEPTH: "1"
+  FAST_BUILD: "true"
+  # UPLOAD_BUILD_SCAN: "true"
 
 cache:
   key:
@@ -15,14 +19,9 @@ cache:
     - .gradle/notifications/
     - .gradle/wrapper/
 
-variables:
-  GIT_DEPTH: "1"
-  FAST_BUILD: "true"
-  # UPLOAD_BUILD_SCAN: "true"
-
 before_script:
   - export GRADLE_USER_HOME="$PWD/.gradle"
-  - apk add bash zip~=3.0
+  - apk add bash moreutils zip~=3.0
 
 include:
   # - template: Security/Dependency-Scanning.gitlab-ci.yml
@@ -38,14 +37,14 @@ stages:
 
 build:
   stage: build
-  # script: "./gradlew buildOtaOSS"
+  # script: "./gradlew buildOtaOSS | TZ=UTC ts '[%H:%M:%S]'"
   script: "./gradlew tasks"
   # artifacts:
   #   paths:
   #     - output/*.zip*
-  #   expire_in: 1 week
-  # only:
-  #   - main
+  #   expire_in: 2 days
+  only:
+    - main
 
 # license_scanning:
 #   stage: test
@@ -58,6 +57,7 @@ sast:
   artifacts:
     paths:
       - gl-sast-report.json
+    expire_in: 2 days
 
 after_script:
   - rm -f  "$GRADLE_USER_HOME/caches/modules-2/modules-2.lock"
