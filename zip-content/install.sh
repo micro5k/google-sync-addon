@@ -72,13 +72,13 @@ PRIVAPP_PATH="${SYS_PATH}/app"
 if test -e "${SYS_PATH}/priv-app"; then PRIVAPP_PATH="${SYS_PATH}/priv-app"; fi  # Detect the position of the privileged apps folder
 
 API=$(build_getprop 'build\.version\.sdk')
-if [[ $API -ge 24 ]]; then  # 23
+if [[ "${API}" -ge 24 ]]; then  # 23
   :  ### New Android versions
-elif [[ $API -ge 21 ]]; then
+elif [[ "${API}" -ge 21 ]]; then
   ui_error 'ERROR: Unsupported Android version'
-elif [[ $API -ge 19 ]]; then
+elif [[ "${API}" -ge 19 ]]; then
   OLD_ANDROID=true
-elif [[ $API -ge 1 ]]; then
+elif [[ "${API}" -ge 1 ]]; then
   ui_error 'Your Android version is too old'
 else
   ui_error 'Invalid API level'
@@ -99,23 +99,23 @@ ui_msg ''
 
 # Extracting
 ui_msg 'Extracting...'
-custom_package_extract_dir 'files' "$TMP_PATH"
-#custom_package_extract_dir 'addon.d' "$TMP_PATH"
+custom_package_extract_dir 'files' "${TMP_PATH}"
+#custom_package_extract_dir 'addon.d' "${TMP_PATH}"
 
 # Setting up permissions
 ui_debug 'Setting up permissions...'
-set_std_perm_recursive "$TMP_PATH/files"
-#set_std_perm_recursive "$TMP_PATH/addon.d"
-#set_perm 0 0 0755 "$TMP_PATH/addon.d/00-1-google-sync.sh"
+set_std_perm_recursive "${TMP_PATH}/files"
+#set_std_perm_recursive "${TMP_PATH}/addon.d"
+#set_perm 0 0 0755 "${TMP_PATH}/addon.d/00-1-google-sync.sh"
 
 # Verifying
 ui_msg_sameline_start 'Verifying... '
-if #verify_sha1 "$TMP_PATH/files/priv-app/GoogleBackupTransport.apk" '2bdf65e98dbd115473cd72db8b6a13d585a65d8d' &&  # Disabled for now
-   verify_sha1 "$TMP_PATH/files/priv-app/GoogleContactsSyncAdapter.apk" 'd6913b4a2fa5377b2b2f9e43056599b5e987df83' &&
-   verify_sha1 "$TMP_PATH/files/app/GoogleCalendarSyncAdapter.apk" 'aa482580c87a43c83882c05a4757754917d47f32' &&
-   verify_sha1 "$TMP_PATH/files/priv-app-4.4/GoogleBackupTransport.apk" '6f186d368014022b0038ad2f5d8aa46bb94b5c14' &&
-   verify_sha1 "$TMP_PATH/files/app-4.4/GoogleContactsSyncAdapter.apk" '68597be59f16d2e26a79def6fa20bc85d1d2c3b3' &&
-   verify_sha1 "$TMP_PATH/files/app-4.4/GoogleCalendarSyncAdapter.apk" 'cf9fa487dfe0ead8576d6af897687e7fa2ae00fa'
+if #verify_sha1 "${TMP_PATH}/files/priv-app/GoogleBackupTransport.apk" '2bdf65e98dbd115473cd72db8b6a13d585a65d8d' &&  # Disabled for now
+   verify_sha1 "${TMP_PATH}/files/priv-app/GoogleContactsSyncAdapter.apk" 'd6913b4a2fa5377b2b2f9e43056599b5e987df83' &&
+   verify_sha1 "${TMP_PATH}/files/app/GoogleCalendarSyncAdapter.apk" 'aa482580c87a43c83882c05a4757754917d47f32' &&
+   verify_sha1 "${TMP_PATH}/files/priv-app-4.4/GoogleBackupTransport.apk" '6f186d368014022b0038ad2f5d8aa46bb94b5c14' &&
+   verify_sha1 "${TMP_PATH}/files/app-4.4/GoogleContactsSyncAdapter.apk" '68597be59f16d2e26a79def6fa20bc85d1d2c3b3' &&
+   verify_sha1 "${TMP_PATH}/files/app-4.4/GoogleCalendarSyncAdapter.apk" 'cf9fa487dfe0ead8576d6af897687e7fa2ae00fa'
 then
   ui_msg_sameline_end 'OK'
 else
@@ -133,7 +133,7 @@ if [[ ! -e "${SYS_PATH}/etc/default-permissions" ]]; then
   ui_msg 'Creating the default permissions folder...'
   create_dir "${SYS_PATH}/etc/default-permissions"
 fi
-copy_dir_content "$TMP_PATH/files/etc/default-permissions" "${SYS_PATH}/etc/default-permissions"
+copy_dir_content "${TMP_PATH}/files/etc/default-permissions" "${SYS_PATH}/etc/default-permissions"
 
 # MOUNT /data PARTITION
 if ! is_mounted '/data'; then
@@ -165,19 +165,19 @@ unmount '/data'
 # Preparing
 ui_msg 'Preparing...'
 
-if [[ $OLD_ANDROID != true ]]; then
+if test "${OLD_ANDROID}" != true; then
   # Move apps into subdirs
-  #for entry in "$TMP_PATH/files/priv-app"/*; do
-    #path_without_ext=$(remove_ext "$entry")
+  for entry in "${TMP_PATH}/files/priv-app"/*; do
+    path_without_ext=$(remove_ext "${entry}")
 
-    #create_dir "$path_without_ext"
-    #mv -f "$entry" "$path_without_ext"/
-  #done
-  for entry in "$TMP_PATH/files/app"/*; do
-    path_without_ext=$(remove_ext "$entry")
+    create_dir "${path_without_ext}"
+    mv -f "${entry}" "${path_without_ext}"/
+  done
+  for entry in "${TMP_PATH}/files/app"/*; do
+    path_without_ext=$(remove_ext "${entry}")
 
-    create_dir "$path_without_ext"
-    mv -f "$entry" "$path_without_ext"/
+    create_dir "${path_without_ext}"
+    mv -f "${entry}" "${path_without_ext}"/
   done
 fi
 
@@ -187,18 +187,18 @@ if test "${API}" -lt 26; then
   delete "${TMP_PATH}/files/etc/permissions/privapp-permissions-com.google.android.syncadapters.contacts.xml"
   delete_dir_if_empty "${TMP_PATH}/files/etc/permissions"
 fi
-if [[ $API -ge 23 ]]; then
+if [[ "${API}" -ge 23 ]]; then
   if test -e "${TMP_PATH}/files/etc/permissions"; then copy_dir_content "${TMP_PATH}/files/etc/permissions" "${SYS_PATH}/etc/permissions"; fi
-  copy_dir_content "$TMP_PATH/files/priv-app" "${PRIVAPP_PATH}"
-  copy_dir_content "$TMP_PATH/files/app" "${SYS_PATH}/app"
-elif [[ $API -ge 21 ]]; then
+  copy_dir_content "${TMP_PATH}/files/priv-app" "${PRIVAPP_PATH}"
+  copy_dir_content "${TMP_PATH}/files/app" "${SYS_PATH}/app"
+elif [[ "${API}" -ge 21 ]]; then
   ui_error 'ERROR: Unsupported Android version'
-elif [[ $API -ge 19 ]]; then
-  copy_dir_content "$TMP_PATH/files/priv-app-4.4" "${PRIVAPP_PATH}"
-  copy_dir_content "$TMP_PATH/files/app-4.4" "${SYS_PATH}/app"
+elif [[ "${API}" -ge 19 ]]; then
+  copy_dir_content "${TMP_PATH}/files/priv-app-4.4" "${PRIVAPP_PATH}"
+  copy_dir_content "${TMP_PATH}/files/app-4.4" "${SYS_PATH}/app"
 fi
 
-USED_SETTINGS_PATH="$TMP_PATH/files/etc/zips"
+USED_SETTINGS_PATH="${TMP_PATH}/files/etc/zips"
 create_dir "${USED_SETTINGS_PATH}"
 
 {
@@ -221,15 +221,15 @@ copy_dir_content "${USED_SETTINGS_PATH}" "${SYS_PATH}/etc/zips"
 delete "${SYS_PATH}/etc/zips/google-sync.prop"
 
 # Install survival script
-if [[ -d "${SYS_PATH}/addon.d" ]]; then
-  if [[ $OLD_ANDROID == true ]]; then
+if test -e "${SYS_PATH}/addon.d"; then
+  if test "${OLD_ANDROID}" = true; then
     :  ### Not ready yet
   else
     #ui_msg 'Installing survival script...'
     : ### Not ready yet
-    #write_file_list "$TMP_PATH/files" "$TMP_PATH/files/" "$TMP_PATH/backup-filelist.lst"
-    #replace_line_in_file "$TMP_PATH/addon.d/00-1-google-sync.sh" '%PLACEHOLDER-1%' "$TMP_PATH/backup-filelist.lst"
-    #copy_file "$TMP_PATH/addon.d/00-1-google-sync.sh" "$SYS_PATH/addon.d"
+    #write_file_list "${TMP_PATH}/files" "${TMP_PATH}/files/" "${TMP_PATH}/backup-filelist.lst"
+    #replace_line_in_file "${TMP_PATH}/addon.d/00-1-google-sync.sh" '%PLACEHOLDER-1%' "${TMP_PATH}/backup-filelist.lst"
+    #copy_file "${TMP_PATH}/addon.d/00-1-google-sync.sh" "$SYS_PATH/addon.d"
   fi
 fi
 
@@ -238,5 +238,5 @@ if test "${SYS_INIT_STATUS}" = '1'; then
   if test -e '/system'; then unmount '/system'; fi
 fi
 
-touch "$TMP_PATH/installed"
+touch "${TMP_PATH}/installed"
 ui_msg 'Done.'
