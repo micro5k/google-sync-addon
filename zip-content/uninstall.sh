@@ -3,7 +3,7 @@
 
 # SC3010: In POSIX sh, [[ ]] is undefined
 
-# SPDX-FileCopyrightText: (c) 2016-2019, 2021 ale5000
+# SPDX-FileCopyrightText: (c) 2016 ale5000
 # SPDX-License-Identifier: GPL-3.0-or-later
 # SPDX-FileType: SOURCE
 
@@ -29,7 +29,6 @@ GoogleContactsSyncAdapter|com.google.android.syncadapters.contacts
 GoogleCalendarSyncAdapter|com.google.android.syncadapters.calendar
 CalendarGooglePrebuilt|
 GoogleBackupTransport|com.google.android.backuptransport
-
 EOF
 }
 
@@ -49,7 +48,7 @@ if [[ -z "${INSTALLER}" ]]; then
   {
     if test -e "$1"; then
       ui_debug "Deleting '$1'..."
-      rm -rf "$1" || ui_debug "Failed to delete files/folders"
+      rm -rf -- "$1" || ui_debug "Failed to delete files/folders"
     fi
   }
 
@@ -58,7 +57,7 @@ if [[ -z "${INSTALLER}" ]]; then
     for filename in "$@"; do
       if test -e "${filename}"; then
         ui_debug "Deleting '${filename}'...."
-        rm -rf "${filename:?}" || ui_debug "Failed to delete files/folders"
+        rm -rf -- "${filename:?}" || ui_debug "Failed to delete files/folders"
       fi
     done
   }
@@ -121,9 +120,9 @@ done
 
 list_app_filenames | while read -r FILENAME; do
   if [[ -z "${FILENAME}" ]]; then continue; fi
+  delete_recursive_wildcard /data/dalvik-cache/system@app@"${FILENAME}"[@\.]*@classes*
   delete_recursive_wildcard /data/dalvik-cache/*/system@priv-app@"${FILENAME}"[@\.]*@classes*
   delete_recursive_wildcard /data/dalvik-cache/*/system@app@"${FILENAME}"[@\.]*@classes*
-  delete_recursive_wildcard /data/dalvik-cache/system@app@"${FILENAME}"[@\.]*@classes*
 done
 
 list_app_data_to_remove | while read -r FILENAME; do
@@ -138,5 +137,8 @@ delete_recursive "${SYS_PATH}"/etc/default-permissions/google-sync-permissions.x
 delete_recursive "${SYS_PATH}"/etc/default-permissions/contacts-calendar-sync.xml
 
 if [[ -z "${INSTALLER}" ]]; then
+  install_id='google-sync-addon'
+  delete_recursive "${SYS_PATH}/etc/zips/${install_id}.prop"
+  rmdir --ignore-fail-on-non-empty -- "${SYS_PATH}/etc/zips"
   ui_debug 'Done.'
 fi

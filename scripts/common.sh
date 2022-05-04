@@ -3,7 +3,7 @@
 
 # SC3043: In POSIX sh, local is undefined
 
-# SPDX-FileCopyrightText: (c) 2016-2019, 2021 ale5000
+# SPDX-FileCopyrightText: (c) 2016 ale5000
 # SPDX-License-Identifier: GPL-3.0-or-later
 # SPDX-FileType: SOURCE
 
@@ -58,7 +58,7 @@ verify_sha1()
 
 corrupted_file()
 {
-  rm -f "$1" || echo 'Failed to remove the corrupted file.'
+  rm -f -- "$1" || echo 'Failed to remove the corrupted file.'
   ui_error "The file '$1' is corrupted."
 }
 
@@ -78,11 +78,12 @@ dl_file()
 # Detect OS and set OS specific info
 SEP='/'
 PATHSEP=':'
+_uname_o_saved="$(uname -o)" || ui_error 'Failed to get uname -o'
 if compare_start_uname 'Linux'; then
   PLATFORM='linux'
 elif compare_start_uname 'Windows_NT' || compare_start_uname 'MINGW32_NT-' || compare_start_uname 'MINGW64_NT-'; then
   PLATFORM='win'
-  if [[ $(uname -o) == 'Msys' ]]; then
+  if test "${_uname_o_saved}" = 'Msys'; then
     :            # MSYS under Windows
   else
     PATHSEP=';'  # BusyBox under Windows

@@ -2,7 +2,7 @@
 # shellcheck disable=SC3043
 # SC3043: In POSIX sh, local is undefined
 
-# SPDX-FileCopyrightText: (c) 2016-2019, 2021 ale5000
+# SPDX-FileCopyrightText: (c) 2016 ale5000
 # SPDX-License-Identifier: GPL-3.0-or-later
 # SPDX-FileType: SOURCE
 
@@ -313,7 +313,7 @@ if [ "${LIVE_SETUP}" -eq 1 ]; then
   fi
 fi
 
-ui_msg ''
+ui_debug ''
 ui_debug 'Starting installation script...'
 "${OUR_BB}" ash "${TMP_PATH}/install.sh" Preloader "${TMP_PATH}"; STATUS="$?"
 
