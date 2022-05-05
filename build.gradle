@@ -64,7 +64,7 @@ tasks.register('buildOta', Exec) {
     }
 }
 
-/*tasks.register('buildOtaOSS', Exec) {
+tasks.register('buildOtaOSS', Exec) {
     group '- OTA build'
     description 'Build the flashable OTA zip (open-source components only).'
 
@@ -73,9 +73,9 @@ tasks.register('buildOta', Exec) {
         executable "${projectDir}/build" + getScriptExt()
         environment OPENSOURCE_ONLY: 'true'
     }
-}*/
+}
 tasks.named('build').configure {
-    finalizedBy buildOta
+    finalizedBy buildOtaOSS
 }
 
 tasks.register('installTest', Exec) {
