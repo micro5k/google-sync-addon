@@ -1,0 +1,80 @@
+---
+# SPDX-FileCopyrightText: (c) 2021 ale5000
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileType: SOURCE
+name: "Base"
+on:
+  - push
+  - pull_request
+  - workflow_dispatch
+env:
+  FAST_BUILD: true
+  # UPLOAD_BUILD_SCAN: true
+jobs:
+  base-job:
+    name: "Base job"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: "Check out code"
+        uses: actions/checkout@v3
+      - name: "Set up Java"
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+      - name: "Validate codecov.yml"
+        shell: bash
+        run: |
+          codecovyml_path='${{ github.workspace }}/.codecov.yml'
+          if test -f "${codecovyml_path}"; then
+            wget -qO- --post-file "${codecovyml_path}" https://codecov.io/validate \
+              || (echo 'NOT Valid!'; exit 1)
+          fi
+          codecovyml_path='${{ github.workspace }}/codecov.yml'
+          if test -f "${codecovyml_path}"; then
+            wget -qO- --post-file "${codecovyml_path}" https://codecov.io/validate \
+              || (echo 'NOT Valid!'; exit 1)
+          fi
+      - name: "Set up Ruby"
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.0"
+      - name: "Install Bashcov and Codecov"
+        run: |
+          # Installing Bashcov and Codecov...
+          gem install bashcov codecov
+      - name: "Execute code coverage"
+        run: |
+          # Executing code coverage...
+          sudo apt-get -qq -y install moreutils 1> /dev/null
+          export OPENSOURCE_ONLY='true'
+          bashcov './build.sh' # | TZ=UTC ts '[%H:%M:%S]'  # Timestamp disabled as it break GitHub notice
+          # Testing zip installation...
+          # bash './recovery-simulator/recovery.sh' ./output/*.zip
+          # printf '\n\n'
+          # echo '==============='
+          # echo 'RECOVERY OUTPUT'
+          # echo '==============='
+          # cat './recovery-simulator/output/recovery-output-parsed.log'
+      - name: "Upload reports to Codecov"
+        uses: codecov/codecov-action@v3
+        with:
+          files: "${{ github.workspace }}/coverage/codecov-result.json"
+
+  validator:
+    name: "Validate dep5"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: "Check out code"
+        uses: actions/checkout@v3
+      - name: "Validate dep5"
+        shell: bash
+        run: |
+          # Validating dep5
+          if ! test -e './.reuse/dep5'; then exit 0; fi
+          sudo apt-get -qq -y install cme 1> /dev/null
+          status='0'
+          cme check dpkg-copyright -file './.reuse/dep5' || status="${?}"
+          if test "${status}" -eq 0; then echo 'Result: pass'; else echo 'Result: fail'; exit "${status}"; fi
