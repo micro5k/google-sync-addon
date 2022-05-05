@@ -37,8 +37,7 @@ stages:
 
 build:
   stage: build
-  # script: "./gradlew buildOtaOSS | TZ=UTC ts '[%H:%M:%S]'"
-  script: "./gradlew tasks"
+  script: "./gradlew buildOtaOSS | TZ=UTC ts '[%H:%M:%S]'"
   # artifacts:
   #   paths:
   #     - output/*.zip*
