@@ -1,11 +1,16 @@
 #!/usr/bin/env bash
-
 # SPDX-License-Identifier: GPL-3.0-or-later
 # SPDX-FileType: SOURCE
 
-# shellcheck disable=SC3043
+# shellcheck disable=SC2310
+# SC2310: This function is invoked in an 'if' condition so set -e will be disabled
 
 last_command="${_}"  # IMPORTANT: This line must be at the start of the script before any other command otherwise it will not work
+
+# shellcheck disable=SC3040
+set -eo pipefail
+# shellcheck disable=SC3044
+shopt -s inherit_errexit 2> /dev/null || true
 
 cat <<'LICENSE'
   SPDX-FileCopyrightText: (c) 2016-2019, 2021-2022 ale5000
@@ -27,11 +32,13 @@ echo ''
 
 detect_script_dir()
 {
+  # shellcheck disable=SC3043
   local this_script
 
   # shellcheck disable=SC3028,SC2128
   if test "${#BASH_SOURCE}" -ge 1; then this_script="${BASH_SOURCE}"  # Expanding an array without an index gives the first element (it is intended)
   else
+    # shellcheck disable=SC3043
     local current_shell
     # shellcheck disable=SC2009
     current_shell="$(ps -o 'pid,comm' | grep -Fw "$$" | while IFS=' ' read -r _ current_shell; do echo "${current_shell}"; done || true)"
@@ -47,17 +54,17 @@ detect_script_dir()
 }
 detect_script_dir || return 1 2>&- || exit 1
 
-# shellcheck disable=SC2154
-if test -z "${CI}"; then printf '\033]0;%s\007' 'Building the flashable OTA zip...' && printf '\r                                             \r'; fi
-
 # shellcheck source=SCRIPTDIR/scripts/common.sh
 if test "${A5K_FUNCTIONS_INCLUDED:-false}" = 'false'; then . "${SCRIPT_DIR}/scripts/common.sh"; fi
+
+change_title 'Building the flashable OTA zip...'
+
 # shellcheck source=SCRIPTDIR/conf-1.sh
 . "${SCRIPT_DIR}/conf-1.sh"
 # shellcheck source=SCRIPTDIR/conf-2.sh
 if test "${OPENSOURCE_ONLY:-false}" = 'false'; then . "${SCRIPT_DIR}/conf-2.sh"; fi
 
-if ! is_oss_only_build_enabled && test "${OPENSOURCE_ONLY:-false}" != 'false'; then echo 'WARNING: The OSS only build is disabled'; return 0 2>&- || exit 0; fi
+if ! is_oss_only_build_enabled && test "${OPENSOURCE_ONLY:-false}" != 'false'; then echo 'WARNING: The OSS only build is disabled'; change_title 'OSS only build is disabled'; return 0 2>&- || exit 0; fi
 
 # Check dependencies
 hash 'zip' 2>&- || ui_error 'Zip is missing'
@@ -168,7 +175,7 @@ cp -f "${TEMP_DIR}/${FILENAME}.zip" "${OUT_DIR}/${FILENAME}.zip" || ui_error 'Fa
 cd "${OUT_DIR}" || ui_error 'Failed to change the folder'
 
 # Cleanup remnants
-rm -rf "${TEMP_DIR:?}" &
+rm -rf -- "${TEMP_DIR:?}" &
 #pid="${!}"
 
 # Create checksum files
@@ -193,7 +200,7 @@ cd "${INIT_DIR}" || ui_error 'Failed to change back the folder'
 
 echo ''
 echo 'Done.'
-if test -z "${CI}"; then printf '\033]0;Done\007' && printf '\r                    \r'; fi
+change_title 'Done'
 
 #wait "${pid}"
-exit "$?"
+set +e

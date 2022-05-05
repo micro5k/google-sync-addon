@@ -8,6 +8,10 @@ Google Sync add-on
 :Author: `ale5000 <https://github.com/ale5000-git>`_
 :License: `GPLv3.0 or later <LICENSE.rst>`_
 
+.. image:: https://codecov.io/gh/micro5k/google-sync-addon/branch/main/graph/badge.svg
+   :alt: Coverage
+   :target: https://codecov.io/gh/micro5k/google-sync-addon
+
 
 Description
 -----------
