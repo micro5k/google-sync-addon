@@ -137,8 +137,6 @@ delete_recursive "${SYS_PATH}"/etc/default-permissions/google-sync-permissions.x
 delete_recursive "${SYS_PATH}"/etc/default-permissions/contacts-calendar-sync.xml
 
 if [[ -z "${INSTALLER}" ]]; then
-  install_id='google-sync-addon'
-  delete_recursive "${SYS_PATH}/etc/zips/${install_id}.prop"
   rmdir --ignore-fail-on-non-empty -- "${SYS_PATH}/etc/zips"
   ui_debug 'Done.'
 fi
