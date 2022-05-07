@@ -37,10 +37,6 @@ Release
 
 See `here <docs/INSTRUCTIONS.rst>`_ for the instructions.
 
-.. image:: https://img.shields.io/github/downloads/micro5k/google-sync-addon/latest/total.svg?cacheSeconds=3600
-   :alt: Downloads of the latest release
-   :target: docs/INSTRUCTIONS.rst
-
 
 Copyright
 ---------
