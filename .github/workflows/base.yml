@@ -47,16 +47,21 @@ jobs:
       - name: "Execute code coverage"
         run: |
           # Executing code coverage...
-          sudo apt-get -qq -y install moreutils 1> /dev/null
+          sudo apt-get -qq -y install moreutils 1>/dev/null
           export OPENSOURCE_ONLY='true'
           bashcov './build.sh' # | TZ=UTC ts '[%H:%M:%S]'  # Timestamp disabled as it break GitHub notice
           # Testing zip installation...
-          # bash './recovery-simulator/recovery.sh' ./output/*.zip
-          # printf '\n\n'
-          # echo '==============='
-          # echo 'RECOVERY OUTPUT'
-          # echo '==============='
-          # cat './recovery-simulator/output/recovery-output-parsed.log'
+          #bash './recovery-simulator/recovery.sh' ./output/*.zip
+          #printf '\n\n'
+          #echo '==============='
+          #echo 'RECOVERY OUTPUT'
+          #echo '==============='
+          #cat './recovery-simulator/output/recovery-output.log'
+          #printf '\n\n'
+          #echo '==============='
+          #echo 'STDOUT / STDERR'
+          #echo '==============='
+          #cat './recovery-simulator/output/recovery-stdout-stderr.log'
       - name: "Upload reports to Codecov"
         uses: codecov/codecov-action@v3
         with:

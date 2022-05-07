@@ -21,6 +21,42 @@ link_folder()
   ln -sf "${2}" "${1}" || mkdir -p "${1}" || fail_with_msg "Failed to link dir '${1}'"
 }
 
+ui_print()
+{
+  echo "ui_print ${1}"
+}
+
+recovery_flash_start()
+{
+  ui_print "I:Set page: 'install'"
+  ui_print "I:Set page: 'flash_confirm'"
+  ui_print "I:Set page: 'flash_zip'"
+  ui_print "I:operation_start: 'Flashing'"
+  ui_print "Installing zip file '${1}'"
+  #ui_print "Checking for MD5 file..."
+  #ui_print "MD5 matched for '${1}'."
+  ui_print "I:Update binary zip"
+}
+
+recovery_flash_end()
+{
+  if test "${1}" -eq 0; then
+    ui_print "I:Updater process ended with RC=0"
+  else
+    ui_print "Updater process ended with ERROR: ${1}"
+    ui_print "Error installing zip file '${2}'"
+  fi
+  ui_print "Updating partition details..."
+  ui_print "...done"
+  ui_print "I:Set page: 'flash_done'"
+  if test "${1}" -eq 0; then
+    ui_print "I:operation_end - status=0"
+  else
+    ui_print "I:operation_end - status=1"
+  fi
+  ui_print ''
+}
+
 if test -z "${1}"; then fail_with_msg 'You must pass the filename of the flashable ZIP as parameter'; fi
 
 # Reset environment
@@ -102,14 +138,15 @@ chmod +x "${TMPDIR}/updater" || fail_with_msg "chmod failed on '${TMPDIR}/update
 
 # Setup recovery output
 recovery_fd=99
+recovery_logs_dir="${THIS_SCRIPT_DIR}/output"
 if test -e "/proc/self/fd/${recovery_fd}"; then fail_with_msg 'Recovery FD already exist'; fi
-mkdir -p "${THIS_SCRIPT_DIR}/output"
-touch "${THIS_SCRIPT_DIR}/output/recovery-output.log"
+mkdir -p "${recovery_logs_dir}"
+touch "${recovery_logs_dir}/recovery-output-raw.log"
 if test "${uname_o_saved}" != 'MS/Windows'; then
-  sudo chattr +aAd "${THIS_SCRIPT_DIR}/output/recovery-output.log" || fail_with_msg "chattr failed on 'recovery-output.log'"
+  sudo chattr +aAd "${recovery_logs_dir}/recovery-output-raw.log" || fail_with_msg "chattr failed on 'recovery-output-raw.log'"
 fi
 # shellcheck disable=SC3023
-exec 99>> "${THIS_SCRIPT_DIR}/output/recovery-output.log"
+exec 99>> "${recovery_logs_dir}/recovery-output-raw.log"
 
 # Simulate the environment variables (part 2)
 PATH="${OVERRIDE_DIR}:${BASE_SIMULATION_PATH}/sbin:${ANDROID_ROOT}/bin:${PATH}"  # We have to keep the original folders inside PATH otherwise everything stop working
@@ -131,15 +168,17 @@ FLASHABLE_ZIP_NAME="$("${CUSTOM_BUSYBOX}" basename "${FLASHABLE_ZIP_PATH}")" || 
 chmod +x "${TMPDIR}/update-binary" || fail_with_msg "chmod failed on '${TMPDIR}/update-binary'"
 
 # Execute the script that will run the flashable zip
+recovery_flash_start "${SECONDARY_STORAGE}/${FLASHABLE_ZIP_NAME}" 1>&"${recovery_fd}"
 set +e
-"${CUSTOM_BUSYBOX}" ash "${TMPDIR}/updater" 3 "${recovery_fd}" "${SECONDARY_STORAGE}/${FLASHABLE_ZIP_NAME}" | TZ=UTC ts '[%H:%M:%S]'; STATUS="$?"
+"${CUSTOM_BUSYBOX}" ash "${TMPDIR}/updater" 3 "${recovery_fd}" "${SECONDARY_STORAGE}/${FLASHABLE_ZIP_NAME}" 1>>"${recovery_logs_dir}/recovery-stdout-stderr.log" 2>&1; STATUS="${?}"
 set -e
+recovery_flash_end "${STATUS}" "${SECONDARY_STORAGE}/${FLASHABLE_ZIP_NAME}" 1>&"${recovery_fd}"
 
 # Close recovery output
 # shellcheck disable=SC3023
 exec 99>&-
 if test "${uname_o_saved}" != 'MS/Windows'; then
-  sudo chattr -a "${THIS_SCRIPT_DIR}/output/recovery-output.log" || fail_with_msg "chattr failed on 'recovery-output.log'"
+  sudo chattr -a "${recovery_logs_dir}/recovery-output-raw.log" || fail_with_msg "chattr failed on 'recovery-output-raw.log'"
 fi
 
 # Parse recovery output
@@ -152,15 +191,17 @@ while IFS=' ' read -r ui_command text; do
       echo "${text}"
       last_msg_printed=true
     fi
+  elif test "${ui_command}" = 'custom_std'; then
+    echo "${text}"
   else
-    echo "> COMMAND: ${ui_command} ${text}"
+    echo "> ${ui_command} ${text}"
     last_msg_printed=false
   fi
-done < "${THIS_SCRIPT_DIR}/output/recovery-output.log" > "${THIS_SCRIPT_DIR}/output/recovery-output-parsed.log"
+done < "${recovery_logs_dir}/recovery-output-raw.log" > "${recovery_logs_dir}/recovery-output.log"
 
 # Final cleanup
 cd "${INIT_DIR}" || fail_with_msg 'Failed to change back the folder'
 unset TMPDIR
 rm -rf -- "${OUR_TEMP_DIR:?}" &
 set +e
-if test "${STATUS}" -ne 0; then fail_with_msg "Installation failed with error ${STATUS}"; fi
+if test "${STATUS}" -ne 0; then exit "${STATUS}"; fi

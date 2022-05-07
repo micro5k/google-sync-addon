@@ -136,7 +136,8 @@ done
 delete_recursive "${SYS_PATH}"/etc/default-permissions/google-sync-permissions.xml
 delete_recursive "${SYS_PATH}"/etc/default-permissions/contacts-calendar-sync.xml
 
+if test -e "${SYS_PATH}/etc/zips"; then rmdir --ignore-fail-on-non-empty -- "${SYS_PATH}/etc/zips"; fi
+
 if [[ -z "${INSTALLER}" ]]; then
-  rmdir --ignore-fail-on-non-empty -- "${SYS_PATH}/etc/zips"
   ui_debug 'Done.'
 fi
