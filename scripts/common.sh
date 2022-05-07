@@ -18,10 +18,20 @@ export LANG=C
 unset LANGUAGE
 unset LC_MESSAGES
 unset UNZIP
-unset UNZIP_OPTS
 unset UNZIPOPT
+unset UNZIP_OPTS
+unset ZIP
+unset ZIPOPT
+unset ZIP_OPTS
+unset ZIPINFO
+unset ZIPINFOOPT
+unset ZIPINFO_OPTS
+unset JAVA_OPTS
 unset JAVA_TOOL_OPTIONS
+unset _JAVA_OPTIONS
 unset CDPATH
+
+SCRIPT_DIR="$(realpath "${SCRIPT_DIR:?}")" || return 1 2>&- || exit 1
 
 ui_error()
 {
