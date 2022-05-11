@@ -28,8 +28,8 @@ SYS_PATH=''
 
 ### FUNCTIONS ###
 
-# shellcheck source=SCRIPTDIR/inc/common.sh
-. "${TMP_PATH}/inc/common.sh"
+# shellcheck source=SCRIPTDIR/inc/common-functions.sh
+. "${TMP_PATH}/inc/common-functions.sh"
 
 
 ### CODE ###

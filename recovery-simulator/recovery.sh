@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-
 # SPDX-FileCopyrightText: (c) 2022 ale5000
 # SPDX-License-Identifier: GPL-3.0-or-later
 # SPDX-FileType: SOURCE
@@ -21,40 +20,59 @@ link_folder()
   ln -sf "${2}" "${1}" || mkdir -p "${1}" || fail_with_msg "Failed to link dir '${1}'"
 }
 
-ui_print()
-{
-  echo "ui_print ${1}"
-}
-
 recovery_flash_start()
 {
-  ui_print "I:Set page: 'install'"
-  ui_print "I:Set page: 'flash_confirm'"
-  ui_print "I:Set page: 'flash_zip'"
-  ui_print "I:operation_start: 'Flashing'"
-  ui_print "Installing zip file '${1}'"
-  #ui_print "Checking for MD5 file..."
-  #ui_print "MD5 matched for '${1}'."
-  ui_print "I:Update binary zip"
+  if test "${1}" = 'false'; then
+    echo "I:Set page: 'install'"
+    echo "I:Set page: 'flash_confirm'"
+    echo "I:Set page: 'flash_zip'"
+    echo "I:operation_start: 'Flashing'"
+  fi
+
+  echo "Installing zip file '${2}'"
+  echo "Checking for MD5 file..."
+  echo "Skipping MD5 check: no MD5 file found"
+  #echo "MD5 matched for '${2}'."
+
+  if test "${1}" = 'false'; then
+    echo "I:Update binary zip"
+  fi
 }
 
 recovery_flash_end()
 {
-  if test "${1}" -eq 0; then
-    ui_print "I:Updater process ended with RC=0"
-  else
-    ui_print "Updater process ended with ERROR: ${1}"
-    ui_print "Error installing zip file '${2}'"
+  if test "${2}" -ne 0; then
+    echo "Updater process ended with ERROR: ${2}"
+    if test "${1}" = 'false'; then
+      echo "I:Install took ... second(s)."
+    fi
+    echo "Error installing zip file '${3}'"
+  elif test "${1}" = 'false'; then
+    echo "I:Updater process ended with RC=0"
+    echo "I:Install took ... second(s)."
   fi
-  ui_print "Updating partition details..."
-  ui_print "...done"
-  ui_print "I:Set page: 'flash_done'"
-  if test "${1}" -eq 0; then
-    ui_print "I:operation_end - status=0"
+
+  echo "Updating partition details..."
+  echo "...done"
+
+  if test "${1}" = 'false'; then
+    echo "I:Set page: 'flash_done'"
+    if test "${2}" -eq 0; then
+      echo "I:operation_end - status=0"
+    else
+      echo "I:operation_end - status=1"
+    fi
+    echo "I:Set page: 'clear_vars'"
+
+    echo "I:Set page: 'copylog'"
+    echo "I:Set page: 'action_page'"
+    echo "I:operation_start: 'Copy Log'"
+    echo "I:Copying file /tmp/recovery.log to /sdcard1/recovery.log"
   else
-    ui_print "I:operation_end - status=1"
+    echo "Copied recovery log to /sdcard1/recovery.log"
   fi
-  ui_print ''
+
+  echo ''
 }
 
 if test -z "${1}"; then fail_with_msg 'You must pass the filename of the flashable ZIP as parameter'; fi
@@ -72,7 +90,7 @@ unset LC_TIME
 uname_o_saved="$(uname -o)" || fail_with_msg 'Failed to get uname -o'
 
 # Check dependencies
-CUSTOM_BUSYBOX="$(which busybox)" || fail_with_msg 'BusyBox is missing'
+_our_busybox="$(which busybox)" || fail_with_msg 'BusyBox is missing'
 
 # Get dir of this script
 THIS_SCRIPT_DIR="$(dirname "${THIS_SCRIPT}")" || fail_with_msg 'Failed to get script dir'
@@ -108,6 +126,7 @@ TMPDIR="${BASE_SIMULATION_PATH}/tmp"
 # Simulate the Android environment inside the temp folder
 cd "${BASE_SIMULATION_PATH}" || fail_with_msg 'Failed to change dir to the base simulation path'
 mkdir -p "${ANDROID_ROOT}"
+mkdir -p "${BASE_SIMULATION_PATH}/system/addon.d"
 mkdir -p "${BASE_SIMULATION_PATH}/system/priv-app"
 mkdir -p "${BASE_SIMULATION_PATH}/system/app"
 mkdir -p "${ANDROID_ROOT}/bin"
@@ -116,6 +135,7 @@ mkdir -p "${EXTERNAL_STORAGE}"
 mkdir -p "${SECONDARY_STORAGE}"
 link_folder "${BASE_SIMULATION_PATH}/sbin" "${BASE_SIMULATION_PATH}/system/bin"
 link_folder "${BASE_SIMULATION_PATH}/sdcard" "${EXTERNAL_STORAGE}"
+cp -pf -- "${_our_busybox:?}" "${BASE_SIMULATION_PATH:?}/system/bin/busybox" || fail_with_msg 'Failed to copy BusyBox'
 
 {
   echo 'ro.build.version.sdk=25'
@@ -133,7 +153,7 @@ zip -D -9 -X -UN=n -nw -q "${ANDROID_ROOT}/framework/framework-res.apk" 'Android
 rm -f "${BASE_SIMULATION_PATH}/AndroidManifest.xml"
 
 mkdir -p "${TMPDIR}"
-cp -rf "${THIS_SCRIPT_DIR}/updater.sh" "${TMPDIR}/updater" || fail_with_msg 'Failed to copy the updater script'
+cp -pf -- "${THIS_SCRIPT_DIR}/updater.sh" "${TMPDIR}/updater" || fail_with_msg 'Failed to copy the updater script'
 chmod +x "${TMPDIR}/updater" || fail_with_msg "chmod failed on '${TMPDIR}/updater'"
 
 # Setup recovery output
@@ -141,12 +161,15 @@ recovery_fd=99
 recovery_logs_dir="${THIS_SCRIPT_DIR}/output"
 if test -e "/proc/self/fd/${recovery_fd}"; then fail_with_msg 'Recovery FD already exist'; fi
 mkdir -p "${recovery_logs_dir}"
-touch "${recovery_logs_dir}/recovery-output-raw.log"
+touch "${recovery_logs_dir}/recovery-raw.log" "${recovery_logs_dir}/recovery-output-raw.log" "${recovery_logs_dir}/recovery-stdout.log" "${recovery_logs_dir}/recovery-stderr.log"
 if test "${uname_o_saved}" != 'MS/Windows'; then
+  sudo chattr +aAd "${recovery_logs_dir}/recovery-raw.log" || fail_with_msg "chattr failed on 'recovery-raw.log'"
   sudo chattr +aAd "${recovery_logs_dir}/recovery-output-raw.log" || fail_with_msg "chattr failed on 'recovery-output-raw.log'"
+  sudo chattr +aAd "${recovery_logs_dir}/recovery-stdout.log" || fail_with_msg "chattr failed on 'recovery-stdout.log'"
+  sudo chattr +aAd "${recovery_logs_dir}/recovery-stderr.log" || fail_with_msg "chattr failed on 'recovery-stderr.log'"
 fi
 # shellcheck disable=SC3023
-exec 99>> "${recovery_logs_dir}/recovery-output-raw.log"
+exec 99> >(tee -a "${recovery_logs_dir}/recovery-raw.log" "${recovery_logs_dir}/recovery-output-raw.log" || true)
 
 # Simulate the environment variables (part 2)
 PATH="${OVERRIDE_DIR}:${BASE_SIMULATION_PATH}/sbin:${ANDROID_ROOT}/bin:${PATH}"  # We have to keep the original folders inside PATH otherwise everything stop working
@@ -158,7 +181,9 @@ export ANDROID_ROOT
 export ANDROID_PROPERTY_WORKSPACE
 export TZ
 export TMPDIR
-export CUSTOM_BUSYBOX
+export CUSTOM_BUSYBOX="${BASE_SIMULATION_PATH:?}/system/bin/busybox"
+"${CUSTOM_BUSYBOX:?}" --install "${BASE_SIMULATION_PATH:?}/system/bin" || fail_with_msg 'Failed to install BusyBox'
+rm -f "${BASE_SIMULATION_PATH:?}/system/bin/su" "${BASE_SIMULATION_PATH:?}/system/bin/mount" "${BASE_SIMULATION_PATH:?}/system/bin/umount" "${BASE_SIMULATION_PATH:?}/system/bin/chown" || fail_with_msg 'Failed to remove potentially unsafe commands'
 
 # Prepare before execution
 export OVERRIDE_DIR
@@ -168,36 +193,51 @@ FLASHABLE_ZIP_NAME="$("${CUSTOM_BUSYBOX}" basename "${FLASHABLE_ZIP_PATH}")" || 
 chmod +x "${TMPDIR}/update-binary" || fail_with_msg "chmod failed on '${TMPDIR}/update-binary'"
 
 # Execute the script that will run the flashable zip
-recovery_flash_start "${SECONDARY_STORAGE}/${FLASHABLE_ZIP_NAME}" 1>&"${recovery_fd}"
+echo "custom_flash_start ${SECONDARY_STORAGE}/${FLASHABLE_ZIP_NAME}" 1>&"${recovery_fd}"
 set +e
-"${CUSTOM_BUSYBOX}" ash "${TMPDIR}/updater" 3 "${recovery_fd}" "${SECONDARY_STORAGE}/${FLASHABLE_ZIP_NAME}" 1>>"${recovery_logs_dir}/recovery-stdout-stderr.log" 2>&1; STATUS="${?}"
+"${CUSTOM_BUSYBOX}" sh "${TMPDIR}/updater" 3 "${recovery_fd}" "${SECONDARY_STORAGE}/${FLASHABLE_ZIP_NAME}" 1> >(tee -a "${recovery_logs_dir}/recovery-raw.log" "${recovery_logs_dir}/recovery-stdout.log" || true) 2> >(tee -a "${recovery_logs_dir}/recovery-raw.log" "${recovery_logs_dir}/recovery-stderr.log" 1>&2 || true); STATUS="${?}"
 set -e
-recovery_flash_end "${STATUS}" "${SECONDARY_STORAGE}/${FLASHABLE_ZIP_NAME}" 1>&"${recovery_fd}"
+echo "custom_flash_end ${STATUS}" 1>&"${recovery_fd}"
 
 # Close recovery output
 # shellcheck disable=SC3023
 exec 99>&-
 if test "${uname_o_saved}" != 'MS/Windows'; then
+  sudo chattr -a "${recovery_logs_dir}/recovery-raw.log" || fail_with_msg "chattr failed on 'recovery-raw.log'"
   sudo chattr -a "${recovery_logs_dir}/recovery-output-raw.log" || fail_with_msg "chattr failed on 'recovery-output-raw.log'"
+  sudo chattr -a "${recovery_logs_dir}/recovery-stdout.log" || fail_with_msg "chattr failed on 'recovery-stdout.log'"
+  sudo chattr -a "${recovery_logs_dir}/recovery-stderr.log" || fail_with_msg "chattr failed on 'recovery-stderr.log'"
 fi
 
-# Parse recovery output
-last_msg_printed=false
-while IFS=' ' read -r ui_command text; do
-  if test "${ui_command}" = 'ui_print'; then
-    if test "${last_msg_printed}" = true && test "${text}" = ''; then
-      last_msg_printed=false
+parse_recovery_output()
+{
+  _last_msg_printed=false
+  _last_zip_name=''
+  while IFS=' ' read -r ui_command text; do
+    if test "${ui_command}" = 'ui_print'; then
+      if test "${_last_msg_printed}" = true && test "${text}" = ''; then
+        _last_msg_printed=false
+      else
+        _last_msg_printed=true
+        echo "${text}"
+      fi
+    elif test "${ui_command}" = 'custom_flash_start'; then
+      _last_msg_printed=false
+      _last_zip_name="${text}"
+      recovery_flash_start "${1}" "${_last_zip_name}"
+    elif test "${ui_command}" = 'custom_flash_end'; then
+      _last_msg_printed=false
+      recovery_flash_end "${1}" "${text}" "${_last_zip_name}"
     else
-      echo "${text}"
-      last_msg_printed=true
+      _last_msg_printed=false
+      echo "> ${ui_command} ${text}"
     fi
-  elif test "${ui_command}" = 'custom_std'; then
-    echo "${text}"
-  else
-    echo "> ${ui_command} ${text}"
-    last_msg_printed=false
-  fi
-done < "${recovery_logs_dir}/recovery-output-raw.log" > "${recovery_logs_dir}/recovery-output.log"
+  done < "${2}" > "${3}"
+}
+
+# Parse recovery output
+parse_recovery_output true "${recovery_logs_dir}/recovery-output-raw.log" "${recovery_logs_dir}/recovery-output.log"
+parse_recovery_output false "${recovery_logs_dir}/recovery-raw.log" "${recovery_logs_dir}/recovery.log"
 
 # Final cleanup
 cd "${INIT_DIR}" || fail_with_msg 'Failed to change back the folder'
