@@ -4,10 +4,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # SPDX-FileType: SOURCE
 
-if test -n "$1"; then
-  echo "Dummy umount: $*"
-  return 0 2>&- || exit 0
-fi
-
-echo "umount: bad usage"
+echo "su: bad usage"
 return 1 2>&- || exit 1

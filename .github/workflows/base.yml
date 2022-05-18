@@ -12,7 +12,7 @@ env:
   # UPLOAD_BUILD_SCAN: true
 jobs:
   base-job:
-    name: "Base job"
+    name: "Coverage and testing"
     runs-on: ubuntu-latest
 
     steps:
@@ -51,17 +51,12 @@ jobs:
           export OPENSOURCE_ONLY='true'
           bashcov './build.sh' # | TZ=UTC ts '[%H:%M:%S]'  # Timestamp disabled as it break GitHub notice
           # Testing zip installation...
-          #bash './recovery-simulator/recovery.sh' ./output/*.zip
-          #printf '\n\n'
-          #echo '==============='
-          #echo 'RECOVERY OUTPUT'
-          #echo '==============='
-          #cat './recovery-simulator/output/recovery-output.log'
-          #printf '\n\n'
-          #echo '==============='
-          #echo 'STDOUT / STDERR'
-          #echo '==============='
-          #cat './recovery-simulator/output/recovery-stdout-stderr.log'
+          # bash './recovery-simulator/recovery.sh' ./output/*.zip
+          # printf '\n\n'
+          # echo '==============='
+          # echo 'RECOVERY OUTPUT'
+          # echo '==============='
+          # cat './recovery-simulator/output/recovery-output.log'
       - name: "Upload reports to Codecov"
         uses: codecov/codecov-action@v3
         with:
@@ -79,6 +74,7 @@ jobs:
         run: |
           # Validating dep5
           if ! test -e './.reuse/dep5'; then exit 0; fi
+          sudo apt-get -qq update
           sudo apt-get -qq -y install cme 1> /dev/null
           status='0'
           cme check dpkg-copyright -file './.reuse/dep5' || status="${?}"
