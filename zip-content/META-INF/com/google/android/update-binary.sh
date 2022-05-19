@@ -1,10 +1,12 @@
 #!/sbin/sh
-# shellcheck disable=SC3043
-# SC3043: In POSIX sh, local is undefined
-
 # SPDX-FileCopyrightText: (c) 2016 ale5000
 # SPDX-License-Identifier: GPL-3.0-or-later
 # SPDX-FileType: SOURCE
+
+# shellcheck disable=SC3043
+# SC3043: In POSIX sh, local is undefined
+
+umask 022
 
 ### GLOBAL VARIABLES ###
 
@@ -22,7 +24,8 @@ MANUAL_TMP_MOUNT=0
 GENER_ERROR=0
 STATUS=1
 
-KEYCHECK_ENABLED=false
+LIVE_SETUP_POSSIBLE=false
+export KEYCHECK_ENABLED=false
 export BOOTMODE=false
 
 
@@ -85,9 +88,13 @@ ui_debug()
 
 is_mounted()
 {
-  case $(mount) in
-    *[[:blank:]]"$1"[[:blank:]]*) return 0;;  # Mounted
-    *)                                        # NOT mounted
+  local _partition _mount_result
+  _partition="$(readlink -f "${1:?}")" || { _partition="${1:?}"; ui_warning "Failed to canonicalize '${1}'"; }
+  _mount_result="$(mount)" || { test -e '/proc/mounts' && _mount_result="$(cat /proc/mounts)"; } || ui_error 'is_mounted has failed'
+
+  case "${_mount_result:?}" in
+    *[[:blank:]]"${_partition:?}"[[:blank:]]*) return 0;;  # Mounted
+    *)                                                     # NOT mounted
   esac
   return 1  # NOT mounted
 }
@@ -96,9 +103,7 @@ set_perm()
 {
   local uid="$1"; local gid="$2"; local mod="$3"
   shift 3
-  if test "${TEST_INSTALL:-false}" = 'false'; then
-    chown "${uid}:${gid}" "$@" || chown "${uid}.${gid}" "$@" || ui_error "chown failed on: $*" 81
-  fi
+  chown "${uid}:${gid}" "$@" || chown "${uid}.${gid}" "$@" || ui_error "chown failed on: $*" 81
   chmod "${mod}" "$@" || ui_error "chmod failed on: $*" 81
 }
 
@@ -106,9 +111,7 @@ set_perm_safe()
 {
   local uid="$1"; local gid="$2"; local mod="$3"
   shift 3
-  if test "${TEST_INSTALL:-false}" = 'false'; then
-    "${OUR_BB}" chown "${uid}:${gid}" "$@" || "${OUR_BB}" chown "${uid}.${gid}" "$@" || ui_error "chown failed on: $*" 81
-  fi
+  chown "${uid}:${gid}" "$@" || chown "${uid}.${gid}" "$@" || ui_error "chown failed on: $*" 81
   "${OUR_BB}" chmod "${mod}" "$@" || ui_error "chmod failed on: $*" 81
 }
 
@@ -149,7 +152,7 @@ delete_recursive_safe()
 # Input related functions
 check_key()
 {
-  case "$1" in
+  case "${1?}" in
   42)   # Vol +
     return 3;;
   21)   # Vol -
@@ -161,33 +164,88 @@ check_key()
   esac
 }
 
-choose_timeout()
+_choose_remapper()
+{
+  case "${1?}" in
+  '+')
+    return 3;;
+  '-')
+    return 2;;
+  *)
+    return 1;;
+  esac
+}
+
+choose_binary_timeout()
 {
   local key_code=1
-  timeout -t "$1" keycheck; key_code="$?"  # Timeout return 127 when it cannot execute the binary
-  if test "${key_code}" -eq 143; then
+  timeout -t "${1:?}" keycheck; key_code="${?}"  # Timeout return 127 when it cannot execute the binary
+  if test "${key_code?}" = '143'; then
     ui_msg 'Key code: No key pressed'
     return 0
-  elif test "${key_code}" -eq 127 || test "${key_code}" -eq 132; then
+  elif test "${key_code?}" = '127' || test "${key_code?}" = '132'; then
     ui_msg 'WARNING: Key detection failed'
     return 1
   fi
 
-  ui_msg "Key code: ${key_code}"
-  check_key "${key_code}"
-  return "$?"
+  ui_msg "Key code: ${key_code?}"
+  check_key "${key_code?}"
+  return "${?}"
+}
+
+choose_timeout()
+{
+  local _key
+  # shellcheck disable=SC3045
+  IFS='' read -t"${1:?}" -n1 -r -s -- _key || { ui_warning 'Key detection failed'; return 1; }
+  if test "${_key}" = ''; then
+    ui_msg 'Key code: No key pressed'
+    return 0
+  else
+    ui_msg "Key press: ${_key:?}"
+  fi
+  _choose_remapper "${_key:?}"
+  return "${?}"
+}
+
+choose_binary()
+{
+  local key_code=1
+  ui_msg "QUESTION: ${1:?}"
+  ui_msg "${2:?}"
+  ui_msg "${3:?}"
+  keycheck; key_code="${?}"
+  ui_msg "Key code: ${key_code?}"
+  check_key "${key_code?}"
+  return "${?}"
+}
+
+choose_shell()
+{
+  local _key
+  ui_msg "QUESTION: ${1:?}"
+  ui_msg "${2:?}"
+  ui_msg "${3:?}"
+  # shellcheck disable=SC3045
+  IFS='' read -n1 -r -s -- _key || { ui_warning 'Key detection failed'; return 1; }
+  if test "${_key}" = ''; then
+    ui_msg 'Key code: No key pressed'
+    return 0
+  else
+    ui_msg "Key press: ${_key:?}"
+  fi
+  _choose_remapper "${_key:?}"
+  return "${?}"
 }
 
 choose()
 {
-  local key_code=1
-  ui_msg "QUESTION: $1"
-  ui_msg "$2"
-  ui_msg "$3"
-  keycheck; key_code="$?"
-  ui_msg "Key code: ${key_code}"
-  check_key "${key_code}"
-  return "$?"
+  if "${KEYCHECK_ENABLED}"; then
+    choose_binary "${@}"
+  else
+    choose_shell "${@}"
+  fi
+  return "${?}"
 }
 
 
@@ -196,21 +254,21 @@ choose()
 test "${DEBUG_LOG}" -eq 1 && enable_debug_log  # Enable file logging if needed
 
 ui_debug 'PRELOADER'
-if ! is_mounted '/tmp'; then
-  # Workaround: create and mount /tmp if it isn't already mounted
+if ! is_mounted "${BASE_TMP_PATH:?}"; then
+  # Workaround: create and mount the temp folder if it isn't already mounted
   MANUAL_TMP_MOUNT=1
-  ui_msg 'WARNING: Creating missing /tmp...'
-  if [ ! -e '/tmp' ]; then create_dir '/tmp'; fi
-  mount -t tmpfs -o rw tmpfs /tmp
-  set_perm 0 2000 0775 '/tmp'
+  ui_msg 'WARNING: Creating and mounting the missing temp folder...'
+  if ! test -e "${BASE_TMP_PATH:?}"; then create_dir "${BASE_TMP_PATH:?}"; fi
+  mount -t tmpfs -o rw tmpfs "${BASE_TMP_PATH:?}"
+  set_perm 0 2000 0775 "${BASE_TMP_PATH:?}"
 
-  if ! is_mounted '/tmp'; then ui_error '/tmp is NOT mounted'; fi
+  if ! is_mounted "${BASE_TMP_PATH:?}"; then ui_error 'The temp folder CANNOT be mounted'; fi
 fi
 
 detect_recovery_arch()
 {
   case "$(uname -m)" in
-    x86_64                    ) RECOVERY_ARCH='x86_64';;
+    x86_64 | x64              ) RECOVERY_ARCH='x86_64';;
     x86 | i686                ) RECOVERY_ARCH='x86';;
     aarch64 | arm64* | armv8* ) RECOVERY_ARCH='arm64-v8a';;
     armv7*                    ) RECOVERY_ARCH='armeabi-v7a';;
@@ -224,6 +282,7 @@ OUR_BB="${BASE_TMP_PATH}/busybox"
 if test -n "${CUSTOM_BUSYBOX:-}" && test -e "${CUSTOM_BUSYBOX}"; then
   OUR_BB="${CUSTOM_BUSYBOX}"
   ui_debug "Using custom BusyBox... '${OUR_BB}'"
+  #LIVE_SETUP_POSSIBLE=true
 elif test "${RECOVERY_ARCH}" = 'x86_64'; then
   ui_debug 'Extracting 64-bit x86 BusyBox...'
   package_extract_file 'misc/busybox/busybox-x86_64.bin' "${OUR_BB}"
@@ -269,7 +328,15 @@ if test -e "${BASE_TMP_PATH}/keycheck"; then
   "${OUR_BB}" mv -f "${BASE_TMP_PATH}/keycheck" "${TMP_PATH}/bin/keycheck" || ui_error "Failed to move keycheck to the bin folder"
   # Give execution rights
   set_perm_safe 0 0 0755 "${TMP_PATH}/bin/keycheck"
+  LIVE_SETUP_POSSIBLE=true
   KEYCHECK_ENABLED=true
+fi
+
+# Live setup isn't supported under continuous integration system
+# Live setup doesn't work when executed through Gradle
+if test "${CI:-false}" != 'false' || test "${APP_NAME:-false}" = 'Gradle'; then
+  LIVE_SETUP_POSSIBLE=false
+  LIVE_SETUP=0
 fi
 
 # Extract scripts
@@ -298,24 +365,28 @@ if [ "${DEBUG_LOG_ENABLED}" -eq 1 ]; then export DEBUG_LOG=1; fi
 "${BOOTMODE}" || (ps -A 2>/dev/null | grep zygote | grep -v grep >/dev/null && BOOTMODE=true)
 
 # Live setup
-if "${KEYCHECK_ENABLED}" && [ "${LIVE_SETUP}" -eq 0 ] && [ "${LIVE_SETUP_TIMEOUT}" -ge 1 ]; then
+if "${LIVE_SETUP_POSSIBLE}" && test "${LIVE_SETUP}" -eq 0 && test "${LIVE_SETUP_TIMEOUT}" -ge 1; then
   ui_msg '---------------------------------------------------'
   ui_msg 'INFO: Select the VOLUME + key to enable live setup.'
   ui_msg "Waiting input for ${LIVE_SETUP_TIMEOUT} seconds..."
-  choose_timeout "${LIVE_SETUP_TIMEOUT}"
-  if test "$?" -eq 3; then export LIVE_SETUP=1; fi
+  if "${KEYCHECK_ENABLED}"; then
+    choose_binary_timeout "${LIVE_SETUP_TIMEOUT}"
+  else
+    choose_timeout "${LIVE_SETUP_TIMEOUT}"
+  fi
+  if test "${?}" = '3'; then export LIVE_SETUP=1; fi
 fi
 
-if [ "${LIVE_SETUP}" -eq 1 ]; then
+if test "${LIVE_SETUP}" = '1'; then
   ui_msg 'LIVE SETUP ENABLED!'
-  if [ "${DEBUG_LOG}" -eq 0 ]; then
-    choose 'Do you want to enable the debug log?' '+) Yes' '-) No'; if [ "$?" -ne 2 ]; then export DEBUG_LOG=1; enable_debug_log; fi
+  if test "${DEBUG_LOG}" = '0'; then
+    choose 'Do you want to enable the debug log?' '+) Yes' '-) No'; if test "${?}" = '3'; then export DEBUG_LOG=1; enable_debug_log; fi
   fi
 fi
 
 ui_debug ''
 ui_debug 'Starting installation script...'
-"${OUR_BB}" ash "${TMP_PATH}/install.sh" Preloader "${TMP_PATH}"; STATUS="$?"
+"${OUR_BB}" sh "${TMP_PATH}/install.sh" Preloader "${TMP_PATH}"; STATUS="$?"
 
 test -f "${TMP_PATH}/installed" || GENER_ERROR=1
 
@@ -327,7 +398,7 @@ delete_recursive_safe "${TMP_PATH}"
 test "${DEBUG_LOG}" -eq 1 && disable_debug_log  # Disable debug log and restore normal output
 
 if test "${MANUAL_TMP_MOUNT}" -ne 0; then
-  "${OUR_BB}" umount '/tmp' || ui_error "Failed to unmount '/tmp'"
+  "${OUR_BB}" umount "${BASE_TMP_PATH:?}" || ui_error 'Failed to unmount the temp folder'
 fi
 
 if test "${STATUS}" -ne 0; then ui_error "Installation script failed with error ${STATUS}" "${STATUS}"; fi

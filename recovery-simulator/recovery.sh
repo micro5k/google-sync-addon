@@ -90,10 +90,17 @@ if ! "${ENV_RESETTED:-false}"; then
   THIS_SCRIPT="$(realpath "${0:?}" 2>/dev/null)" || fail_with_msg 'Failed to get script filename'
   # Create the temp dir (must be done before resetting environment)
   OUR_TEMP_DIR="$(mktemp -d -t ANDR-RECOV-XXXXXX)" || fail_with_msg 'Failed to create our temp dir'
-  exec env -i ENV_RESETTED=true THIS_SCRIPT="${THIS_SCRIPT:?}" OUR_TEMP_DIR="${OUR_TEMP_DIR:?}" PATH="${PATH:?}" bash "${THIS_SCRIPT:?}" "${@}" || fail_with_msg 'failed: exec'
+
+  if test "${APP_BASE_NAME:-false}" = 'gradlew' || test "${APP_BASE_NAME:-false}" = 'gradlew.'; then
+    APP_NAME='Gradle'
+  fi
+
+  exec env -i ENV_RESETTED=true THIS_SCRIPT="${THIS_SCRIPT:?}" OUR_TEMP_DIR="${OUR_TEMP_DIR:?}" CI="${CI:-}" APP_NAME="${APP_NAME:-}" PATH="${PATH:?}" bash "${THIS_SCRIPT:?}" "${@}" || fail_with_msg 'failed: exec'
   exit 127
 fi
 unset ENV_RESETTED
+if test -z "${CI:-}"; then unset CI; fi
+if test -z "${APP_NAME:-}"; then unset APP_NAME; fi
 _backup_path="${PATH:?}"
 uname_o_saved="$(uname -o)" || fail_with_msg 'Failed to get uname -o'
 
@@ -176,7 +183,7 @@ override_command()
   rm -f -- "${_android_sys:?}/bin/${1:?}"
 
   unset -f -- "${1:?}" || true
-  eval " ${1:?}() { \"${_our_overrider_dir:?}/${1:?}\"; }" || return "${?}"  # This expands when defined, not when used
+  eval " ${1:?}() { '${_our_overrider_dir:?}/${1:?}' \"\${@}\"; }" || return "${?}"  # The folder expands when defined, not when used
   # shellcheck disable=SC3045
   export -f -- "${1:?}" 2>/dev/null | : || true
 }
@@ -232,7 +239,7 @@ exec 99> >(tee -a "${recovery_logs_dir:?}/recovery-raw.log" "${recovery_logs_dir
 
 flash_zips()
 {
-  for _current_zip_fullpath in "${@}"; do
+  for _current_zip_fullpath in "${@?}"; do
     # Simulate the environment variables
     # shellcheck disable=SC2310
     simulate_env || return "${?}"

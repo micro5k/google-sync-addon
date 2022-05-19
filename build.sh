@@ -49,7 +49,7 @@ detect_script_dir()
   fi
   unset last_command
 
-  this_script="$(realpath "${this_script}" 2>&-)" || return 1
+  this_script="$(realpath "${this_script}" 2>/dev/null)" || return 1
   SCRIPT_DIR="$(dirname "${this_script}")" || return 1
 }
 detect_script_dir || return 1 2>&- || exit 1
@@ -67,8 +67,8 @@ if test "${OPENSOURCE_ONLY:-false}" = 'false'; then . "${SCRIPT_DIR}/conf-2.sh";
 if ! is_oss_only_build_enabled && test "${OPENSOURCE_ONLY:-false}" != 'false'; then echo 'WARNING: The OSS only build is disabled'; change_title 'OSS only build is disabled'; return 0 2>&- || exit 0; fi
 
 # Check dependencies
-hash 'zip' 2>&- || ui_error 'Zip is missing'
-hash 'java' 2>&- || ui_error 'Java is missing'
+hash 'zip' 2>/dev/null || ui_error 'Zip is missing'
+hash 'java' 2>/dev/null || ui_error 'Java is missing'
 
 # Create the output dir
 OUT_DIR="${SCRIPT_DIR}/output"
@@ -183,10 +183,10 @@ echo ''
 sha256sum "${FILENAME}.zip" > "${OUT_DIR}/${FILENAME}.zip.sha256" || ui_error 'Failed to compute the sha256 hash'
 sha256_hash="$(cat "${OUT_DIR}/${FILENAME}.zip.sha256")" || ui_error 'Failed to display the sha256 hash'
 echo 'SHA-256:'
+echo "${sha256_hash:?}"
+
 if test "${GITHUB_JOB:-false}" != 'false'; then
-  echo "::notice::${sha256_hash}"
-else
-  echo "${sha256_hash}"
+  printf '\r::set-output name=sha256_hash::%s\n' "${sha256_hash:?}"  # Save hash for later use
 fi
 
 if test "${FAST_BUILD:-false}" = 'false'; then
