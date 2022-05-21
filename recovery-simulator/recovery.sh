@@ -77,7 +77,7 @@ recovery_flash_end()
     echo "I:operation_start: 'Copy Log'"
     echo "I:Copying file /tmp/recovery.log to /sdcard1/recovery.log"
   else
-    echo "Copied recovery log to /sdcard1/recovery.log"
+    echo "Copied recovery log to /sdcard1/recovery.log."
   fi
 
   echo ''
@@ -105,7 +105,7 @@ _backup_path="${PATH:?}"
 uname_o_saved="$(uname -o)" || fail_with_msg 'Failed to get uname -o'
 
 # Check dependencies
-_our_busybox="$(which busybox)" || fail_with_msg 'BusyBox is missing'
+_our_busybox="$(command -v -- busybox)" || fail_with_msg 'BusyBox is missing'
 
 # Get dir of this script
 THIS_SCRIPT_DIR="$(dirname "${THIS_SCRIPT:?}")" || fail_with_msg 'Failed to get script dir'
@@ -131,7 +131,7 @@ rm -rf "${OUR_TEMP_DIR:?}"/* || fail_with_msg 'Failed to empty our temp dir'
 # Setup the needed variables
 BASE_SIMULATION_PATH="${OUR_TEMP_DIR}/root"  # Internal var
 _our_overrider_dir="${THIS_SCRIPT_DIR}/override"  # Internal var
-INIT_DIR="$(pwd)"
+_init_dir="$(pwd)" || ui_error 'Failed to read the current dir'
 
 # Configure the Android recovery environment variables (they will be used later)
 _android_tmp="${BASE_SIMULATION_PATH}/tmp"
@@ -139,7 +139,7 @@ _android_sys="${BASE_SIMULATION_PATH}/system"
 _android_data="${BASE_SIMULATION_PATH}/data"
 _android_ext_stor="${BASE_SIMULATION_PATH}/sdcard0"
 _android_sec_stor="${BASE_SIMULATION_PATH}/sdcard1"
-_android_path="${_our_overrider_dir}:${BASE_SIMULATION_PATH}/sbin:${_android_sys}/bin:${_backup_path}"
+_android_path="${_our_overrider_dir}:${BASE_SIMULATION_PATH}/sbin:${_android_sys}/bin"
 _android_lib_path=".:${BASE_SIMULATION_PATH}/sbin"
 
 # Simulate the Android recovery environment inside the temp folder
@@ -182,7 +182,7 @@ override_command()
   if ! test -e "${_our_overrider_dir:?}/${1:?}"; then return 1; fi
   rm -f -- "${_android_sys:?}/bin/${1:?}"
 
-  unset -f -- "${1:?}" || true
+  unset -f -- "${1:?}"
   eval " ${1:?}() { '${_our_overrider_dir:?}/${1:?}' \"\${@}\"; }" || return "${?}"  # The folder expands when defined, not when used
   # shellcheck disable=SC3045
   export -f -- "${1:?}" 2>/dev/null | : || true
@@ -199,8 +199,11 @@ simulate_env()
   export ANDROID_PROPERTY_WORKSPACE='21,32768'
   export TZ='CET-1CEST,M3.5.0,M10.5.0'
   export TMPDIR="${_android_tmp:?}"
+
+  # Our custom variables
   export CUSTOM_BUSYBOX="${BASE_SIMULATION_PATH:?}/system/bin/busybox"
   export OVERRIDE_DIR="${_our_overrider_dir:?}"
+  export TEST_INSTALL=true
 
   "${CUSTOM_BUSYBOX:?}" --install "${_android_sys:?}/bin" || fail_with_msg 'Failed to install BusyBox'
   # shellcheck disable=SC2310
@@ -219,7 +222,7 @@ restore_env()
 {
   export PATH="${_backup_path}"
   unset BB_OVERRIDE_APPLETS
-  unset -f -- mount umount chown su sudo || true
+  unset -f -- mount umount chown su sudo
 }
 
 # Setup recovery output
@@ -240,12 +243,13 @@ exec 99> >(tee -a "${recovery_logs_dir:?}/recovery-raw.log" "${recovery_logs_dir
 flash_zips()
 {
   for _current_zip_fullpath in "${@?}"; do
+    FLASHABLE_ZIP_NAME="$(basename "${_current_zip_fullpath:?}")" || fail_with_msg 'Failed to get the filename of the flashable ZIP'
+    cp -f -- "${_current_zip_fullpath:?}" "${_android_sec_stor:?}/${FLASHABLE_ZIP_NAME:?}" || fail_with_msg 'Failed to copy the flashable ZIP'
+
     # Simulate the environment variables
     # shellcheck disable=SC2310
     simulate_env || return "${?}"
 
-    FLASHABLE_ZIP_NAME="$(basename "${_current_zip_fullpath:?}")" || fail_with_msg 'Failed to get the filename of the flashable ZIP'
-    cp -f -- "${_current_zip_fullpath:?}" "${_android_sec_stor:?}/${FLASHABLE_ZIP_NAME:?}" || fail_with_msg 'Failed to copy the flashable ZIP'
     "${CUSTOM_BUSYBOX:?}" unzip -opq "${_android_sec_stor:?}/${FLASHABLE_ZIP_NAME:?}" 'META-INF/com/google/android/update-binary' > "${_android_tmp:?}/update-binary" || fail_with_msg 'Failed to extract the update-binary'
 
     echo "custom_flash_start ${_android_sec_stor:?}/${FLASHABLE_ZIP_NAME:?}" 1>&"${recovery_fd:?}"
@@ -306,7 +310,7 @@ parse_recovery_output true "${recovery_logs_dir}/recovery-output-raw.log" "${rec
 parse_recovery_output false "${recovery_logs_dir}/recovery-raw.log" "${recovery_logs_dir}/recovery.log"
 
 # Final cleanup
-cd "${INIT_DIR}" || fail_with_msg 'Failed to change back the folder'
+cd "${_init_dir:?}" || ui_error 'Failed to change back the folder'
 unset TMPDIR
 rm -rf -- "${OUR_TEMP_DIR:?}" &
 set +e

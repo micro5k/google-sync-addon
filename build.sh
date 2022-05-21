@@ -66,6 +66,8 @@ if test "${OPENSOURCE_ONLY:-false}" = 'false'; then . "${SCRIPT_DIR}/conf-2.sh";
 
 if ! is_oss_only_build_enabled && test "${OPENSOURCE_ONLY:-false}" != 'false'; then echo 'WARNING: The OSS only build is disabled'; change_title 'OSS only build is disabled'; return 0 2>&- || exit 0; fi
 
+_init_dir="$(pwd)" || ui_error 'Failed to read the current dir'
+
 # Check dependencies
 hash 'zip' 2>/dev/null || ui_error 'Zip is missing'
 hash 'java' 2>/dev/null || ui_error 'Java is missing'
@@ -144,7 +146,7 @@ BASE_TMP_SCRIPT_DIR="${TEMP_DIR}/zip-content/META-INF/com/google/android"
 mv -f "${BASE_TMP_SCRIPT_DIR}/update-binary.sh" "${BASE_TMP_SCRIPT_DIR}/update-binary" || ui_error 'Failed to rename a file'
 mv -f "${BASE_TMP_SCRIPT_DIR}/updater-script.dat" "${BASE_TMP_SCRIPT_DIR}/updater-script" || ui_error 'Failed to rename a file'
 find "${TEMP_DIR}/zip-content" -type d -exec chmod 0700 '{}' + -o -type f -exec chmod 0600 '{}' + || ui_error 'Failed to set permissions of files'
-if test "${PLATFORM}" == 'win'; then
+if test "${PLATFORM:?}" == 'win'; then
   ATTRIB -R -A -S -H "${TEMP_DIR}/zip-content/*" /S /D
 fi
 find "${TEMP_DIR}/zip-content" -exec touch -c -t 200802290333.46 '{}' + || ui_error 'Failed to set the modification date of files'
@@ -196,7 +198,7 @@ if test "${FAST_BUILD:-false}" = 'false'; then
   cat "${OUT_DIR}/${FILENAME}.zip.md5" || ui_error 'Failed to display the md5 hash'
 fi
 
-cd "${INIT_DIR}" || ui_error 'Failed to change back the folder'
+cd "${_init_dir:?}" || ui_error 'Failed to change back the folder'
 
 echo ''
 echo 'Done.'

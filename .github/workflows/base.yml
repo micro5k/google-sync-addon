@@ -4,9 +4,13 @@
 # SPDX-FileType: SOURCE
 name: "Base"
 on:
-  - push
-  - pull_request
-  - workflow_dispatch
+  push:
+    branches:
+      - main
+    tags:
+      - v*
+  pull_request:
+  workflow_dispatch:
 env:
   FAST_BUILD: true
   # UPLOAD_BUILD_SCAN: true
@@ -23,19 +27,6 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '17'
-      - name: "Validate codecov.yml"
-        shell: bash
-        run: |
-          codecovyml_path='${{ github.workspace }}/.codecov.yml'
-          if test -f "${codecovyml_path}"; then
-            wget -qO- --post-file "${codecovyml_path}" https://codecov.io/validate \
-              || (echo 'NOT Valid!'; exit 1)
-          fi
-          codecovyml_path='${{ github.workspace }}/codecov.yml'
-          if test -f "${codecovyml_path}"; then
-            wget -qO- --post-file "${codecovyml_path}" https://codecov.io/validate \
-              || (echo 'NOT Valid!'; exit 1)
-          fi
       - name: "Set up Ruby"
         uses: ruby/setup-ruby@v1
         with:
@@ -59,6 +50,7 @@ jobs:
           # echo '==============='
           # cat './recovery-simulator/output/recovery-output.log'
       - name: "SHA256"
+        if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/') }}
         run: |
           # SHA256...
           sha256_hash="${{ steps.coverage.outputs.sha256_hash }}"

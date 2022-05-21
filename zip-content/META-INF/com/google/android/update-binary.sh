@@ -153,26 +153,28 @@ delete_recursive_safe()
 check_key()
 {
   case "${1?}" in
-  42)   # Vol +
-    return 3;;
-  21)   # Vol -
-    return 2;;
-  132)  # Error (example: Illegal instruction)
-    return 1;;
-  *)
-    return 0;;
+    42)   # Vol +
+      return 3;;
+    21)   # Vol -
+      return 2;;
+    132)  # Error (example: Illegal instruction)
+      return 1;;
+    *)
+      return 0;;
   esac
 }
 
 _choose_remapper()
 {
-  case "${1?}" in
-  '+')
-    return 3;;
-  '-')
-    return 2;;
-  *)
-    return 1;;
+  case "${1:?}" in
+    '+')  # +
+      return 3;;
+    '-')  # -
+      return 2;;
+    'Enter')
+      return 0;;
+    *)    # All other keys
+      return 0;;
   esac
 }
 
@@ -195,15 +197,23 @@ choose_binary_timeout()
 
 choose_timeout()
 {
-  local _key
+  local _key _status
+  _status='0'
+
   # shellcheck disable=SC3045
-  IFS='' read -t"${1:?}" -n1 -r -s -- _key || { ui_warning 'Key detection failed'; return 1; }
-  if test "${_key}" = ''; then
-    ui_msg 'Key code: No key pressed'
-    return 0
-  else
-    ui_msg "Key press: ${_key:?}"
-  fi
+  IFS='' read -rsn1 -t"${1:?}" -- _key || _status="${?}"
+  case "${_status:?}" in
+    0)        # 0: Command terminated successfully
+      if test -z "${_key?}"; then _key='Enter'; fi;;
+    1 | 142)  # 1: Command timed out on BusyBox, 142: Command timed out on Bash
+      ui_msg 'Key: No key pressed'
+      return 0;;
+    *)
+      ui_warning 'Key detection failed'
+      return 1;;
+  esac
+
+  ui_msg "Key: ${_key:?}"
   _choose_remapper "${_key:?}"
   return "${?}"
 }
@@ -227,20 +237,17 @@ choose_shell()
   ui_msg "${2:?}"
   ui_msg "${3:?}"
   # shellcheck disable=SC3045
-  IFS='' read -n1 -r -s -- _key || { ui_warning 'Key detection failed'; return 1; }
-  if test "${_key}" = ''; then
-    ui_msg 'Key code: No key pressed'
-    return 0
-  else
-    ui_msg "Key press: ${_key:?}"
-  fi
+  IFS='' read -rsn1 -- _key || { ui_warning 'Key detection failed'; return 1; }
+  if test -z "${_key?}"; then _key='Enter'; fi
+
+  ui_msg "Key press: ${_key:?}"
   _choose_remapper "${_key:?}"
   return "${?}"
 }
 
 choose()
 {
-  if "${KEYCHECK_ENABLED}"; then
+  if "${KEYCHECK_ENABLED:?}"; then
     choose_binary "${@}"
   else
     choose_shell "${@}"
@@ -282,7 +289,6 @@ OUR_BB="${BASE_TMP_PATH}/busybox"
 if test -n "${CUSTOM_BUSYBOX:-}" && test -e "${CUSTOM_BUSYBOX}"; then
   OUR_BB="${CUSTOM_BUSYBOX}"
   ui_debug "Using custom BusyBox... '${OUR_BB}'"
-  #LIVE_SETUP_POSSIBLE=true
 elif test "${RECOVERY_ARCH}" = 'x86_64'; then
   ui_debug 'Extracting 64-bit x86 BusyBox...'
   package_extract_file 'misc/busybox/busybox-x86_64.bin' "${OUR_BB}"
@@ -312,7 +318,7 @@ create_dir_safe "${TMP_PATH}"
 create_dir_safe "${TMP_PATH}/bin"
 
 PREVIOUS_PATH="${PATH}"
-DEVICE_MOUNT="$(which mount)"
+DEVICE_MOUNT="$(command -v -- mount)" || DEVICE_MOUNT=''
 export DEVICE_MOUNT
 
 if test "${TEST_INSTALL:-false}" = 'false'; then
@@ -331,6 +337,9 @@ if test -e "${BASE_TMP_PATH}/keycheck"; then
   LIVE_SETUP_POSSIBLE=true
   KEYCHECK_ENABLED=true
 fi
+
+# Enable the binary-free live setup when inside the recovery simulator
+if test "${TEST_INSTALL:-false}" != 'false'; then LIVE_SETUP_POSSIBLE=true; KEYCHECK_ENABLED=false; fi
 
 # Live setup isn't supported under continuous integration system
 # Live setup doesn't work when executed through Gradle
@@ -365,7 +374,7 @@ if [ "${DEBUG_LOG_ENABLED}" -eq 1 ]; then export DEBUG_LOG=1; fi
 "${BOOTMODE}" || (ps -A 2>/dev/null | grep zygote | grep -v grep >/dev/null && BOOTMODE=true)
 
 # Live setup
-if "${LIVE_SETUP_POSSIBLE}" && test "${LIVE_SETUP}" -eq 0 && test "${LIVE_SETUP_TIMEOUT}" -ge 1; then
+if "${LIVE_SETUP_POSSIBLE:?}" && test "${LIVE_SETUP:?}" -eq 0 && test "${LIVE_SETUP_TIMEOUT:?}" -ge 1; then
   ui_msg '---------------------------------------------------'
   ui_msg 'INFO: Select the VOLUME + key to enable live setup.'
   ui_msg "Waiting input for ${LIVE_SETUP_TIMEOUT} seconds..."
