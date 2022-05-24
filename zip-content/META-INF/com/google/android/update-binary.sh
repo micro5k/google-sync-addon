@@ -8,6 +8,9 @@
 
 umask 022
 
+# shellcheck disable=SC3040
+set -o pipefail || true
+
 ### GLOBAL VARIABLES ###
 
 export DEBUG_LOG=0
@@ -49,41 +52,37 @@ disable_debug_log()
 
 _show_text_on_recovery()
 {
-  if test -e "${RECOVERY_PIPE}"; then
-    printf "ui_print %s\nui_print \n" "${1}" >> "${RECOVERY_PIPE}"
+  if test -e "${RECOVERY_PIPE:?}"; then
+    printf "ui_print %s\nui_print \n" "${1?}" >> "${RECOVERY_PIPE:?}"
   else
-    printf "ui_print %s\nui_print \n" "${1}" 1>&"${OUTFD}"
+    printf "ui_print %s\nui_print \n" "${1?}" 1>&"${OUTFD:?}"
   fi
 }
 
 ui_error()
 {
   ERROR_CODE=79
-  if test -n "$2"; then ERROR_CODE="$2"; fi
-  echo "ERROR ${ERROR_CODE}: $1" >&2
-  _show_text_on_recovery "ERROR: $1"
-  exit "${ERROR_CODE}"
+  if test -n "${2}"; then ERROR_CODE="${2:?}"; fi
+  1>&2 echo "ERROR ${ERROR_CODE:?}: ${1:?}"
+  _show_text_on_recovery "ERROR: ${1:?}"
+  exit "${ERROR_CODE:?}"
 }
 
 ui_warning()
 {
-  echo "WARNING: $1" >&2
-  _show_text_on_recovery "WARNING: $1"
+  1>&2 echo "WARNING: ${1:?}"
+  _show_text_on_recovery "WARNING: ${1:?}"
 }
 
 ui_msg()
 {
-  if test "${DEBUG_LOG}" -ne 0; then echo "$1"; fi
-  if test -e "${RECOVERY_PIPE}"; then
-    printf "ui_print %s\nui_print \n" "${1}" >> "${RECOVERY_PIPE}"
-  else
-    printf "ui_print %s\nui_print \n" "${1}" 1>&"${OUTFD}"
-  fi
+  if test "${DEBUG_LOG}" -ne 0; then echo "${1:?}"; fi
+  _show_text_on_recovery "${1:?}"
 }
 
 ui_debug()
 {
-  echo "$1"
+  echo "${1?}"
 }
 
 is_mounted()
@@ -149,6 +148,16 @@ delete_recursive_safe()
   "${OUR_BB}" rm -rf "$@" || ui_error "Failed to delete files/folders" 86
 }
 
+parse_busybox_version()
+{
+  head -n1 | grep -oE 'BusyBox v[0-9]+\.[0-9]+\.[0-9]+' | cut -d 'v' -f 2
+}
+
+numerically_comparable_version()
+{
+  echo "${@:?}" | awk -F. '{ printf("%d%03d%03d%03d\n", $1, $2, $3, $4); }'
+}
+
 # Input related functions
 check_key()
 {
@@ -180,13 +189,22 @@ _choose_remapper()
 
 choose_binary_timeout()
 {
+  local _timeout_ver
   local key_code=1
-  timeout -t "${1:?}" keycheck; key_code="${?}"  # Timeout return 127 when it cannot execute the binary
+
+  _timeout_ver="$(timeout --help 2>&1 | parse_busybox_version)" || _timeout_ver=''
+  if test -z "${_timeout_ver?}" || test "$(numerically_comparable_version "${_timeout_ver:?}" || true)" -ge "$(numerically_comparable_version '1.30.0' || true)"; then
+    timeout "${1:?}" keycheck; key_code="${?}"
+  else
+    timeout -t "${1:?}" keycheck; key_code="${?}"
+  fi
+
+  # Timeout return 127 when it cannot execute the binary
   if test "${key_code?}" = '143'; then
     ui_msg 'Key code: No key pressed'
     return 0
   elif test "${key_code?}" = '127' || test "${key_code?}" = '132'; then
-    ui_msg 'WARNING: Key detection failed'
+    ui_warning 'Key detection failed'
     return 1
   fi
 
@@ -264,7 +282,7 @@ ui_debug 'PRELOADER'
 if ! is_mounted "${BASE_TMP_PATH:?}"; then
   # Workaround: create and mount the temp folder if it isn't already mounted
   MANUAL_TMP_MOUNT=1
-  ui_msg 'WARNING: Creating and mounting the missing temp folder...'
+  ui_warning 'Creating and mounting the missing temp folder...'
   if ! test -e "${BASE_TMP_PATH:?}"; then create_dir "${BASE_TMP_PATH:?}"; fi
   mount -t tmpfs -o rw tmpfs "${BASE_TMP_PATH:?}"
   set_perm 0 2000 0775 "${BASE_TMP_PATH:?}"

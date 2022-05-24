@@ -90,11 +90,11 @@ ui_msg 'Google Sync Add-on'
 ui_msg "${install_version}"
 ui_msg '(by ale5000)'
 ui_msg '------------------'
-ui_msg ''
+ui_msg_empty_line
 ui_msg "API: ${API}"
 ui_msg "System path: ${SYS_PATH}"
 ui_msg "Privileged apps: ${PRIVAPP_PATH}"
-ui_msg ''
+ui_msg_empty_line
 
 # Extracting
 ui_msg 'Extracting...'

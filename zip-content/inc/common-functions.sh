@@ -20,61 +20,63 @@ fi
 # Message related functions
 _show_text_on_recovery()
 {
-  if test -e "${RECOVERY_PIPE}"; then
-    printf "ui_print %s\nui_print \n" "${1}" >> "${RECOVERY_PIPE}"
+  if test -e "${RECOVERY_PIPE:?}"; then
+    printf "ui_print %s\nui_print \n" "${1?}" >> "${RECOVERY_PIPE:?}"
   else
-    printf "ui_print %s\nui_print \n" "${1}" 1>&"${OUTFD}"
+    printf "ui_print %s\nui_print \n" "${1?}" 1>&"${OUTFD:?}"
   fi
 }
 
 ui_error()
 {
   ERROR_CODE=91
-  if test -n "$2"; then ERROR_CODE="$2"; fi
-  >&2 echo "ERROR ${ERROR_CODE}: $1"
-  _show_text_on_recovery "ERROR: $1"
-  exit "${ERROR_CODE}"
+  if test -n "${2}"; then ERROR_CODE="${2:?}"; fi
+  1>&2 echo "ERROR ${ERROR_CODE:?}: ${1:?}"
+  _show_text_on_recovery "ERROR: ${1:?}"
+  exit "${ERROR_CODE:?}"
 }
 
 ui_warning()
 {
-  >&2 echo "WARNING: $1"
-  _show_text_on_recovery "WARNING: $1"
+  1>&2 echo "WARNING: ${1:?}"
+  _show_text_on_recovery "WARNING: ${1:?}"
+}
+
+ui_msg_empty_line()
+{
+  if test "${DEBUG_LOG}" -ne 0; then echo ''; fi
+  _show_text_on_recovery ''
 }
 
 ui_msg()
 {
-  if test "${DEBUG_LOG}" -ne 0; then echo "$1"; fi
-  if test -e "${RECOVERY_PIPE}"; then
-    printf "ui_print %s\nui_print \n" "${1}" >> "${RECOVERY_PIPE}"
-  else
-    printf "ui_print %s\nui_print \n" "${1}" 1>&"${OUTFD}"
-  fi
+  if test "${DEBUG_LOG}" -ne 0; then echo "${1:?}"; fi
+  _show_text_on_recovery "${1:?}"
 }
 
 ui_msg_sameline_start()
 {
-  if test "${DEBUG_LOG}" -ne 0; then printf '%s\n' "${1}"; fi
+  if test "${DEBUG_LOG}" -ne 0; then printf '%s\n' "${1:?}"; fi
   if test -e "${RECOVERY_PIPE}"; then
-    printf 'ui_print %s' "${1}" >> "${RECOVERY_PIPE}"
+    printf 'ui_print %s' "${1:?}" >> "${RECOVERY_PIPE:?}"
   else
-    printf 'ui_print %s' "${1}" 1>&"${OUTFD}"
+    printf 'ui_print %s' "${1:?}" 1>&"${OUTFD:?}"
   fi
 }
 
 ui_msg_sameline_end()
 {
-  if test "${DEBUG_LOG}" -ne 0; then printf '%s\n' "${1}"; fi
+  if test "${DEBUG_LOG}" -ne 0; then printf '%s\n' "${1:?}"; fi
   if test -e "${RECOVERY_PIPE}"; then
-    printf '%s\nui_print \n' "${1}" >> "${RECOVERY_PIPE}"
+    printf '%s\nui_print \n' "${1:?}" >> "${RECOVERY_PIPE:?}"
   else
-    printf '%s\nui_print \n' "${1}" 1>&"${OUTFD}"
+    printf '%s\nui_print \n' "${1:?}" 1>&"${OUTFD:?}"
   fi
 }
 
 ui_debug()
 {
-  echo "$1"
+  echo "${1?}"
 }
 
 # Error checking functions
@@ -145,7 +147,7 @@ remount_read_only()
 
 unmount()
 {
-  umount "$1" || ui_msg "WARNING: Failed to unmount '$1'"
+  umount "$1" || ui_warning "Failed to unmount '$1'"
 }
 
 # Getprop related functions
@@ -433,7 +435,7 @@ choose_binary_timeout()
     ui_msg 'Key code: No key pressed'
     return 0
   elif test "${key_code?}" = '127' || test "${key_code?}" = '132'; then
-    ui_msg 'WARNING: Key detection failed'
+    ui_warning 'Key detection failed'
     return 1
   fi
 
