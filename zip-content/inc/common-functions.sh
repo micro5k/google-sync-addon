@@ -399,6 +399,37 @@ write_file_list()  # $1 => Folder to scan  $2 => Prefix to remove  $3 => Output 
 }
 
 # Input related functions
+_find_hardware_keys()
+{
+  if ! test -e '/proc/bus/input/devices'; then return 1; fi
+  local _last_device_name=''
+  while IFS=': ' read -r line_type full_line; do
+    if test "${line_type?}" = 'N'; then
+      _last_device_name="${full_line:?}"
+    elif test "${line_type?}" = 'H' && test "${_last_device_name?}" = 'Name="gpio-keys"'; then
+      local _not_found=1
+      echo "${full_line:?}" | cut -d '=' -f 2 | while IFS='' read -r my_line; do
+        for elem in ${my_line:?}; do
+          echo "${elem:?}" | grep -e '^event' && { _not_found=0; break; }
+        done
+        return "${_not_found:?}"
+      done
+      return "${?}"
+    fi
+  done < '/proc/bus/input/devices'
+  return 1
+}
+
+_parse_input_event()
+{
+  if ! test -e "/dev/input/${1:?}"; then return 1; fi
+  hexdump -n 14 -d 0< "/dev/input/${1:?}" | while IFS=' ' read -r _ _ _ _ _ _ cur_button key_down _; do
+    if test "${key_down:?}" -ne 1; then return 2; fi
+    echo "${cur_button:?}" | awk '{$0=int($0)}1' || return 1
+    break
+  done
+}
+
 check_key()
 {
   case "${1?}" in
@@ -429,8 +460,17 @@ _choose_remapper()
 
 choose_binary_timeout()
 {
+  local _timeout_ver
   local key_code=1
-  timeout -t "${1:?}" keycheck; key_code="${?}"  # Timeout return 127 when it cannot execute the binary
+
+  _timeout_ver="$(timeout --help 2>&1 | parse_busybox_version)" || _timeout_ver=''
+  if test -z "${_timeout_ver?}" || test "$(numerically_comparable_version "${_timeout_ver:?}" || true)" -ge "$(numerically_comparable_version '1.30.0' || true)"; then
+    timeout "${1:?}" keycheck; key_code="${?}"
+  else
+    timeout -t "${1:?}" keycheck; key_code="${?}"
+  fi
+
+  # Timeout return 127 when it cannot execute the binary
   if test "${key_code?}" = '143'; then
     ui_msg 'Key code: No key pressed'
     return 0
@@ -494,6 +534,25 @@ choose_shell()
   return "${?}"
 }
 
+choose_input_event()
+{
+  local _key _hard_keys_event
+  ui_msg "QUESTION: ${1:?}"
+  ui_msg "${2:?}"
+  ui_msg "${3:?}"
+
+  _hard_keys_event="$(_find_hardware_keys)" || { ui_warning 'Key detection failed'; return 1; }
+  _key="$(_parse_input_event "${_hard_keys_event:?}")" || { ui_warning 'Key detection failed'; return 1; }
+
+  ui_msg "Key code: ${_key:?}"
+  # 102 Menu
+  # 114 Vol -
+  # 115 Vol +
+  # 116 Power
+  #_choose_input_event_remapper "${_key:?}"
+  #return "${?}"
+}
+
 choose()
 {
   if "${KEYCHECK_ENABLED:?}"; then
@@ -505,10 +564,35 @@ choose()
 }
 
 # Other
+parse_busybox_version()
+{
+  head -n1 | grep -oE 'BusyBox v[0-9]+\.[0-9]+\.[0-9]+' | cut -d 'v' -f 2
+}
+
+numerically_comparable_version()
+{
+  echo "${@:?}" | awk -F. '{ printf("%d%03d%03d%03d\n", $1, $2, $3, $4); }'
+}
+
 remove_ext()
 {
   local str="$1"
   echo "${str%.*}"
+}
+
+enable_debug_log()
+{
+  if test "${DEBUG_LOG_ENABLED}" -eq 1; then return; fi
+  DEBUG_LOG_ENABLED=1
+  exec 3>&1 4>&2  # Backup stdout and stderr
+  exec 1>>"${ZIP_PATH:?}/debug-a5k.log" 2>&1
+}
+
+disable_debug_log()
+{
+  if test "${DEBUG_LOG_ENABLED}" -eq 0; then return; fi
+  DEBUG_LOG_ENABLED=0
+  exec 1>&3 2>&4  # Restore stdout and stderr
 }
 
 # Test

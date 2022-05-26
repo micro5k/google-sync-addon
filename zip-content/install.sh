@@ -4,9 +4,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # SPDX-FileType: SOURCE
 
-# shellcheck disable=SC3010
-# SC3010: In POSIX sh, [[ ]] is undefined
-
 ### INIT ENV ###
 export TZ=UTC
 export LANG=en_US
@@ -33,6 +30,26 @@ SYS_PATH=''
 
 
 ### CODE ###
+
+# Live setup
+if "${LIVE_SETUP_POSSIBLE:?}" && test "${LIVE_SETUP:?}" -eq 0 && test "${LIVE_SETUP_TIMEOUT:?}" -ge 1; then
+  ui_msg '---------------------------------------------------'
+  ui_msg 'INFO: Select the VOLUME + key to enable live setup.'
+  ui_msg "Waiting input for ${LIVE_SETUP_TIMEOUT} seconds..."
+  if "${KEYCHECK_ENABLED}"; then
+    choose_binary_timeout "${LIVE_SETUP_TIMEOUT}"
+  else
+    choose_timeout "${LIVE_SETUP_TIMEOUT}"
+  fi
+  if test "${?}" = '3'; then export LIVE_SETUP=1; fi
+fi
+
+if test "${LIVE_SETUP}" = '1'; then
+  ui_msg 'LIVE SETUP ENABLED!'
+  if test "${DEBUG_LOG}" = '0'; then
+    choose 'Do you want to enable the debug log?' '+) Yes' '-) No'; if test "${?}" = '3'; then export DEBUG_LOG=1; enable_debug_log; fi
+  fi
+fi
 
 SYS_INIT_STATUS=0
 
@@ -72,13 +89,13 @@ PRIVAPP_PATH="${SYS_PATH}/app"
 if test -e "${SYS_PATH}/priv-app"; then PRIVAPP_PATH="${SYS_PATH}/priv-app"; fi  # Detect the position of the privileged apps folder
 
 API=$(build_getprop 'build\.version\.sdk')
-if [[ "${API}" -ge 24 ]]; then  # 23
+if test "${API}" -ge 24; then  # 23
   :  ### New Android versions
-elif [[ "${API}" -ge 21 ]]; then
+elif test "${API}" -ge 21; then
   ui_error 'ERROR: Unsupported Android version'
-elif [[ "${API}" -ge 19 ]]; then
+elif test "${API}" -ge 19; then
   OLD_ANDROID=true
-elif [[ "${API}" -ge 1 ]]; then
+elif test "${API}" -ge 1; then
   ui_error 'Your Android version is too old'
 else
   ui_error 'Invalid API level'
@@ -154,7 +171,7 @@ fi
 
 # Configuring default Android permissions
 ui_debug 'Configuring default Android permissions...'
-if [[ ! -e "${SYS_PATH}/etc/default-permissions" ]]; then
+if ! test -e "${SYS_PATH}/etc/default-permissions"; then
   ui_msg 'Creating the default permissions folder...'
   create_dir "${SYS_PATH}/etc/default-permissions"
 fi
@@ -188,13 +205,13 @@ if test "${API}" -lt 26; then
   delete "${TMP_PATH}/files/etc/permissions/privapp-permissions-com.google.android.syncadapters.contacts.xml"
   delete_dir_if_empty "${TMP_PATH}/files/etc/permissions"
 fi
-if [[ "${API}" -ge 23 ]]; then
+if test "${API}" -ge 23; then
   if test -e "${TMP_PATH}/files/etc/permissions"; then copy_dir_content "${TMP_PATH}/files/etc/permissions" "${SYS_PATH}/etc/permissions"; fi
   copy_dir_content "${TMP_PATH}/files/priv-app" "${PRIVAPP_PATH}"
   copy_dir_content "${TMP_PATH}/files/app" "${SYS_PATH}/app"
-elif [[ "${API}" -ge 21 ]]; then
+elif test "${API}" -ge 21; then
   ui_error 'ERROR: Unsupported Android version'
-elif [[ "${API}" -ge 19 ]]; then
+elif test "${API}" -ge 19; then
   copy_dir_content "${TMP_PATH}/files/priv-app-4.4" "${PRIVAPP_PATH}"
   copy_dir_content "${TMP_PATH}/files/app-4.4" "${SYS_PATH}/app"
 fi
