@@ -14,7 +14,7 @@ All notable changes to this project will be documented in this file.
 -------------------
 - Click above to see all the changes.
 
-1.0.3 beta
+`1.0.3`_ beta
 ----------
 - Updated Google Contacts Sync to 8.0.0 for Nougat (tested)
 - Improved Google Sync Add-on / GApps uninstaller
@@ -41,4 +41,5 @@ All notable changes to this project will be documented in this file.
 - Initial release
 
 
-.. _Dev: https://github.com/micro5k/google-sync-addon/compare/ff98479424018616811fa8d8afab2f2684361616...HEAD
+.. _Dev: https://github.com/micro5k/google-sync-addon/compare/7d869eb31a90645b742c434001df9f0ac6df0a76...HEAD
+.. _1.0.3: https://github.com/micro5k/google-sync-addon/compare/572b41b384523f24028ff5c11dc898054b0b3145...7d869eb31a90645b742c434001df9f0ac6df0a76
