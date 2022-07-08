@@ -10,17 +10,17 @@ Changelog
 All notable changes to this project will be documented in this file.
 
 
-`Dev`_ - Unreleased
--------------------
+`Unreleased`_
+-------------
 - Click above to see all the changes.
 
 `1.0.3-beta`_
-----------
+-------------
 - Updated Google Contacts Sync to 8.0.0 for Nougat (tested)
 - Improved Google Sync Add-on / GApps uninstaller
 
 `1.0.2-alpha`_
------------
+--------------
 - Released sources on GitHub
 - Added Google Calendar Sync for KitKat
 - Changed signing process to fix a problem with Dingdong Recovery and maybe other old recoveries
@@ -41,6 +41,6 @@ All notable changes to this project will be documented in this file.
 - Initial release
 
 
-.. _Dev: https://github.com/micro5k/google-sync-addon/compare/7d869eb31a90645b742c434001df9f0ac6df0a76...HEAD
+.. _Unreleased: https://github.com/micro5k/google-sync-addon/compare/7d869eb31a90645b742c434001df9f0ac6df0a76...HEAD
 .. _1.0.3-beta: https://github.com/micro5k/google-sync-addon/compare/572b41b384523f24028ff5c11dc898054b0b3145...7d869eb31a90645b742c434001df9f0ac6df0a76
 .. _1.0.2-alpha: https://github.com/micro5k/google-sync-addon/tree/572b41b384523f24028ff5c11dc898054b0b3145
