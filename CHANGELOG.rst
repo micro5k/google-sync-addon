@@ -18,17 +18,16 @@ All notable changes to this project will be documented in this file.
 ----------
 - Updated Google Contacts Sync to 8.0.0 for Nougat (tested)
 - Improved Google Sync Add-on / GApps uninstaller
-- Minor changes
 
 1.0.2 alpha
 -----------
 - Released sources on GitHub
 - Added Google Calendar Sync for KitKat
-- Changed signing process to fix a problem with Dingdong Recovery and maybe other old recoveries.
+- Changed signing process to fix a problem with Dingdong Recovery and maybe other old recoveries
 - Added default permissions
 - Reset permissions on dirty installations
 - Temporarily disabled support for Marshmallow until the problems are fixed
-- Almost complete rewrite of the installer, so you can finally say goodbye to error 4
+- Almost complete rewrite of the installer, so the error 4 is finally gone
 - Too many changes to remember
 
 1.0.1 beta
