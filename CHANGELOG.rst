@@ -14,12 +14,12 @@ All notable changes to this project will be documented in this file.
 -------------------
 - Click above to see all the changes.
 
-`1.0.3`_ beta
+`1.0.3-beta`_
 ----------
 - Updated Google Contacts Sync to 8.0.0 for Nougat (tested)
 - Improved Google Sync Add-on / GApps uninstaller
 
-`1.0.2`_ alpha
+`1.0.2-alpha`_
 -----------
 - Released sources on GitHub
 - Added Google Calendar Sync for KitKat
@@ -30,17 +30,17 @@ All notable changes to this project will be documented in this file.
 - Almost complete rewrite of the installer, so the error 4 is finally gone
 - Too many changes to remember
 
-1.0.1 beta
+1.0.1-beta
 ----------
 - Added support for Android 6.0 - 8.0
 - Added Google Contacts Sync O
 - Added Google Calendar Sync 5.2.3-99827563
 
-1.0.0 beta
+1.0.0-beta
 ----------
 - Initial release
 
 
 .. _Dev: https://github.com/micro5k/google-sync-addon/compare/7d869eb31a90645b742c434001df9f0ac6df0a76...HEAD
-.. _1.0.3: https://github.com/micro5k/google-sync-addon/compare/572b41b384523f24028ff5c11dc898054b0b3145...7d869eb31a90645b742c434001df9f0ac6df0a76
-.. _1.0.2: https://github.com/micro5k/google-sync-addon/tree/572b41b384523f24028ff5c11dc898054b0b3145
+.. _1.0.3-beta: https://github.com/micro5k/google-sync-addon/compare/572b41b384523f24028ff5c11dc898054b0b3145...7d869eb31a90645b742c434001df9f0ac6df0a76
+.. _1.0.2-alpha: https://github.com/micro5k/google-sync-addon/tree/572b41b384523f24028ff5c11dc898054b0b3145
