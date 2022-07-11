@@ -27,7 +27,7 @@ uninstall_list()
 cat <<'EOF'
 GoogleContactsSyncAdapter|com.google.android.syncadapters.contacts
 GoogleCalendarSyncAdapter|com.google.android.syncadapters.calendar
-CalendarGooglePrebuilt|
+CalendarGooglePrebuilt|com.google.android.calendar
 GoogleBackupTransport|com.google.android.backuptransport
 EOF
 }
