@@ -38,7 +38,7 @@ export SKIPUNZIP
 
 ### GLOBAL VARIABLES ###
 
-export RECOVERY_API_VER="${1}"
+export RECOVERY_API_VER="${1:-}"
 ZIP_PATH="$(dirname "${ZIPFILE:?}")"
 export ZIP_PATH
 
@@ -50,7 +50,6 @@ STATUS=1
 
 export LIVE_SETUP_POSSIBLE=false
 export KEYCHECK_ENABLED=false
-export BOOTMODE=false
 
 
 ### FUNCTIONS ###
