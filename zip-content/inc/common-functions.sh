@@ -7,12 +7,14 @@
 # shellcheck disable=SC3043
 # SC3043: In POSIX sh, local is undefined
 
-### GLOBAL VARIABLES ###
+### PREVENTIVE CHECKS ###
 
-if test -z "${RECOVERY_PIPE:-}" || test -z "${OUTFD:-}" || test -z "${ZIP_FILE:-}" || test -z "${TMP_PATH:-}" || test -z "${DEBUG_LOG:-}"; then
+if test -z "${RECOVERY_PIPE:-}" || test -z "${OUTFD:-}" || test -z "${ZIPFILE:-}" || test -z "${TMP_PATH:-}" || test -z "${DEBUG_LOG:-}"; then
   echo 'Some variables are NOT set.'
   exit 90
 fi
+
+mkdir -p "${TMP_PATH:?}/func-tmp" || ui_error 'Failed to create the functions temp folder'
 
 
 ### FUNCTIONS ###
@@ -20,63 +22,66 @@ fi
 # Message related functions
 _show_text_on_recovery()
 {
-  if test -e "${RECOVERY_PIPE:?}"; then
-    printf "ui_print %s\nui_print \n" "${1?}" >> "${RECOVERY_PIPE:?}"
+  if test "${BOOTMODE:?}" = 'true'; then
+    printf '%s\n' "${1?}"
+    return
+  elif test -e "${RECOVERY_PIPE:?}"; then
+    printf 'ui_print %s\nui_print\n' "${1?}" >> "${RECOVERY_PIPE:?}"
   else
-    printf "ui_print %s\nui_print \n" "${1?}" 1>&"${OUTFD:?}"
+    printf 'ui_print %s\nui_print\n' "${1?}" 1>&"${OUTFD:?}"
   fi
+
+  if test "${DEBUG_LOG:?}" -ne 0; then printf '%s\n' "${1?}"; fi
 }
 
 ui_error()
 {
   ERROR_CODE=91
-  if test -n "${2}"; then ERROR_CODE="${2:?}"; fi
-  1>&2 echo "ERROR ${ERROR_CODE:?}: ${1:?}"
+  if test -n "${2:-}"; then ERROR_CODE="${2:?}"; fi
   _show_text_on_recovery "ERROR: ${1:?}"
-  exit "${ERROR_CODE:?}"
+  1>&2 printf '\033[1;31m%s\033[0m\n' "ERROR ${ERROR_CODE:?}: ${1:?}"
+  abort '' 2>/dev/null || exit "${ERROR_CODE:?}"
 }
 
 ui_warning()
 {
-  1>&2 echo "WARNING: ${1:?}"
   _show_text_on_recovery "WARNING: ${1:?}"
+  1>&2 printf '\033[0;33m%s\033[0m\n' "WARNING: ${1:?}"
 }
 
 ui_msg_empty_line()
 {
-  if test "${DEBUG_LOG}" -ne 0; then echo ''; fi
-  _show_text_on_recovery ''
+  _show_text_on_recovery ' '
 }
 
 ui_msg()
 {
-  if test "${DEBUG_LOG}" -ne 0; then echo "${1:?}"; fi
   _show_text_on_recovery "${1:?}"
 }
 
 ui_msg_sameline_start()
 {
-  if test "${DEBUG_LOG}" -ne 0; then printf '%s\n' "${1:?}"; fi
   if test -e "${RECOVERY_PIPE}"; then
     printf 'ui_print %s' "${1:?}" >> "${RECOVERY_PIPE:?}"
   else
     printf 'ui_print %s' "${1:?}" 1>&"${OUTFD:?}"
   fi
+  if test "${DEBUG_LOG}" -ne 0; then printf '%s\n' "${1:?}"; fi
 }
 
 ui_msg_sameline_end()
 {
-  if test "${DEBUG_LOG}" -ne 0; then printf '%s\n' "${1:?}"; fi
   if test -e "${RECOVERY_PIPE}"; then
-    printf '%s\nui_print \n' "${1:?}" >> "${RECOVERY_PIPE:?}"
+    printf '%s\nui_print\n' "${1:?}" >> "${RECOVERY_PIPE:?}"
   else
-    printf '%s\nui_print \n' "${1:?}" 1>&"${OUTFD:?}"
+    printf '%s\nui_print\n' "${1:?}" 1>&"${OUTFD:?}"
   fi
+  if test "${DEBUG_LOG}" -ne 0; then printf '%s\n' "${1:?}"; fi
 }
 
 ui_debug()
 {
-  echo "${1?}"
+  printf '%s\n' "${1?}"
 }
 
 # Error checking functions
@@ -94,22 +99,82 @@ validate_return_code_warning()
 mount_partition()
 {
   local partition
-  partition="$(readlink -f "${1}")" || { partition="${1}"; ui_warning "Failed to canonicalize '${1}'"; }
+  partition="$(readlink -f "${1:?}")" || { partition="${1:?}"; ui_warning "Failed to canonicalize '${1}'"; }
 
-  mount "${partition}" || ui_warning "Failed to mount '${1}'"
+  mount "${partition:?}" || ui_warning "Failed to mount '${partition}'"
+  return 0  # Never fail
+}
+
+mount_partition_silent()
+{
+  local partition
+  partition="$(readlink -f "${1:?}")" || { partition="${1:?}"; }
+
+  mount "${partition:?}" 2>/dev/null || true
+  return 0  # Never fail
+}
+
+unmount()
+{
+  local partition
+  partition="$(readlink -f "${1:?}")" || { partition="${1:?}"; ui_warning "Failed to canonicalize '${1}'"; }
+
+  umount "${partition:?}" || ui_warning "Failed to unmount '${partition}'"
+  return 0  # Never fail
 }
 
 is_mounted()
 {
-  local _partition _mount_result
-  _partition="$(readlink -f "${1:?}")" || { _partition="${1:?}"; ui_warning "Failed to canonicalize '${1}'"; }
-  _mount_result="$(mount)" || { test -e '/proc/mounts' && _mount_result="$(cat /proc/mounts)"; } || { test -n "${DEVICE_MOUNT:-}" && _mount_result="$("${DEVICE_MOUNT:?}")"; } || ui_error 'is_mounted has failed'
+  local _partition _mount_result _silent
+  _silent="${2:-false}"
+  _partition="$(readlink -f "${1:?}")" || { _partition="${1:?}"; if test "${_silent:?}" = false; then ui_warning "Failed to canonicalize '${1}'"; fi; }
+
+  { test "${TEST_INSTALL:-false}" = 'false' && test -e '/proc/mounts' && _mount_result="$(cat /proc/mounts)"; } || _mount_result="$(mount 2>/dev/null)" || { test -n "${DEVICE_MOUNT:-}" && _mount_result="$("${DEVICE_MOUNT:?}")"; } || ui_error 'is_mounted has failed'
 
   case "${_mount_result:?}" in
     *[[:blank:]]"${_partition:?}"[[:blank:]]*) return 0;;  # Mounted
     *)                                                     # NOT mounted
   esac
   return 1  # NOT mounted
+}
+
+_mount_if_needed_silent()
+{
+  if is_mounted "${1:?}" true; then return 1; fi
+
+  mount_partition_silent "${1:?}"
+  is_mounted "${1:?}" true
+  return "${?}"
+}
+
+UNMOUNT_SYS_EXT=0
+UNMOUNT_PRODUCT=0
+UNMOUNT_VENDOR=0
+mount_extra_partitions_silent()
+{
+  ! _mount_if_needed_silent '/system_ext'
+  UNMOUNT_SYS_EXT="${?}"
+  ! _mount_if_needed_silent '/product'
+  UNMOUNT_PRODUCT="${?}"
+  ! _mount_if_needed_silent '/vendor'
+  UNMOUNT_VENDOR="${?}"
+
+  return 0  # Never fail
+}
+
+unmount_extra_partitions()
+{
+  if test "${UNMOUNT_SYS_EXT:?}" = '1'; then
+    unmount '/system_ext'
+  fi
+  if test "${UNMOUNT_PRODUCT:?}" = '1'; then
+    unmount '/product'
+  fi
+  if test "${UNMOUNT_VENDOR:?}" = '1'; then
+    unmount '/vendor'
+  fi
+
+  return 0  # Never fail
 }
 
 ensure_system_is_mounted()
@@ -143,11 +208,6 @@ remount_read_write()
 remount_read_only()
 {
   mount -o remount,ro "$1" "$1"
-}
-
-unmount()
-{
-  umount "$1" || ui_warning "Failed to unmount '$1'"
 }
 
 # Getprop related functions
@@ -189,10 +249,19 @@ replace_slash_with_at()
   echo "${result}"
 }
 
-replace_line_in_file()  # $1 => File to process  $2 => Line to replace  $3 => File to read for replacement text
+replace_line_in_file()  # $1 => File to process  $2 => Line to replace  $3 => Replacement text
 {
-  sed -i "/$2/r $3" "$1" || ui_error "Failed to replace (1) a line in the file => '$1'" 92
-  sed -i "/$2/d" "$1" || ui_error "Failed to replace (2) a line in the file => '$1'" 92
+  rm -f -- "${TMP_PATH:?}/func-tmp/replacement-string.dat"
+  echo "${3:?}" > "${TMP_PATH:?}/func-tmp/replacement-string.dat" || ui_error "Failed to replace (1) a line in the file => '${1}'" 92
+  sed -i -e "/${2:?}/r ${TMP_PATH:?}/func-tmp/replacement-string.dat" -- "${1:?}" || ui_error "Failed to replace (2) a line in the file => '${1}'" 92
+  sed -i -e "/${2:?}/d" -- "${1:?}" || ui_error "Failed to replace (3) a line in the file => '${1}'" 92
+  rm -f -- "${TMP_PATH:?}/func-tmp/replacement-string.dat"
+}
+
+replace_line_in_file_with_file()  # $1 => File to process  $2 => Line to replace  $3 => File to read for replacement text
+{
+  sed -i -e "/${2:?}/r ${3:?}" -- "${1:?}" || ui_error "Failed to replace (1) a line in the file => '$1'" 92
+  sed -i -e "/${2:?}/d" -- "${1:?}" || ui_error "Failed to replace (2) a line in the file => '$1'" 92
 }
 
 search_string_in_file()
@@ -221,9 +290,7 @@ set_perm()
   local uid="$1"; local gid="$2"; local mod="$3"
   shift 3
   # Quote: Previous versions of the chown utility used the dot (.) character to distinguish the group name; this has been changed to be a colon (:) character, so that user and group names may contain the dot character
-  if test "${TEST_INSTALL:-false}" = 'false'; then
-    chown "${uid}:${gid}" "$@" || chown "${uid}.${gid}" "$@" || ui_error "chown failed on: $*" 81
-  fi
+  chown "${uid}:${gid}" "$@" || chown "${uid}.${gid}" "$@" || ui_error "chown failed on: $*" 81
   chmod "${mod}" "$@" || ui_error "chmod failed on: $*" 81
 }
 
@@ -237,17 +304,17 @@ set_std_perm_recursive()  # Use it only if you know your version of 'find' handl
 package_extract_file()
 {
   local dir
-  dir=$(dirname "$2")
-  mkdir -p "${dir}" || ui_error "Failed to create the dir '${dir}' for extraction" 94
-  set_perm 0 0 0755 "${dir}"
-  unzip -opq "${ZIP_FILE}" "$1" > "$2" || ui_error "Failed to extract the file '$1' from this archive" 94
+  dir="$(dirname "${2:?}")"
+  mkdir -p "${dir:?}" || ui_error "Failed to create the dir '${dir}' for extraction" 94
+  set_perm 0 0 0755 "${dir:?}"
+  unzip -opq "${ZIPFILE:?}" "${1:?}" 1> "${2:?}" || ui_error "Failed to extract the file '${1}' from this archive" 94
 }
 
 custom_package_extract_dir()
 {
-  mkdir -p "$2" || ui_error "Failed to create the dir '$2' for extraction" 95
-  set_perm 0 0 0755 "$2"
-  unzip -oq "${ZIP_FILE}" "$1/*" -d "$2" || ui_error "Failed to extract the dir '$1' from this archive" 95
+  mkdir -p "${2:?}" || ui_error "Failed to create the dir '${2}' for extraction" 95
+  set_perm 0 0 0755 "${2:?}"
+  unzip -oq "${ZIPFILE:?}" "${1:?}/*" -d "${2:?}" || ui_error "Failed to extract the dir '${1}' from this archive" 95
 }
 
 zip_extract_file()
@@ -430,117 +497,143 @@ _parse_input_event()
   done
 }
 
-check_key()
-{
-  case "${1?}" in
-    42)   # Vol +
-      return 3;;
-    21)   # Vol -
-      return 2;;
-    132)  # Error (example: Illegal instruction)
-      return 1;;
-    *)
-      return 0;;
-  esac
-}
-
-_choose_remapper()
+_timeout_exit_code_remapper()
 {
   case "${1:?}" in
-    '+')  # +
-      return 3;;
-    '-')  # -
-      return 2;;
-    'Enter')
-      return 0;;
+    124)  # Timed out
+      return 124;;
+    125)  # timeout command itself fails
+      ;;
+    126)  # COMMAND is found but cannot be invoked
+      ;;
+    127)  # COMMAND cannot be found
+      ;;
+    132)  # SIGILL signal (128+4) - Example: illegal instruction
+      ui_warning 'timeout returned SIGILL signal (128+4)'
+      return 1;;
+    137)  # SIGKILL signal (128+9) - Timed out but SIGTERM failed
+      ui_warning 'timeout returned SIGKILL signal (128+9)'
+      return 1;;
+    143)  # SIGTERM signal (128+15) - Timed out
+      return 124;;
     *)    # All other keys
-      return 0;;
+      if test "${1:?}" -lt 128; then return "${1:?}"; fi;;  # Return codes of COMMAND
   esac
+
+  ui_warning "timeout returned: ${1:?}"
+  return 1
 }
 
-choose_binary_timeout()
+_timeout_compat()
 {
-  local _timeout_ver
-  local key_code=1
+  local _timeout_ver _timeout_secs
 
   _timeout_ver="$(timeout --help 2>&1 | parse_busybox_version)" || _timeout_ver=''
+  _timeout_secs="${1:?}" || ui_error 'Missing "secs" parameter for _timeout_compat'
+  shift
   if test -z "${_timeout_ver?}" || test "$(numerically_comparable_version "${_timeout_ver:?}" || true)" -ge "$(numerically_comparable_version '1.30.0' || true)"; then
-    timeout "${1:?}" keycheck; key_code="${?}"
+    timeout -- "${_timeout_secs:?}" "${@:?}"
   else
-    timeout -t "${1:?}" keycheck; key_code="${?}"
+    timeout -t "${_timeout_secs:?}" -- "${@:?}" 2>/dev/null
   fi
-
-  # Timeout return 127 when it cannot execute the binary
-  if test "${key_code?}" = '143'; then
-    ui_msg 'Key code: No key pressed'
-    return 0
-  elif test "${key_code?}" = '127' || test "${key_code?}" = '132'; then
-    ui_warning 'Key detection failed'
-    return 1
-  fi
-
-  ui_msg "Key code: ${key_code?}"
-  check_key "${key_code?}"
+  _timeout_exit_code_remapper "${?}"
   return "${?}"
 }
 
-choose_timeout()
+_esc_keycode="$(printf '\033')"
+_choose_remapper()
+{
+  local _key
+  _key="${1?}" || ui_error 'Missing parameter for _choose_remapper'
+  if test -z "${_key?}"; then _key='Enter'; elif test "${_key:?}" = "${_esc_keycode:?}"; then _key='ESC'; fi
+  ui_msg_empty_line
+  ui_msg "Key press: ${_key:?}"
+  ui_msg_empty_line
+
+  case "${_key:?}" in
+    '+')    # +
+      return 3;;
+    '-')    # -
+      return 2;;
+    'Enter')
+      return 0;;
+    'ESC')  # ESC or other special keys
+      ui_error 'Installation forcefully terminated' 143;;
+    *)      # All other keys
+      return 123;;
+  esac
+}
+
+_keycheck_map_keycode_to_key()
+{
+  case "${1:?}" in
+    42)  # Vol +
+      printf '+';;
+    21)  # Vol -
+      printf '-';;
+    *)
+      return 1;;
+  esac
+}
+
+choose_keycheck_with_timeout()
+{
+  local _key _status
+  _timeout_compat "${1:?}" keycheck; _status="${?}"
+
+  if test "${_status:?}" = '124'; then ui_msg 'Key: No key pressed'; return 0; fi
+  _key="$(_keycheck_map_keycode_to_key "${_status:?}")" || { ui_warning 'Key detection failed'; return 1; }
+
+  _choose_remapper "${_key:?}"
+  return "${?}"
+}
+
+choose_keycheck()
+{
+  local _key _status
+  keycheck; _status="${?}"
+
+  _key="$(_keycheck_map_keycode_to_key "${_status:?}")" || { ui_warning 'Key detection failed'; return 1; }
+
+  _choose_remapper "${_key:?}"
+  return "${?}"
+}
+
+choose_read_with_timeout()
 {
   local _key _status
   _status='0'
 
   # shellcheck disable=SC3045
-  IFS='' read -rsn1 -t"${1:?}" -- _key || _status="${?}"
+  IFS='' read -rsn 1 -t "${1:?}" -- _key || _status="${?}"
+
   case "${_status:?}" in
-    0)        # 0: Command terminated successfully
-      if test -z "${_key?}"; then _key='Enter'; fi;;
-    1 | 142)  # 1: Command timed out on BusyBox, 142: Command timed out on Bash
-      ui_msg 'Key: No key pressed'
-      return 0;;
+    0) # Command terminated successfully
+      ;;
+    1 | 142) # 1 => Command timed out on BusyBox / Toybox; 142 => Command timed out on Bash
+      ui_msg 'Key: No key pressed'; return 0;;
     *)
-      ui_warning 'Key detection failed'
-      return 1;;
+      ui_warning 'Key detection failed'; return 1;;
   esac
 
-  ui_msg "Key: ${_key:?}"
-  _choose_remapper "${_key:?}"
+  _choose_remapper "${_key?}"
   return "${?}"
 }
 
-choose_binary()
-{
-  local key_code=1
-  ui_msg "QUESTION: ${1:?}"
-  ui_msg "${2:?}"
-  ui_msg "${3:?}"
-  keycheck; key_code="${?}"
-  ui_msg "Key code: ${key_code?}"
-  check_key "${key_code?}"
-  return "${?}"
-}
-
-choose_shell()
+choose_read()
 {
   local _key
-  ui_msg "QUESTION: ${1:?}"
-  ui_msg "${2:?}"
-  ui_msg "${3:?}"
   # shellcheck disable=SC3045
-  IFS='' read -rsn1 -- _key || { ui_warning 'Key detection failed'; return 1; }
-  if test -z "${_key?}"; then _key='Enter'; fi
+  IFS='' read -rsn 1 -- _key || { ui_warning 'Key detection failed'; return 1; }
 
-  ui_msg "Key press: ${_key:?}"
-  _choose_remapper "${_key:?}"
+  clear
+  _choose_remapper "${_key?}"
   return "${?}"
 }
 
-choose_input_event()
+choose_inputevent()
 {
   local _key _hard_keys_event
-  ui_msg "QUESTION: ${1:?}"
-  ui_msg "${2:?}"
-  ui_msg "${3:?}"
-
   _hard_keys_event="$(_find_hardware_keys)" || { ui_warning 'Key detection failed'; return 1; }
   _key="$(_parse_input_event "${_hard_keys_event:?}")" || { ui_warning 'Key detection failed'; return 1; }
 
@@ -549,18 +642,30 @@ choose_input_event()
   # 114 Vol -
   # 115 Vol +
   # 116 Power
-  #_choose_input_event_remapper "${_key:?}"
+  #_choose_inputevent_remapper "${_key:?}"
   #return "${?}"
 }
 
 choose()
 {
-  if "${KEYCHECK_ENABLED:?}"; then
-    choose_binary "${@}"
-  else
-    choose_shell "${@}"
-  fi
-  return "${?}"
+  local _last_status=0
+  while true; do
+    ui_msg "QUESTION: ${1:?}"
+    ui_msg "${2:?}"
+    ui_msg "${3:?}"
+    if "${KEYCHECK_ENABLED:?}"; then
+      choose_keycheck "${@}"
+    else
+      choose_read "${@}"
+    fi
+    _last_status="${?}"
+    if test "${_last_status:?}" -eq 123; then
+      ui_msg 'Invalid choice!!!'
+    else
+      break
+    fi
+  done
+  return "${_last_status:?}"
 }
 
 # Other

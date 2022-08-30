@@ -11,8 +11,9 @@ export LANG=en_US
 unset LANGUAGE
 unset LC_ALL
 unset UNZIP
-unset UNZIP_OPTS
 unset UNZIPOPT
+unset UNZIP_OPTS
+unset CDPATH
 
 ### GLOBAL VARIABLES ###
 
@@ -25,26 +26,37 @@ SYS_PATH=''
 
 ### FUNCTIONS ###
 
-# shellcheck source=SCRIPTDIR/inc/common-functions.sh
+# shellcheck source=SCRIPTDIR/../inc/common-functions.sh
 . "${TMP_PATH}/inc/common-functions.sh"
 
 
 ### CODE ###
 
-# Live setup
-if "${LIVE_SETUP_POSSIBLE:?}" && test "${LIVE_SETUP:?}" -eq 0 && test "${LIVE_SETUP_TIMEOUT:?}" -ge 1; then
-  ui_msg '---------------------------------------------------'
-  ui_msg 'INFO: Select the VOLUME + key to enable live setup.'
-  ui_msg "Waiting input for ${LIVE_SETUP_TIMEOUT} seconds..."
-  if "${KEYCHECK_ENABLED}"; then
-    choose_binary_timeout "${LIVE_SETUP_TIMEOUT}"
-  else
-    choose_timeout "${LIVE_SETUP_TIMEOUT}"
-  fi
-  if test "${?}" = '3'; then export LIVE_SETUP=1; fi
+# Make sure that the commands are still overridden here (most shells don't have the ability to export functions)
+if test "${TEST_INSTALL:-false}" != 'false' && test -f "${RS_OVERRIDE_SCRIPT:?}"; then
+  # shellcheck source=SCRIPTDIR/../../recovery-simulator/inc/configure-overrides.sh
+  . "${RS_OVERRIDE_SCRIPT:?}" || exit "${?}"
 fi
 
-if test "${LIVE_SETUP}" = '1'; then
+# Live setup
+live_setup_enabled=false
+if test "${LIVE_SETUP_POSSIBLE:?}" = 'true'; then
+  if test "${LIVE_SETUP_DEFAULT:?}" != '0'; then
+    live_setup_enabled=true
+  elif test "${LIVE_SETUP_TIMEOUT:?}" -gt 0; then
+    ui_msg '---------------------------------------------------'
+    ui_msg 'INFO: Select the VOLUME + key to enable live setup.'
+    ui_msg "Waiting input for ${LIVE_SETUP_TIMEOUT} seconds..."
+    if "${KEYCHECK_ENABLED}"; then
+      choose_keycheck_with_timeout "${LIVE_SETUP_TIMEOUT}"
+    else
+      choose_read_with_timeout "${LIVE_SETUP_TIMEOUT}"
+    fi
+    if test "${?}" = '3'; then live_setup_enabled=true; fi
+  fi
+fi
+
+if test "${live_setup_enabled:?}" = 'true'; then
   ui_msg 'LIVE SETUP ENABLED!'
   if test "${DEBUG_LOG}" = '0'; then
     choose 'Do you want to enable the debug log?' '+) Yes' '-) No'; if test "${?}" = '3'; then export DEBUG_LOG=1; enable_debug_log; fi
@@ -84,11 +96,15 @@ install_version="$(simple_get_prop 'version' "${TMP_PATH}/module.prop")" || ui_e
 install_version_code="$(simple_get_prop 'versionCode' "${TMP_PATH}/module.prop")" || ui_error 'Failed to parse version code'
 
 INSTALLATION_SETTINGS_FILE="${install_id}.prop"
-
-PRIVAPP_PATH="${SYS_PATH}/app"
-if test -e "${SYS_PATH}/priv-app"; then PRIVAPP_PATH="${SYS_PATH}/priv-app"; fi  # Detect the position of the privileged apps folder
-
 API=$(build_getprop 'build\.version\.sdk')
+
+if test "${API}" -ge 19; then  # KitKat or higher
+  PRIVAPP_PATH="${SYS_PATH}/priv-app"
+else
+  PRIVAPP_PATH="${SYS_PATH}/app"
+fi
+if test ! -e "${PRIVAPP_PATH:?}"; then ui_error 'The priv-app folder does NOT exist'; fi
+
 if test "${API}" -ge 24; then  # 23
   :  ### New Android versions
 elif test "${API}" -ge 21; then
@@ -108,9 +124,10 @@ ui_msg "${install_version}"
 ui_msg '(by ale5000)'
 ui_msg '------------------'
 ui_msg_empty_line
-ui_msg "API: ${API}"
-ui_msg "System path: ${SYS_PATH}"
-ui_msg "Privileged apps: ${PRIVAPP_PATH}"
+ui_msg "Boot mode: ${BOOTMODE:?}"
+ui_msg "Android API: ${API:?}"
+ui_msg "System path: ${SYS_PATH:?}"
+ui_msg "Priv-app path: ${PRIVAPP_PATH:?}"
 ui_msg_empty_line
 
 # Extracting
@@ -126,6 +143,7 @@ set_std_perm_recursive "${TMP_PATH}/files"
 
 # Verifying
 ui_msg_sameline_start 'Verifying... '
+ui_debug ''
 if #verify_sha1 "${TMP_PATH}/files/priv-app/GoogleBackupTransport.apk" '2bdf65e98dbd115473cd72db8b6a13d585a65d8d' &&  # Disabled for now
    verify_sha1 "${TMP_PATH}/files/priv-app/GoogleContactsSyncAdapter.apk" 'd6913b4a2fa5377b2b2f9e43056599b5e987df83' &&
    verify_sha1 "${TMP_PATH}/files/app/GoogleCalendarSyncAdapter.apk" 'aa482580c87a43c83882c05a4757754917d47f32' &&
@@ -137,6 +155,7 @@ then
 else
   ui_msg_sameline_end 'ERROR'
   ui_error 'Verification failed'
+  sleep 1
 fi
 
 # MOUNT /data PARTITION
@@ -165,9 +184,14 @@ if test "${API}" -ge 23; then
   fi
 fi
 
+mount_extra_partitions_silent
+
 # Clean previous installations
+delete "${SYS_PATH}/etc/zips/${install_id}.prop"
 # shellcheck source=SCRIPTDIR/uninstall.sh
 . "${TMP_PATH}/uninstall.sh"
+
+unmount_extra_partitions
 
 # Configuring default Android permissions
 ui_debug 'Configuring default Android permissions...'
@@ -222,9 +246,9 @@ create_dir "${USED_SETTINGS_PATH}"
 {
   echo '# SPDX-FileCopyrightText: none'
   echo '# SPDX-License-Identifier: CC0-1.0'
-  echo '# SPDX-FileType: SOURCE'
+  echo '# SPDX-FileType: OTHER'
   echo ''
-  echo 'install.type=recovery'
+  echo 'install.type=flashable-zip'
   echo "install.version.code=${install_version_code}"
   echo "install.version=${install_version}"
 } > "${USED_SETTINGS_PATH}/${INSTALLATION_SETTINGS_FILE}"
