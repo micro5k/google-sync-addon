@@ -22,7 +22,7 @@ jobs:
       - name: "ShellChecker"
         uses: a5k-actions/shellchecker@v0
         with:
-          ignore-files: "gradlew"
+          ignore-files: "gradlew|.simplecov"
 
   codacy:
     permissions:
@@ -35,7 +35,7 @@ jobs:
       - name: "Check out code"
         uses: actions/checkout@v3
       - name: "Run Codacy analysis"
-        uses: codacy/codacy-analysis-cli-action@v4.1.0
+        uses: codacy/codacy-analysis-cli-action@v4
         with:
           # Check https://github.com/codacy/codacy-analysis-cli#project-token to get your project token from your Codacy repository
           # You can also omit the token and run the tools that support default configurations
@@ -55,6 +55,7 @@ jobs:
     permissions:
       contents: read
     name: "SonarCloud"
+    if: "${{ github.event_name != 'pull_request' }}"
     runs-on: ubuntu-latest
 
     steps:
