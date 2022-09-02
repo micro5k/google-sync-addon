@@ -9,4 +9,5 @@ versionCode=1
 author=ale5000
 description=Google Sync add-on is a flashable zip made to simplify the installation of Google sync adapters.
 support=https://github.com/micro5k/google-sync-addon/issues
-minSdk=19
+donate=https://liberapay.com/microg-unofficial-by-ale5000
+minApi=19
