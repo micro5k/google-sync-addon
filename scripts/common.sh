@@ -42,10 +42,12 @@ ui_error()
   exit 1
 }
 
-WGET_CMD='wget'
-DEFAULT_UA='Mozilla/5.0 (Linux x86_64; rv:102.0) Gecko/20100101 Firefox/102.0'
-DEFAULT_REFERRER='https://duckduckgo.com/'
-readonly WGET_CMD DEFAULT_UA DEFAULT_REFERRER
+readonly WGET_CMD='wget'
+readonly DL_UA='Mozilla/5.0 (Linux x86_64; rv:102.0) Gecko/20100101 Firefox/102.0'
+readonly DL_ACCEPT_HEADER='Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8'
+readonly DL_PROTOCOL='https'
+readonly DL_REFERRER_DOMAIN='duckduckgo.com'
+readonly DL_REFERRER_PATH=''
 
 _uname_saved="$(uname)"
 compare_start_uname()
@@ -85,23 +87,23 @@ corrupted_file()
   ui_error "The file '$1' is corrupted."
 }
 
-# 1 => URL; 2 => Referer; 3 => Output
+# 1 => URL; 2 => Referrer; 3 => Output
 dl_generic()
 {
-  "${WGET_CMD:?}" -c -O "${3:?}" -U "${DEFAULT_UA:?}" --no-cache --header 'Accept: text/html,*/*;q=0.9' --header 'Accept-Language: en-US,en;q=0.8' --header "Referer: ${2:?}" -- "${1:?}" || return "${?}"
+  "${WGET_CMD:?}" -c -O "${3:?}" -U "${DL_UA:?}" --header "${DL_ACCEPT_HEADER:?}" --header 'Accept-Language: en-US,en;q=0.5' --header "Referer: ${2:?}" --no-cache -- "${1:?}" || return "${?}"
 }
 
-# 1 => URL; 2 => Referer; 3 => Pattern
+# 1 => URL; 2 => Referrer; 3 => Pattern
 get_link_from_html()
 {
-  "${WGET_CMD:?}" -q -O- -U "${DEFAULT_UA:?}" --no-cache --header 'Accept: text/html,*/*;q=0.9' --header 'Accept-Language: en-US,en;q=0.8' --header "Referer: ${2:?}" -- "${1:?}" | grep -Eo -e "${3:?}" | grep -Eo -e '\"[^"]+\"$' | tr -d '"' || return "${?}"
+  "${WGET_CMD:?}" -q -O- -U "${DL_UA:?}" --header "${DL_ACCEPT_HEADER:?}" --header 'Accept-Language: en-US,en;q=0.5' --header "Referer: ${2:?}" --no-cache -- "${1:?}" | grep -Eo -e "${3:?}" | grep -Eo -e '\"[^"]+\"$' | tr -d '"' || return "${?}"
 }
 
 dl_type_one()
 {
   local _url _referrer _result
 
-  _referrer="${2:?}/"; _url="${1:?}"
+  _referrer="${2:?}"; _url="${1:?}"
   _result="$(get_link_from_html "${_url:?}" "${_referrer:?}" 'downloadButton.*\"\shref=\"[^"]+\"')" || return "${?}"
   sleep 0.2
   _referrer="${_url:?}"; _url="${2:?}${_result:?}"
@@ -117,19 +119,19 @@ dl_file()
 
   local _status _url _base_url
   _status=0
-  _url="https://${4:?}" || return "${?}"
+  _url="${DL_PROTOCOL:?}://${4:?}" || return "${?}"
   _base_url="$(echo "${_url:?}" | cut -d '/' -f 1,2,3)" || return "${?}"
 
   if ! test -e "${SCRIPT_DIR:?}/cache/$1/$2"; then
     mkdir -p "${SCRIPT_DIR:?}/cache/${1:?}"
 
     case "${_base_url:?}" in
-      ?????'://''w''w''w''.apk''mirror.com')
+      "${DL_PROTOCOL:?}://"'w''w''w.''apk''mirror.com')
         echo 'DL type 1'
-        dl_type_one "${_url:?}" "${_base_url:?}" "${SCRIPT_DIR:?}/cache/${1:?}/${2:?}" || _status="${?}";;
-      ?????'://'????*)
+        dl_type_one "${_url:?}" "${_base_url:?}/" "${SCRIPT_DIR:?}/cache/${1:?}/${2:?}" || _status="${?}";;
+      "${DL_PROTOCOL:?}://"????*)
         echo 'DL type 0'
-        dl_generic "${_url:?}" "${DEFAULT_REFERRER:?}" "${SCRIPT_DIR:?}/cache/${1:?}/${2:?}" || _status="${?}";;
+        dl_generic "${_url:?}" "${DL_PROTOCOL:?}://${DL_REFERRER_DOMAIN:?}/${DL_REFERRER_PATH?}" "${SCRIPT_DIR:?}/cache/${1:?}/${2:?}" || _status="${?}";;
       *)
         ui_error "Invalid download url => '${_url:?}'";;
     esac
