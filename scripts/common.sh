@@ -46,6 +46,7 @@ readonly WGET_CMD='wget'
 readonly DL_UA='Mozilla/5.0 (Linux x86_64; rv:102.0) Gecko/20100101 Firefox/102.0'
 readonly DL_ACCEPT_HEADER='Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8'
 readonly DL_PROTOCOL='https'
+readonly DL_WEB_PREFIX='www.'
 readonly DL_REFERRER_DOMAIN='duckduckgo.com'
 readonly DL_REFERRER_PATH=''
 
@@ -67,6 +68,11 @@ change_title()
 simple_get_prop()
 {
   grep -F "${1}=" "${2}" | head -n1 | cut -d '=' -f 2
+}
+
+get_base_url()
+{
+  echo "${1:?}" | cut -d '/' -f 1,2,3 || return "${?}"
 }
 
 verify_sha1()
@@ -101,15 +107,16 @@ get_link_from_html()
 
 dl_type_one()
 {
-  local _url _referrer _result
+  local _url _base_url _referrer _result
+  _base_url="$(get_base_url "${2:?}")" || return "${?}"
 
   _referrer="${2:?}"; _url="${1:?}"
   _result="$(get_link_from_html "${_url:?}" "${_referrer:?}" 'downloadButton.*\"\shref=\"[^"]+\"')" || return "${?}"
   sleep 0.2
-  _referrer="${_url:?}"; _url="${2:?}${_result:?}"
+  _referrer="${_url:?}"; _url="${_base_url:?}${_result:?}"
   _result="$(get_link_from_html "${_url:?}" "${_referrer:?}" 'Your\sdownload\swill\sstart\s.+href=\"[^"]+\"')" || return "${?}"
   sleep 0.2
-  _referrer="${_url:?}"; _url="${2:?}${_result:?}"
+  _referrer="${_url:?}"; _url="${_base_url:?}${_result:?}"
   dl_generic "${_url:?}" "${_referrer:?}" "${3:?}" || return "${?}"
 }
 
@@ -120,13 +127,13 @@ dl_file()
   local _status _url _base_url
   _status=0
   _url="${DL_PROTOCOL:?}://${4:?}" || return "${?}"
-  _base_url="$(echo "${_url:?}" | cut -d '/' -f 1,2,3)" || return "${?}"
+  _base_url="$(get_base_url "${_url:?}")" || return "${?}"
 
   if ! test -e "${SCRIPT_DIR:?}/cache/$1/$2"; then
     mkdir -p "${SCRIPT_DIR:?}/cache/${1:?}"
 
     case "${_base_url:?}" in
-      "${DL_PROTOCOL:?}://"'w''w''w.''apk''mirror.com')
+      "${DL_PROTOCOL:?}://${DL_WEB_PREFIX:?}"'apk''mirror''.com')
         echo 'DL type 1'
         dl_type_one "${_url:?}" "${_base_url:?}/" "${SCRIPT_DIR:?}/cache/${1:?}/${2:?}" || _status="${?}";;
       "${DL_PROTOCOL:?}://"????*)
