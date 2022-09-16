@@ -45,10 +45,9 @@ ui_error()
 readonly WGET_CMD='wget'
 readonly DL_UA='Mozilla/5.0 (Linux x86_64; rv:102.0) Gecko/20100101 Firefox/102.0'
 readonly DL_ACCEPT_HEADER='Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8'
-readonly DL_PROTOCOL='https'
+readonly DL_ACCEPT_LANG_HEADER='Accept-Language: en-US,en;q=0.5'
+readonly DL_PROT='https://'
 readonly DL_WEB_PREFIX='www.'
-readonly DL_REFERRER_DOMAIN='duckduckgo.com'
-readonly DL_REFERRER_PATH=''
 
 _uname_saved="$(uname)"
 compare_start_uname()
@@ -68,6 +67,11 @@ change_title()
 simple_get_prop()
 {
   grep -F "${1}=" "${2}" | head -n1 | cut -d '=' -f 2
+}
+
+get_domain_from_url()
+{
+  echo "${1:?}" | cut -sd '/' -f 3 || return "${?}"
 }
 
 get_base_url()
@@ -96,13 +100,37 @@ corrupted_file()
 # 1 => URL; 2 => Referrer; 3 => Output
 dl_generic()
 {
-  "${WGET_CMD:?}" -c -O "${3:?}" -U "${DL_UA:?}" --header "${DL_ACCEPT_HEADER:?}" --header 'Accept-Language: en-US,en;q=0.5' --header "Referer: ${2:?}" --no-cache -- "${1:?}" || return "${?}"
+  "${WGET_CMD:?}" -q -O "${3:?}" -U "${DL_UA:?}" --header "${DL_ACCEPT_HEADER:?}" --header "${DL_ACCEPT_LANG_HEADER:?}" --header "Referer: ${2:?}" --no-cache -- "${1:?}" || return "${?}"
 }
 
 # 1 => URL; 2 => Referrer; 3 => Pattern
 get_link_from_html()
 {
-  "${WGET_CMD:?}" -q -O- -U "${DL_UA:?}" --header "${DL_ACCEPT_HEADER:?}" --header 'Accept-Language: en-US,en;q=0.5' --header "Referer: ${2:?}" --no-cache -- "${1:?}" | grep -Eo -e "${3:?}" | grep -Eo -e '\"[^"]+\"$' | tr -d '"' || return "${?}"
+  "${WGET_CMD:?}" -q -O- -U "${DL_UA:?}" --header "${DL_ACCEPT_HEADER:?}" --header "${DL_ACCEPT_LANG_HEADER:?}" --header "Referer: ${2:?}" -- "${1:?}" | grep -Eo -e "${3:?}" | grep -Eo -e '\"[^"]+\"$' | tr -d '"' || return "${?}"
+}
+
+# 1 => URL; 2 => Origin header; 3 => Name to find
+get_JSON_value_from_ajax_request()
+{
+  "${WGET_CMD:?}" -qO '-' -U "${DL_UA:?}" --header 'Accept: */*' --header "${DL_ACCEPT_LANG_HEADER:?}" --header "Origin: ${2:?}" -- "${1:?}" | grep -Eom 1 -e "\"${3:?}\""'\s*:\s*"([^"]+)' | grep -Eom 1 -e ':\s*"([^"]+)' | grep -Eom 1 -e '"([^"]+)' | cut -c '2-' || return "${?}"
+}
+
+# 1 => URL; 2 => Cookie; 3 => Output
+dl_generic_with_cookie()
+{
+  "${WGET_CMD:?}" -q -O "${3:?}" -U "${DL_UA:?}" --header "${DL_ACCEPT_HEADER:?}" --header "${DL_ACCEPT_LANG_HEADER:?}" --header "Cookie: ${2:?}" -- "${1:?}" || return "${?}"
+}
+
+# 1 => URL
+get_location_header_from_http_request()
+{
+  { 2>&1 "${WGET_CMD:?}" --spider -qSO '-' -U "${DL_UA:?}" --header "${DL_ACCEPT_HEADER:?}" --header "${DL_ACCEPT_LANG_HEADER:?}" -- "${1:?}" || true; } | grep -aom 1 -e 'Location:[[:space:]]*[^[:cntrl:]]*$' | head -n '1' || return "${?}"
+}
+
+# 1 => URL; # 2 => Origin header
+send_empty_ajax_request()
+{
+  "${WGET_CMD:?}" --spider -qO '-' -U "${DL_UA:?}" --header 'Accept: */*' --header "${DL_ACCEPT_LANG_HEADER:?}" --header "Origin: ${2:?}" -- "${1:?}" || return "${?}"
 }
 
 dl_type_one()
@@ -120,40 +148,71 @@ dl_type_one()
   dl_generic "${_url:?}" "${_referrer:?}" "${3:?}" || return "${?}"
 }
 
+report_failure()
+{
+  printf '%s\n' " Failed at '${2}' with return code: ${1:?}"
+  return "${1:?}"
+}
+
+dl_type_two()
+{
+  local _url _domain
+
+  _url="${1:?}" || { report_failure "${?}"; return "${?}"; }
+  _domain="$(get_domain_from_url "${_url:?}")" || { report_failure "${?}"; return "${?}"; }
+  _base_dm="$(printf '%s' "${_domain:?}" | cut -sd '.' -f '2-3')" || { report_failure "${?}"; return "${?}"; }
+
+  _loc_code="$(get_location_header_from_http_request "${_url:?}" | cut -sd '/' -f '5')" || { report_failure "${?}" 'get location'; return "${?}"; }
+  sleep 0.2
+  _other_code="$(get_JSON_value_from_ajax_request "${DL_PROT:?}api.${_base_dm:?}/createAccount" "${DL_PROT:?}${_base_dm:?}" 'token')" || { report_failure "${?}" 'get JSON'; return "${?}"; }
+  sleep 0.2
+  send_empty_ajax_request "${DL_PROT:?}api.${_base_dm:?}/getContent?contentId=${_loc_code:?}&token=${_other_code:?}&websiteToken=12345" "${DL_PROT:?}${_base_dm:?}" || { report_failure "${?}" 'get content'; return "${?}"; }
+  sleep 0.3
+  dl_generic_with_cookie "${_url:?}" 'account''Token='"${_other_code:?}" "${3:?}" || { report_failure "${?}" 'dl'; return "${?}"; }
+}
+
 dl_file()
 {
   if test -e "${SCRIPT_DIR:?}/cache/$1/$2"; then verify_sha1 "${SCRIPT_DIR:?}/cache/$1/$2" "$3" || rm -f "${SCRIPT_DIR:?}/cache/$1/$2"; fi  # Preventive check to silently remove corrupted/invalid files
 
-  local _status _url _base_url
+  printf '%s ' "Checking ${2?}..."
+  local _status _url _domain
   _status=0
-  _url="${DL_PROTOCOL:?}://${4:?}" || return "${?}"
-  _base_url="$(get_base_url "${_url:?}")" || return "${?}"
+  _url="${DL_PROT:?}${4:?}" || return "${?}"
+  _domain="$(get_domain_from_url "${_url:?}")" || return "${?}"
 
-  if ! test -e "${SCRIPT_DIR:?}/cache/$1/$2"; then
+  if ! test -e "${SCRIPT_DIR:?}/cache/${1:?}/${2:?}"; then
     mkdir -p "${SCRIPT_DIR:?}/cache/${1:?}"
 
-    case "${_base_url:?}" in
-      "${DL_PROTOCOL:?}://${DL_WEB_PREFIX:?}"'apk''mirror''.com')
-        echo 'DL type 1'
-        dl_type_one "${_url:?}" "${_base_url:?}/" "${SCRIPT_DIR:?}/cache/${1:?}/${2:?}" || _status="${?}";;
-      "${DL_PROTOCOL:?}://"????*)
-        echo 'DL type 0'
-        dl_generic "${_url:?}" "${DL_PROTOCOL:?}://${DL_REFERRER_DOMAIN:?}/${DL_REFERRER_PATH?}" "${SCRIPT_DIR:?}/cache/${1:?}/${2:?}" || _status="${?}";;
+    if test "${CI:-false}" = 'false'; then sleep 0.5; else sleep 3; fi
+    case "${_domain:?}" in
+      *\.'go''file''.io')
+        printf '%s ' 'DL type 2...'
+        dl_type_two "${_url:?}" "${DL_PROT:?}${_domain:?}/" "${SCRIPT_DIR:?}/cache/${1:?}/${2:?}" || _status="${?}";;
+      "${DL_WEB_PREFIX:?}"'apk''mirror''.com')
+        printf '%s ' 'DL type 1...'
+        dl_type_one "${_url:?}" "${DL_PROT:?}${_domain:?}/" "${SCRIPT_DIR:?}/cache/${1:?}/${2:?}" || _status="${?}";;
+      ????*)
+        printf '%s ' 'DL type 0...'
+        dl_generic "${_url:?}" "${DL_PROT:?}${_domain:?}/" "${SCRIPT_DIR:?}/cache/${1:?}/${2:?}" || _status="${?}";;
       *)
         ui_error "Invalid download URL => '${_url?}'";;
     esac
 
     if test "${_status:?}" != 0; then
       if test -n "${5:-}"; then
+        printf '%s\n' 'Download failed, trying a mirror...'
         dl_file "${1:?}" "${2:?}" "${3:?}" "${5:?}"
+        return "${?}"
       else
+        printf '%s\n' 'Download failed'
         ui_error "Failed to download the file => 'cache/${1?}/${2?}'"
       fi
     fi
-    echo ''
   fi
 
   verify_sha1 "${SCRIPT_DIR:?}/cache/$1/$2" "$3" || corrupted_file "${SCRIPT_DIR:?}/cache/$1/$2"
+  printf '%s\n' 'OK'
 }
 
 # Detect OS and set OS specific info

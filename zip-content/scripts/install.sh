@@ -123,8 +123,9 @@ ui_msg 'Google Sync Add-on'
 ui_msg "${install_version}"
 ui_msg '(by ale5000)'
 ui_msg '------------------'
-ui_msg_empty_line
 ui_msg "Boot mode: ${BOOTMODE:?}"
+ui_msg "Recovery API ver: ${RECOVERY_API_VER:-}"
+ui_msg_empty_line
 ui_msg "Android API: ${API:?}"
 ui_msg "System path: ${SYS_PATH:?}"
 ui_msg "Priv-app path: ${PRIVAPP_PATH:?}"
@@ -144,12 +145,12 @@ set_std_perm_recursive "${TMP_PATH}/files"
 # Verifying
 ui_msg_sameline_start 'Verifying... '
 ui_debug ''
-if #verify_sha1 "${TMP_PATH}/files/priv-app/GoogleBackupTransport.apk" '2bdf65e98dbd115473cd72db8b6a13d585a65d8d' &&  # Disabled for now
-   verify_sha1 "${TMP_PATH}/files/priv-app/GoogleContactsSyncAdapter.apk" 'd6913b4a2fa5377b2b2f9e43056599b5e987df83' &&
-   verify_sha1 "${TMP_PATH}/files/app/GoogleCalendarSyncAdapter.apk" 'aa482580c87a43c83882c05a4757754917d47f32' &&
-   verify_sha1 "${TMP_PATH}/files/priv-app-4.4/GoogleBackupTransport.apk" '6f186d368014022b0038ad2f5d8aa46bb94b5c14' &&
-   verify_sha1 "${TMP_PATH}/files/app-4.4/GoogleContactsSyncAdapter.apk" '68597be59f16d2e26a79def6fa20bc85d1d2c3b3' &&
-   verify_sha1 "${TMP_PATH}/files/app-4.4/GoogleCalendarSyncAdapter.apk" 'cf9fa487dfe0ead8576d6af897687e7fa2ae00fa'
+if #verify_sha1 "${TMP_PATH}/files/system-apps/priv-app/GoogleBackupTransport.apk" '2bdf65e98dbd115473cd72db8b6a13d585a65d8d' &&  # Disabled for now
+   verify_sha1 "${TMP_PATH}/files/system-apps/priv-app/GoogleContactsSyncAdapter.apk" 'd6913b4a2fa5377b2b2f9e43056599b5e987df83' &&
+   verify_sha1 "${TMP_PATH}/files/system-apps/app/GoogleCalendarSyncAdapter.apk" 'aa482580c87a43c83882c05a4757754917d47f32' &&
+   verify_sha1 "${TMP_PATH}/files/system-apps/priv-app-4.4/GoogleBackupTransport.apk" '6f186d368014022b0038ad2f5d8aa46bb94b5c14' &&
+   verify_sha1 "${TMP_PATH}/files/system-apps/app-4.4/GoogleContactsSyncAdapter.apk" '68597be59f16d2e26a79def6fa20bc85d1d2c3b3' &&
+   verify_sha1 "${TMP_PATH}/files/system-apps/app-4.4/GoogleCalendarSyncAdapter.apk" 'cf9fa487dfe0ead8576d6af897687e7fa2ae00fa'
 then
   ui_msg_sameline_end 'OK'
 else
@@ -157,6 +158,11 @@ else
   ui_error 'Verification failed'
   sleep 1
 fi
+
+move_rename_dir "${TMP_PATH}/files/system-apps/priv-app" "${TMP_PATH}/files/priv-app"
+move_rename_dir "${TMP_PATH}/files/system-apps/app" "${TMP_PATH}/files/app"
+move_rename_dir "${TMP_PATH}/files/system-apps/priv-app-4.4" "${TMP_PATH}/files/priv-app-4.4"
+move_rename_dir "${TMP_PATH}/files/system-apps/app-4.4" "${TMP_PATH}/files/app-4.4"
 
 # MOUNT /data PARTITION
 DATA_INIT_STATUS=0
@@ -194,12 +200,16 @@ delete "${SYS_PATH}/etc/zips/${install_id}.prop"
 unmount_extra_partitions
 
 # Configuring default Android permissions
-ui_debug 'Configuring default Android permissions...'
-if ! test -e "${SYS_PATH}/etc/default-permissions"; then
-  ui_msg 'Creating the default permissions folder...'
-  create_dir "${SYS_PATH}/etc/default-permissions"
+if test "${API}" -ge 23; then
+  ui_debug 'Configuring default Android permissions...'
+  if ! test -e "${SYS_PATH}/etc/default-permissions"; then
+    ui_msg 'Creating the default permissions folder...'
+    create_dir "${SYS_PATH}/etc/default-permissions"
+  fi
+  copy_dir_content "${TMP_PATH}/files/etc/default-permissions" "${SYS_PATH}/etc/default-permissions"
+else
+  delete_recursive "${TMP_PATH}/files/etc/default-permissions"
 fi
-copy_dir_content "${TMP_PATH}/files/etc/default-permissions" "${SYS_PATH}/etc/default-permissions"
 
 # UNMOUNT /data PARTITION
 if test "${DATA_INIT_STATUS}" = '1'; then unmount '/data'; fi
@@ -251,16 +261,16 @@ create_dir "${USED_SETTINGS_PATH}"
   echo 'install.type=flashable-zip'
   echo "install.version.code=${install_version_code}"
   echo "install.version=${install_version}"
-} > "${USED_SETTINGS_PATH}/${INSTALLATION_SETTINGS_FILE}"
-set_perm 0 0 0640 "${USED_SETTINGS_PATH}/${INSTALLATION_SETTINGS_FILE}"
+} > "${USED_SETTINGS_PATH:?}/${INSTALLATION_SETTINGS_FILE:?}"
+set_perm 0 0 0640 "${USED_SETTINGS_PATH:?}/${INSTALLATION_SETTINGS_FILE:?}"
 
-create_dir "${SYS_PATH}/etc/zips"
-set_perm 0 0 0750 "${SYS_PATH}/etc/zips"
+create_dir "${SYS_PATH:?}/etc/zips"
+set_perm 0 0 0750 "${SYS_PATH:?}/etc/zips"
 
-copy_dir_content "${USED_SETTINGS_PATH}" "${SYS_PATH}/etc/zips"
+copy_dir_content "${USED_SETTINGS_PATH:?}" "${SYS_PATH:?}/etc/zips"
 
 # Clean legacy file
-delete "${SYS_PATH}/etc/zips/google-sync.prop"
+delete "${SYS_PATH:?}/etc/zips/google-sync.prop"
 
 # Install survival script
 if test -e "${SYS_PATH}/addon.d"; then
