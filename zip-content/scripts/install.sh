@@ -157,10 +157,11 @@ else
   sleep 1
 fi
 
-move_rename_dir "${TMP_PATH}/files/system-apps/priv-app" "${TMP_PATH}/files/priv-app"
-move_rename_dir "${TMP_PATH}/files/system-apps/app" "${TMP_PATH}/files/app"
-move_rename_dir "${TMP_PATH}/files/system-apps/priv-app-4.4" "${TMP_PATH}/files/priv-app-4.4"
-move_rename_dir "${TMP_PATH}/files/system-apps/app-4.4" "${TMP_PATH}/files/app-4.4"
+setup_app "1" 'Google Backup Transport' 'GoogleBackupTransport' 'priv-app-4.4' false false
+
+setup_app "1" 'Google Contacts Sync 4.4' 'GoogleContactsSyncAdapter' 'app-4.4'
+setup_app "1" 'Google Contacts Sync 8.1' 'GoogleContactsSyncAdapter' 'priv-app'
+setup_app "1" 'Google Calendar Sync 5.2' 'GoogleCalendarSyncAdapter' 'app'
 
 # MOUNT /data PARTITION
 DATA_INIT_STATUS=0
@@ -217,18 +218,22 @@ ui_msg 'Preparing...'
 
 if test "${OLD_ANDROID}" != true; then
   # Move apps into subdirs
-  for entry in "${TMP_PATH}/files/priv-app"/*; do
-    path_without_ext=$(remove_ext "${entry}")
+  if test -e "${TMP_PATH}/files/priv-app"; then
+    for entry in "${TMP_PATH}/files/priv-app"/*; do
+      path_without_ext=$(remove_ext "${entry}")
 
-    create_dir "${path_without_ext}"
-    mv -f "${entry}" "${path_without_ext}"/
-  done
-  for entry in "${TMP_PATH}/files/app"/*; do
-    path_without_ext=$(remove_ext "${entry}")
+      create_dir "${path_without_ext}"
+      mv -f "${entry}" "${path_without_ext}"/
+    done
+  fi
+  if test -e "${TMP_PATH}/files/app"; then
+    for entry in "${TMP_PATH}/files/app"/*; do
+      path_without_ext=$(remove_ext "${entry}")
 
-    create_dir "${path_without_ext}"
-    mv -f "${entry}" "${path_without_ext}"/
-  done
+      create_dir "${path_without_ext}"
+      mv -f "${entry}" "${path_without_ext}"/
+    done
+  fi
 fi
 
 # Installing
@@ -239,15 +244,11 @@ if test "${API}" -lt 26; then
 fi
 if test "${API}" -ge 23; then
   if test -e "${TMP_PATH}/files/etc/permissions"; then copy_dir_content "${TMP_PATH}/files/etc/permissions" "${SYS_PATH}/etc/permissions"; fi
-  copy_dir_content "${TMP_PATH}/files/priv-app" "${PRIVAPP_PATH}"
-  copy_dir_content "${TMP_PATH}/files/app" "${SYS_PATH}/app"
-elif test "${API}" -ge 21; then
-  ui_error 'ERROR: Unsupported Android version'
-elif test "${API}" -ge 19; then
-  move_rename_file "${TMP_PATH}/files/app/GoogleCalendarSyncAdapter.apk" "${TMP_PATH}/files/app-4.4/GoogleCalendarSyncAdapter.apk"
-  copy_dir_content "${TMP_PATH}/files/priv-app-4.4" "${PRIVAPP_PATH}"
-  copy_dir_content "${TMP_PATH}/files/app-4.4" "${SYS_PATH}/app"
 fi
+if test -e "${TMP_PATH}/files/priv-app-4.4"; then copy_dir_content "${TMP_PATH}/files/priv-app-4.4" "${PRIVAPP_PATH}"; fi
+if test -e "${TMP_PATH}/files/app-4.4"; then copy_dir_content "${TMP_PATH}/files/app-4.4" "${SYS_PATH}/app"; fi
+if test -e "${TMP_PATH}/files/priv-app"; then copy_dir_content "${TMP_PATH}/files/priv-app" "${PRIVAPP_PATH}"; fi
+if test -e "${TMP_PATH}/files/app"; then copy_dir_content "${TMP_PATH}/files/app" "${SYS_PATH}/app"; fi
 
 USED_SETTINGS_PATH="${TMP_PATH}/files/etc/zips"
 create_dir "${USED_SETTINGS_PATH}"
