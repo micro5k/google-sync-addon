@@ -17,8 +17,6 @@
     <exception package="com.google.android.backuptransport">
         <!-- Account / Contacts -->
         <permission name="android.permission.GET_ACCOUNTS" fixed="false" />
-        <permission name="android.permission.READ_CONTACTS" fixed="false" />
-        <permission name="android.permission.WRITE_CONTACTS" fixed="false" />
     </exception>
 
     <exception package="com.google.android.syncadapters.contacts">
