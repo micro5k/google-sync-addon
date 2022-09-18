@@ -145,10 +145,10 @@ set_std_perm_recursive "${TMP_PATH}/files"
 # Verifying
 ui_msg_sameline_start 'Verifying... '
 ui_debug ''
-if verify_sha1 "${TMP_PATH}/files/system-apps/priv-app/GoogleContactsSyncAdapter.apk" 'd6913b4a2fa5377b2b2f9e43056599b5e987df83' &&
-   verify_sha1 "${TMP_PATH}/files/system-apps/app/GoogleCalendarSyncAdapter.apk" 'aa482580c87a43c83882c05a4757754917d47f32' &&
-   verify_sha1 "${TMP_PATH}/files/system-apps/priv-app-4.4/GoogleBackupTransport.apk" '6f186d368014022b0038ad2f5d8aa46bb94b5c14' &&
-   verify_sha1 "${TMP_PATH}/files/system-apps/app-4.4/GoogleContactsSyncAdapter.apk" '68597be59f16d2e26a79def6fa20bc85d1d2c3b3'
+if verify_sha1 "${TMP_PATH}/files/system-apps/priv-app/GoogleBackupTransport44.apk" '6f186d368014022b0038ad2f5d8aa46bb94b5c14' &&
+   verify_sha1 "${TMP_PATH}/files/system-apps/app/GoogleContactsSyncAdapter44.apk" '68597be59f16d2e26a79def6fa20bc85d1d2c3b3' &&
+   verify_sha1 "${TMP_PATH}/files/system-apps/priv-app/GoogleContactsSyncAdapter8.apk" 'd6913b4a2fa5377b2b2f9e43056599b5e987df83' &&
+   verify_sha1 "${TMP_PATH}/files/system-apps/app/GoogleCalendarSyncAdapter5.apk" 'aa482580c87a43c83882c05a4757754917d47f32'
 then
   ui_msg_sameline_end 'OK'
 else
@@ -157,11 +157,11 @@ else
   sleep 1
 fi
 
-setup_app "1" 'Google Backup Transport' 'GoogleBackupTransport' 'priv-app-4.4' false false
+setup_app "1" 'Google Backup Transport 4.4' 'GoogleBackupTransport44' 'priv-app' false false
 
-setup_app "1" 'Google Contacts Sync 4.4' 'GoogleContactsSyncAdapter' 'app-4.4'
-setup_app "1" 'Google Contacts Sync 8.1' 'GoogleContactsSyncAdapter' 'priv-app'
-setup_app "1" 'Google Calendar Sync 5.2' 'GoogleCalendarSyncAdapter' 'app'
+setup_app "1" 'Google Contacts Sync 4.4' 'GoogleContactsSyncAdapter44' 'app'
+setup_app "1" 'Google Contacts Sync 8.1' 'GoogleContactsSyncAdapter8' 'priv-app'
+setup_app "1" 'Google Calendar Sync 5.2' 'GoogleCalendarSyncAdapter5' 'app'
 
 # MOUNT /data PARTITION
 DATA_INIT_STATUS=0
@@ -245,8 +245,6 @@ fi
 if test "${API}" -ge 23; then
   if test -e "${TMP_PATH}/files/etc/permissions"; then copy_dir_content "${TMP_PATH}/files/etc/permissions" "${SYS_PATH}/etc/permissions"; fi
 fi
-if test -e "${TMP_PATH}/files/priv-app-4.4"; then copy_dir_content "${TMP_PATH}/files/priv-app-4.4" "${PRIVAPP_PATH}"; fi
-if test -e "${TMP_PATH}/files/app-4.4"; then copy_dir_content "${TMP_PATH}/files/app-4.4" "${SYS_PATH}/app"; fi
 if test -e "${TMP_PATH}/files/priv-app"; then copy_dir_content "${TMP_PATH}/files/priv-app" "${PRIVAPP_PATH}"; fi
 if test -e "${TMP_PATH}/files/app"; then copy_dir_content "${TMP_PATH}/files/app" "${SYS_PATH}/app"; fi
 

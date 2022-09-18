@@ -12,16 +12,16 @@ CONTENTS
 
 Common
 ------
-- **files/app/GoogleCalendarSyncAdapter.apk** => Google Calendar Sync 5.2.3-99827563 (2015080710)
+- **files/system-apps/app/GoogleCalendarSyncAdapter5.apk** => Google Calendar Sync 5.2.3-99827563 (2015080710)
 
 Android 7+
 ----------
-- **files/priv-app/GoogleContactsSyncAdapter.apk** => Google Contacts Sync 8.1.0 (27)
+- **files/system-apps/priv-app/GoogleContactsSyncAdapter8.apk** => Google Contacts Sync 8.1.0 (27)
 
 Android 4.4 - 4.4.4
 -------------------
-- **files/priv-app-4.4/GoogleBackupTransport.apk** => Google Backup Transport 4.4.4-1227136
-- **files/app-4.4/GoogleContactsSyncAdapter.apk** => Google Contacts Sync 4.4.4-1227136
+- **files/system-apps/priv-app/GoogleBackupTransport44.apk** => Google Backup Transport 4.4.4-1227136
+- **files/system-apps/app/GoogleContactsSyncAdapter44.apk** => Google Contacts Sync 4.4.4-1227136
 
 Components used only during setup (not installed)
 -------------------------------------------------
