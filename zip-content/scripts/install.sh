@@ -145,12 +145,10 @@ set_std_perm_recursive "${TMP_PATH}/files"
 # Verifying
 ui_msg_sameline_start 'Verifying... '
 ui_debug ''
-if #verify_sha1 "${TMP_PATH}/files/system-apps/priv-app/GoogleBackupTransport.apk" '2bdf65e98dbd115473cd72db8b6a13d585a65d8d' &&  # Disabled for now
-   verify_sha1 "${TMP_PATH}/files/system-apps/priv-app/GoogleContactsSyncAdapter.apk" 'd6913b4a2fa5377b2b2f9e43056599b5e987df83' &&
+if verify_sha1 "${TMP_PATH}/files/system-apps/priv-app/GoogleContactsSyncAdapter.apk" 'd6913b4a2fa5377b2b2f9e43056599b5e987df83' &&
    verify_sha1 "${TMP_PATH}/files/system-apps/app/GoogleCalendarSyncAdapter.apk" 'aa482580c87a43c83882c05a4757754917d47f32' &&
    verify_sha1 "${TMP_PATH}/files/system-apps/priv-app-4.4/GoogleBackupTransport.apk" '6f186d368014022b0038ad2f5d8aa46bb94b5c14' &&
-   verify_sha1 "${TMP_PATH}/files/system-apps/app-4.4/GoogleContactsSyncAdapter.apk" '68597be59f16d2e26a79def6fa20bc85d1d2c3b3' &&
-   verify_sha1 "${TMP_PATH}/files/system-apps/app-4.4/GoogleCalendarSyncAdapter.apk" 'cf9fa487dfe0ead8576d6af897687e7fa2ae00fa'
+   verify_sha1 "${TMP_PATH}/files/system-apps/app-4.4/GoogleContactsSyncAdapter.apk" '68597be59f16d2e26a79def6fa20bc85d1d2c3b3'
 then
   ui_msg_sameline_end 'OK'
 else
@@ -246,6 +244,7 @@ if test "${API}" -ge 23; then
 elif test "${API}" -ge 21; then
   ui_error 'ERROR: Unsupported Android version'
 elif test "${API}" -ge 19; then
+  move_rename_file "${TMP_PATH}/files/app/GoogleCalendarSyncAdapter.apk" "${TMP_PATH}/files/app-4.4/GoogleCalendarSyncAdapter.apk"
   copy_dir_content "${TMP_PATH}/files/priv-app-4.4" "${PRIVAPP_PATH}"
   copy_dir_content "${TMP_PATH}/files/app-4.4" "${SYS_PATH}/app"
 fi
