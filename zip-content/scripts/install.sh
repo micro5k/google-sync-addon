@@ -142,22 +142,6 @@ set_std_perm_recursive "${TMP_PATH}/files"
 #set_std_perm_recursive "${TMP_PATH}/addon.d"
 #set_perm 0 0 0755 "${TMP_PATH}/addon.d/00-1-google-sync.sh"
 
-# Verifying
-ui_msg_sameline_start 'Verifying... '
-ui_debug ''
-if verify_sha1 "${TMP_PATH}/files/system-apps/priv-app/GoogleBackupTransport44.apk" '6f186d368014022b0038ad2f5d8aa46bb94b5c14' &&
-   verify_sha1 "${TMP_PATH}/files/system-apps/app/GoogleContactsSyncAdapter44.apk" '68597be59f16d2e26a79def6fa20bc85d1d2c3b3' &&
-   verify_sha1 "${TMP_PATH}/files/system-apps/priv-app/GoogleContactsSyncAdapter8.apk" 'd6913b4a2fa5377b2b2f9e43056599b5e987df83' &&
-   verify_sha1 "${TMP_PATH}/files/system-apps/app/GoogleCalendarSyncAdapter5.apk" 'aa482580c87a43c83882c05a4757754917d47f32' &&
-   verify_sha1 "${TMP_PATH}/files/system-apps/app/GoogleCalendarSyncAdapter6.apk" '7711e226ef5939d015ac031d83df4aa28a065bdc'
-then
-  ui_msg_sameline_end 'OK'
-else
-  ui_msg_sameline_end 'ERROR'
-  ui_error 'Verification failed'
-  sleep 1
-fi
-
 setup_app "1" 'Google Backup Transport 4.4' 'GoogleBackupTransport44' 'priv-app' false false
 
 setup_app "1" 'Google Contacts Sync 4.4' 'GoogleContactsSyncAdapter44' 'app'
