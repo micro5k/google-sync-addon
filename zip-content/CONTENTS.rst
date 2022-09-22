@@ -13,6 +13,9 @@ CONTENTS
 Android 7+
 ----------
 - **files/system-apps/priv-app/GoogleContactsSyncAdapter8.apk** => Google Contacts Sync 8.1.0 (27)
+
+Android 5+
+----------
 - **files/system-apps/app/GoogleCalendarSyncAdapter6.apk** => Google Calendar Sync 6.0.44-267540251 (2016267990)
 
 Android 4.4 - 4.4.4
