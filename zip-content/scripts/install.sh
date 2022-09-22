@@ -139,15 +139,15 @@ custom_package_extract_dir 'files' "${TMP_PATH}"
 # Setting up permissions
 ui_debug 'Setting up permissions...'
 set_std_perm_recursive "${TMP_PATH}/files"
-#set_std_perm_recursive "${TMP_PATH}/addon.d"
+if test -e "${TMP_PATH}/addon.d"; then set_std_perm_recursive "${TMP_PATH}/addon.d"; fi
 #set_perm 0 0 0755 "${TMP_PATH}/addon.d/00-1-google-sync.sh"
 
-setup_app "1" 'Google Backup Transport 4.4' 'GoogleBackupTransport44' 'priv-app' false false
+setup_app 1 'Google Backup Transport 4.4' 'GoogleBackupTransport44' 'priv-app' false false
 
-setup_app "1" 'Google Contacts Sync 4.4' 'GoogleContactsSyncAdapter44' 'app'
-setup_app "1" 'Google Contacts Sync 8.1' 'GoogleContactsSyncAdapter8' 'priv-app'
-setup_app "1" 'Google Calendar Sync 5.2' 'GoogleCalendarSyncAdapter5' 'app'
-setup_app "1" 'Google Calendar Sync 6.0' 'GoogleCalendarSyncAdapter6' 'app'
+setup_app 1 'Google Contacts Sync 4.4' 'GoogleContactsSyncAdapter44' 'app'
+setup_app 1 'Google Contacts Sync 8.1' 'GoogleContactsSyncAdapter8' 'priv-app'
+setup_app 1 'Google Calendar Sync 5.2' 'GoogleCalendarSyncAdapter5' 'app'
+setup_app 1 'Google Calendar Sync 6.0' 'GoogleCalendarSyncAdapter6' 'app'
 
 # MOUNT /data PARTITION
 DATA_INIT_STATUS=0
