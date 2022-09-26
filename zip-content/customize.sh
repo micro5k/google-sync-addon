@@ -46,9 +46,6 @@ export ZIP_PATH
 BASE_TMP_PATH="${TMPDIR:?}"
 TMP_PATH="${TMPDIR:?}/custom-setup-a5k"
 
-GENER_ERROR=0
-STATUS=1
-
 export LIVE_SETUP_POSSIBLE=false
 export KEYCHECK_ENABLED=false
 
@@ -254,7 +251,7 @@ set_perm_safe 0 0 0755 "${TMP_PATH:?}/uninstall.sh"
 set_perm_safe 0 0 0755 "${TMP_PATH:?}/install.sh"
 
 package_extract_file_safe 'settings.conf' "${TMP_PATH:?}/default-settings.conf"
-# shellcheck source=SCRIPTDIR/settings.conf
+# shellcheck source=SCRIPTDIR/settings-full.conf
 . "${TMP_PATH:?}/default-settings.conf"
 test "${DEBUG_LOG}" -eq 1 && enable_debug_log  # Enable file logging if needed
 
@@ -263,9 +260,8 @@ if [ "${DEBUG_LOG_ENABLED}" -eq 1 ]; then export DEBUG_LOG=1; fi
 
 ui_debug ''
 ui_debug 'Starting installation script...'
-"${OUR_BB:?}" sh "${TMP_PATH:?}/install.sh" Preloader "${TMP_PATH:?}"; STATUS="$?"
-
-test -f "${TMP_PATH:?}/installed" || GENER_ERROR=1
+"${OUR_BB:?}" sh "${TMP_PATH:?}/install.sh" Preloader "${TMP_PATH:?}"; export STATUS="${?}"
+if test -f "${TMP_PATH:?}/installed"; then export UNKNOWN_ERROR=0; else export UNKNOWN_ERROR=1; fi
 
 export PATH="${PREVIOUS_PATH?}"
 delete_recursive_safe "${TMP_PATH:?}"
@@ -273,8 +269,4 @@ delete_recursive_safe "${TMP_PATH:?}"
 #!!! UNSAFE ENVIRONMENT FROM HERE !!!#
 
 test "${DEBUG_LOG}" -eq 1 && disable_debug_log  # Disable debug log and restore normal output
-
-if test "${STATUS:?}" -ne 0; then ui_error "Installation script failed with error ${STATUS}" "${STATUS}"; fi
-if test "${GENER_ERROR:?}" -ne 0; then ui_error 'Installation failed with an unknown error'; fi
-
 delete_safe "${BASE_TMP_PATH:?}/busybox"
