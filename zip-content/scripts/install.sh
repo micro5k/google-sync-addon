@@ -20,7 +20,6 @@ unset CDPATH
 export INSTALLER=1
 TMP_PATH="$2"
 
-OLD_ANDROID=false
 SYS_PATH=''
 
 
@@ -110,7 +109,7 @@ if test "${API}" -ge 24; then  # 23
 elif test "${API}" -ge 21; then
   ui_error 'ERROR: Unsupported Android version'
 elif test "${API}" -ge 19; then
-  OLD_ANDROID=true
+  :
 elif test "${API}" -ge 1; then
   ui_error 'Your Android version is too old'
 else
@@ -133,14 +132,14 @@ ui_msg_empty_line
 
 # Extracting
 ui_msg 'Extracting...'
-custom_package_extract_dir 'files' "${TMP_PATH}"
-#custom_package_extract_dir 'addon.d' "${TMP_PATH}"
+custom_package_extract_dir 'files' "${TMP_PATH:?}"
+#custom_package_extract_dir 'addon.d' "${TMP_PATH:?}"
 
 # Setting up permissions
 ui_debug 'Setting up permissions...'
-set_std_perm_recursive "${TMP_PATH}/files"
-if test -e "${TMP_PATH}/addon.d"; then set_std_perm_recursive "${TMP_PATH}/addon.d"; fi
-#set_perm 0 0 0755 "${TMP_PATH}/addon.d/00-1-google-sync.sh"
+set_std_perm_recursive "${TMP_PATH:?}/files"
+if test -e "${TMP_PATH:?}/addon.d"; then set_std_perm_recursive "${TMP_PATH:?}/addon.d"; fi
+#set_perm 0 0 0755 "${TMP_PATH:?}/addon.d/00-1-google-sync.sh"
 
 setup_app 1 'Google Backup Transport 4.4' 'GoogleBackupTransport44' 'priv-app' false false
 
@@ -178,9 +177,9 @@ fi
 mount_extra_partitions_silent
 
 # Clean previous installations
-delete "${SYS_PATH}/etc/zips/${install_id}.prop"
+delete "${SYS_PATH:?}/etc/zips/${install_id:?}.prop"
 # shellcheck source=SCRIPTDIR/uninstall.sh
-. "${TMP_PATH}/uninstall.sh"
+. "${TMP_PATH:?}/uninstall.sh"
 
 unmount_extra_partitions
 
@@ -202,10 +201,11 @@ if test "${DATA_INIT_STATUS}" = '1'; then unmount '/data'; fi
 # Preparing
 ui_msg 'Preparing...'
 
+delete_dir_if_empty "${TMP_PATH:?}/files/app"
 delete_dir_if_empty "${TMP_PATH:?}/files/etc/permissions"
 delete_dir_if_empty "${TMP_PATH:?}/files/etc"
 
-if test "${OLD_ANDROID}" != true; then
+if test "${API:?}" -ge 21; then
   # Move apps into subdirs
   if test -e "${TMP_PATH:?}/files/priv-app"; then
     for entry in "${TMP_PATH:?}/files/priv-app"/*; do
@@ -256,8 +256,10 @@ copy_dir_content "${USED_SETTINGS_PATH:?}" "${SYS_PATH:?}/etc/zips"
 delete "${SYS_PATH:?}/etc/zips/google-sync.prop"
 
 # Install survival script
-if test -e "${SYS_PATH}/addon.d"; then
-  if test "${OLD_ANDROID}" = true; then
+if test -e "${SYS_PATH:?}/addon.d"; then
+  if test "${API:?}" -lt 19; then
+    :  ### Skip it
+  elif test "${API:?}" -lt 21; then
     :  ### Not ready yet
   else
     #ui_msg 'Installing survival script...'
@@ -273,5 +275,5 @@ if test "${SYS_INIT_STATUS}" = '1'; then
   if test -e '/system'; then unmount '/system'; fi
 fi
 
-touch "${TMP_PATH}/installed"
+touch "${TMP_PATH:?}/installed"
 ui_msg 'Installation finished.'
