@@ -202,18 +202,21 @@ if test "${DATA_INIT_STATUS}" = '1'; then unmount '/data'; fi
 # Preparing
 ui_msg 'Preparing...'
 
+delete_dir_if_empty "${TMP_PATH:?}/files/etc/permissions"
+delete_dir_if_empty "${TMP_PATH:?}/files/etc"
+
 if test "${OLD_ANDROID}" != true; then
   # Move apps into subdirs
-  if test -e "${TMP_PATH}/files/priv-app"; then
-    for entry in "${TMP_PATH}/files/priv-app"/*; do
+  if test -e "${TMP_PATH:?}/files/priv-app"; then
+    for entry in "${TMP_PATH:?}/files/priv-app"/*; do
       path_without_ext=$(remove_ext "${entry}")
 
       create_dir "${path_without_ext}"
       mv -f "${entry}" "${path_without_ext}"/
     done
   fi
-  if test -e "${TMP_PATH}/files/app"; then
-    for entry in "${TMP_PATH}/files/app"/*; do
+  if test -e "${TMP_PATH:?}/files/app"; then
+    for entry in "${TMP_PATH:?}/files/app"/*; do
       path_without_ext=$(remove_ext "${entry}")
 
       create_dir "${path_without_ext}"
@@ -224,18 +227,14 @@ fi
 
 # Installing
 ui_msg 'Installing...'
-if test "${API}" -lt 26; then
-  delete "${TMP_PATH}/files/etc/permissions/privapp-permissions-com.google.android.syncadapters.contacts.xml"
-  delete_dir_if_empty "${TMP_PATH}/files/etc/permissions"
+if test "${API:?}" -ge 23; then
+  if test -e "${TMP_PATH:?}/files/etc/permissions"; then copy_dir_content "${TMP_PATH:?}/files/etc/permissions" "${SYS_PATH:?}/etc/permissions"; fi
 fi
-if test "${API}" -ge 23; then
-  if test -e "${TMP_PATH}/files/etc/permissions"; then copy_dir_content "${TMP_PATH}/files/etc/permissions" "${SYS_PATH}/etc/permissions"; fi
-fi
-if test -e "${TMP_PATH}/files/priv-app"; then copy_dir_content "${TMP_PATH}/files/priv-app" "${PRIVAPP_PATH}"; fi
-if test -e "${TMP_PATH}/files/app"; then copy_dir_content "${TMP_PATH}/files/app" "${SYS_PATH}/app"; fi
+if test -e "${TMP_PATH:?}/files/app"; then copy_dir_content "${TMP_PATH:?}/files/app" "${SYS_PATH:?}/app"; fi
+if test -e "${TMP_PATH:?}/files/priv-app"; then copy_dir_content "${TMP_PATH:?}/files/priv-app" "${PRIVAPP_PATH:?}"; fi
 
-USED_SETTINGS_PATH="${TMP_PATH}/files/etc/zips"
-create_dir "${USED_SETTINGS_PATH}"
+USED_SETTINGS_PATH="${TMP_PATH:?}/files/etc/zips"
+create_dir "${USED_SETTINGS_PATH:?}"
 
 {
   echo '# SPDX-FileCopyrightText: none'
