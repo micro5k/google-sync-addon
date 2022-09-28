@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-    SPDX-FileCopyrightText: (c) 2016 ale5000
+    SPDX-FileCopyrightText: (c) 2022 ale5000
     SPDX-License-Identifier: Apache-2.0
     SPDX-FileType: SOURCE
 
@@ -12,14 +12,12 @@
 -->
 
 <exceptions>
-    <exception package="com.google.android.backuptransport">
+    <exception package="com.google.android.syncadapters.contacts">
         <!-- Account / Contacts -->
         <permission name="android.permission.GET_ACCOUNTS" fixed="false" />
-    </exception>
-
-    <exception package="com.google.android.syncadapters.calendar">
-        <!-- Calendar -->
-        <permission name="android.permission.READ_CALENDAR" fixed="false" />
-        <permission name="android.permission.WRITE_CALENDAR" fixed="false" />
+        <permission name="android.permission.READ_CONTACTS" fixed="false" />
+        <permission name="android.permission.WRITE_CONTACTS" fixed="false" />
+        <!-- Others -->
+        <permission name="com.google.android.googleapps.permission.GOOGLE_AUTH.cp" fixed="false" />
     </exception>
 </exceptions>
