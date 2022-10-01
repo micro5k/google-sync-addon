@@ -3,16 +3,18 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # SPDX-FileType: SOURCE
 name: "Code linting"
+permissions: {}
 on:
   push:
     branches:
       - main
     tags:
-      - v*
+      - "v*"
   pull_request:
   workflow_dispatch:
 jobs:
   shellchecker:
+    permissions: {}
     name: "ShellChecker"
     runs-on: ubuntu-latest
 
@@ -26,9 +28,9 @@ jobs:
 
   codacy:
     permissions:
-      contents: read
       security-events: write
     name: "Codacy"
+    if: "${{ github.event_name != 'pull_request' && github.repository_owner == 'micro5k' }}"
     runs-on: ubuntu-latest
 
     steps:
@@ -49,13 +51,13 @@ jobs:
       - name: "Upload SARIF results file"
         uses: github/codeql-action/upload-sarif@v2
         with:
-          sarif_file: results.sarif
+          sarif_file: "results.sarif"
+          category: "Codacy"
 
   sonarcloud:
-    permissions:
-      contents: read
+    permissions: {}
     name: "SonarCloud"
-    if: "${{ github.event_name != 'pull_request' }}"
+    if: "${{ github.event_name != 'pull_request' && github.repository_owner == 'micro5k' }}"
     runs-on: ubuntu-latest
 
     steps:
