@@ -9,11 +9,12 @@
 if test "${A5K_FUNCTIONS_INCLUDED:-false}" = 'false'; then readonly A5K_FUNCTIONS_INCLUDED=true; fi
 
 # shellcheck disable=SC3040
-set -o pipefail
+set -o pipefail || true
 
 export TZ=UTC
 export LC_ALL=C
-export LANG=C
+export LANG=C.UTF-8
+export LC_CTYPE=UTF-8
 
 unset LANGUAGE
 unset LC_CTYPE
@@ -37,7 +38,7 @@ SCRIPT_DIR="$(realpath "${SCRIPT_DIR:?}")" || return 1 2>&- || exit 1
 
 ui_error()
 {
-  >&2 echo "ERROR: $1"
+  echo 1>&2 "ERROR: $1"
   test -n "$2" && exit "$2"
   exit 1
 }
@@ -53,10 +54,10 @@ _uname_saved="$(uname)"
 compare_start_uname()
 {
   case "${_uname_saved}" in
-    "$1"*) return 0;;  # Found
-    *)                 # NOT found
+    "$1"*) return 0 ;; # Found
+    *) ;;              # NOT found
   esac
-  return 1  # NOT found
+  return 1 # NOT found
 }
 
 change_title()
@@ -85,10 +86,10 @@ verify_sha1()
   local hash="$2"
   local file_hash
 
-  if test ! -f "${file_name}"; then return 1; fi  # Failed
+  if test ! -f "${file_name}"; then return 1; fi # Failed
   file_hash="$(sha1sum "${file_name}" | cut -d ' ' -f 1)"
-  if test -z "${file_hash}" || test "${hash}" != "${file_hash}"; then return 1; fi  # Failed
-  return 0  # Success
+  if test -z "${file_hash}" || test "${hash}" != "${file_hash}"; then return 1; fi # Failed
+  return 0                                                                         # Success
 }
 
 corrupted_file()
@@ -124,7 +125,7 @@ dl_generic_with_cookie()
 # 1 => URL
 get_location_header_from_http_request()
 {
-  { 2>&1 "${WGET_CMD:?}" --spider -qSO '-' -U "${DL_UA:?}" --header "${DL_ACCEPT_HEADER:?}" --header "${DL_ACCEPT_LANG_HEADER:?}" -- "${1:?}" || true; } | grep -aom 1 -e 'Location:[[:space:]]*[^[:cntrl:]]*$' | head -n '1' || return "${?}"
+  { "${WGET_CMD:?}" 2>&1 --spider -qSO '-' -U "${DL_UA:?}" --header "${DL_ACCEPT_HEADER:?}" --header "${DL_ACCEPT_LANG_HEADER:?}" -- "${1:?}" || true; } | grep -aom 1 -e 'Location:[[:space:]]*[^[:cntrl:]]*$' | head -n '1' || return "${?}"
 }
 
 # 1 => URL; # 2 => Origin header
@@ -145,7 +146,10 @@ dl_type_one()
   if test "${DL_TYPE_1_FAILED:-false}" != 'false'; then return 128; fi
   local _url _base_url _referrer _result
 
-  _base_url="$(get_base_url "${2:?}")" || { report_failure_one "${?}"; return "${?}"; }
+  _base_url="$(get_base_url "${2:?}")" || {
+    report_failure_one "${?}"
+    return "${?}"
+  }
 
   _referrer="${2:?}"; _url="${1:?}"
   _result="$(get_link_from_html "${_url:?}" "${_referrer:?}" 'downloadButton.*\"\shref=\"[^"]+\"')" || { report_failure_one "${?}" 'get link 1'; return "${?}"; }
@@ -184,7 +188,7 @@ dl_type_two()
 
 dl_file()
 {
-  if test -e "${SCRIPT_DIR:?}/cache/$1/$2"; then verify_sha1 "${SCRIPT_DIR:?}/cache/$1/$2" "$3" || rm -f "${SCRIPT_DIR:?}/cache/$1/$2"; fi  # Preventive check to silently remove corrupted/invalid files
+  if test -e "${SCRIPT_DIR:?}/cache/$1/$2"; then verify_sha1 "${SCRIPT_DIR:?}/cache/$1/$2" "$3" || rm -f "${SCRIPT_DIR:?}/cache/$1/$2"; fi # Preventive check to silently remove corrupted/invalid files
 
   printf '%s ' "Checking ${2?}..."
   local _status _url _domain
@@ -199,15 +203,19 @@ dl_file()
     case "${_domain:?}" in
       *\.'go''file''.io')
         printf '\n %s: ' 'DL type 2'
-        dl_type_two "${_url:?}" "${DL_PROT:?}${_domain:?}/" "${SCRIPT_DIR:?}/cache/${1:?}/${2:?}" || _status="${?}";;
+        dl_type_two "${_url:?}" "${DL_PROT:?}${_domain:?}/" "${SCRIPT_DIR:?}/cache/${1:?}/${2:?}" || _status="${?}"
+        ;;
       "${DL_WEB_PREFIX:?}"'apk''mirror''.com')
         printf '\n %s: ' 'DL type 1'
-        dl_type_one "${_url:?}" "${DL_PROT:?}${_domain:?}/" "${SCRIPT_DIR:?}/cache/${1:?}/${2:?}" || _status="${?}";;
+        dl_type_one "${_url:?}" "${DL_PROT:?}${_domain:?}/" "${SCRIPT_DIR:?}/cache/${1:?}/${2:?}" || _status="${?}"
+        ;;
       ????*)
         printf '\n %s: ' 'DL type 0'
-        dl_generic "${_url:?}" "${DL_PROT:?}${_domain:?}/" "${SCRIPT_DIR:?}/cache/${1:?}/${2:?}" || _status="${?}";;
+        dl_generic "${_url:?}" "${DL_PROT:?}${_domain:?}/" "${SCRIPT_DIR:?}/cache/${1:?}/${2:?}" || _status="${?}"
+        ;;
       *)
-        ui_error "Invalid download URL => '${_url?}'";;
+        ui_error "Invalid download URL => '${_url?}'"
+        ;;
     esac
 
     if test "${_status:?}" != 0; then
@@ -226,6 +234,13 @@ dl_file()
   printf '%s\n' 'OK'
 }
 
+dl_list()
+{
+  while IFS='|' read -r LOCAL_FILENAME LOCAL_PATH _ _ _ _ DL_HASH DL_URL DL_MIRROR _; do
+    dl_file "${LOCAL_PATH:?}" "${LOCAL_FILENAME:?}.apk" "${DL_HASH:?}" "${DL_URL:?}" "${DL_MIRROR?}" || return "${?}"
+  done || return "${?}"
+}
+
 # Detect OS and set OS specific info
 SEP='/'
 PATHSEP=':'
@@ -235,9 +250,9 @@ if compare_start_uname 'Linux'; then
 elif compare_start_uname 'Windows_NT' || compare_start_uname 'MINGW32_NT-' || compare_start_uname 'MINGW64_NT-'; then
   PLATFORM='win'
   if test "${_uname_o_saved}" = 'Msys'; then
-    :            # MSYS under Windows
+    :           # MSYS under Windows
   else
-    PATHSEP=';'  # BusyBox under Windows
+    PATHSEP=';' # BusyBox under Windows
   fi
 elif compare_start_uname 'Darwin'; then
   PLATFORM='macos'
@@ -248,7 +263,7 @@ else
 fi
 
 # Set some environment variables
-PS1='\[\033[1;32m\]\u\[\033[0m\]:\[\033[1;34m\]\w\[\033[0m\]\$'  # Escape the colors with \[ \] => https://mywiki.wooledge.org/BashFAQ/053
+PS1='\[\033[1;32m\]\u\[\033[0m\]:\[\033[1;34m\]\w\[\033[0m\]\$' # Escape the colors with \[ \] => https://mywiki.wooledge.org/BashFAQ/053
 PROMPT_COMMAND=
 
 TOOLS_DIR="${SCRIPT_DIR:?}${SEP}tools${SEP}${PLATFORM}"

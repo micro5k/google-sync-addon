@@ -4,6 +4,7 @@
 
 * text=auto
 
+docs/CODEOWNERS   text eol=lf
 *.gitattributes   text eol=lf
 *.gitignore       text eol=lf
 *.gitmodules      text eol=lf
@@ -14,6 +15,7 @@
 *.dis             text eol=lf
 .simplecov        text eol=lf
 .shellcheckrc     text eol=lf
+.editorconfig     text eol=lf
 
 .reuse/dep5       text eol=lf
 *.license         text eol=lf
