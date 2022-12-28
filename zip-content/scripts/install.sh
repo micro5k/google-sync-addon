@@ -136,14 +136,14 @@ ui_msg_empty_line
 ui_msg 'Extracting...'
 custom_package_extract_dir 'origin' "${TMP_PATH:?}"
 custom_package_extract_dir 'files' "${TMP_PATH:?}"
-#custom_package_extract_dir 'addon.d' "${TMP_PATH:?}"
+custom_package_extract_dir 'addon.d' "${TMP_PATH:?}"
 
 # Setting up permissions
 ui_debug 'Setting up permissions...'
 set_std_perm_recursive "${TMP_PATH:?}/origin"
 set_std_perm_recursive "${TMP_PATH:?}/files"
 if test -e "${TMP_PATH:?}/addon.d"; then set_std_perm_recursive "${TMP_PATH:?}/addon.d"; fi
-#set_perm 0 0 0755 "${TMP_PATH:?}/addon.d/00-1-google-sync.sh"
+set_perm 0 0 0755 "${TMP_PATH:?}/addon.d/00-1-google-sync.sh"
 
 setup_app 1 'Google Backup Transport 4.4' 'GoogleBackupTransport44' 'priv-app' false false
 
@@ -262,15 +262,14 @@ delete "${SYS_PATH:?}/etc/zips/google-sync.prop"
 # Install survival script
 if test -e "${SYS_PATH:?}/addon.d"; then
   if test "${API:?}" -lt 19; then
-    :  ### Skip it
+    : ### Skip it
   elif test "${API:?}" -lt 21; then
-    :  ### Not ready yet
-  else
-    #ui_msg 'Installing survival script...'
     : ### Not ready yet
-    #write_file_list "${TMP_PATH}/files" "${TMP_PATH}/files/" "${TMP_PATH}/backup-filelist.lst"
-    #replace_line_in_file "${TMP_PATH}/addon.d/00-1-google-sync.sh" '%PLACEHOLDER-1%' "${TMP_PATH}/backup-filelist.lst"
-    #copy_file "${TMP_PATH}/addon.d/00-1-google-sync.sh" "$SYS_PATH/addon.d"
+  else
+    ui_msg 'Installing survival script...'
+    write_file_list "${TMP_PATH}/files" "${TMP_PATH}/files/" "${TMP_PATH}/backup-filelist.lst"
+    replace_line_in_file_with_file "${TMP_PATH}/addon.d/00-1-google-sync.sh" '%PLACEHOLDER-1%' "${TMP_PATH}/backup-filelist.lst"
+    copy_file "${TMP_PATH}/addon.d/00-1-google-sync.sh" "$SYS_PATH/addon.d"
   fi
 fi
 
