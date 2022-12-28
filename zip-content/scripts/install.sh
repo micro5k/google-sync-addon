@@ -206,8 +206,6 @@ if test "${DATA_INIT_STATUS}" = '1'; then unmount '/data'; fi
 ui_msg 'Preparing...'
 
 delete_dir_if_empty "${TMP_PATH:?}/files/app"
-delete_dir_if_empty "${TMP_PATH:?}/files/etc/permissions"
-delete_dir_if_empty "${TMP_PATH:?}/files/etc"
 
 if test "${API:?}" -ge 21; then
   # Move apps into subdirs
@@ -231,9 +229,9 @@ fi
 
 # Installing
 ui_msg 'Installing...'
-if test "${API:?}" -ge 23; then
-  if test -e "${TMP_PATH:?}/files/etc/permissions"; then copy_dir_content "${TMP_PATH:?}/files/etc/permissions" "${SYS_PATH:?}/etc/permissions"; fi
-fi
+delete_dir_if_empty "${TMP_PATH:?}/files/etc/permissions"
+delete_dir_if_empty "${TMP_PATH:?}/files/etc"
+if test -e "${TMP_PATH:?}/files/etc/permissions"; then copy_dir_content "${TMP_PATH:?}/files/etc/permissions" "${SYS_PATH:?}/etc/permissions"; fi
 if test -e "${TMP_PATH:?}/files/app"; then copy_dir_content "${TMP_PATH:?}/files/app" "${SYS_PATH:?}/app"; fi
 if test -e "${TMP_PATH:?}/files/priv-app"; then copy_dir_content "${TMP_PATH:?}/files/priv-app" "${PRIVAPP_PATH:?}"; fi
 
