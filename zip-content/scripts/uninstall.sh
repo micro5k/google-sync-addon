@@ -88,6 +88,13 @@ uninstall_list | while IFS='|' read -r FILENAME INTERNAL_NAME _; do
     # Other installers
     delete_recursive "${SYS_PATH}/etc/permissions/privapp-permissions-${INTERNAL_NAME:?}.xml"
     delete_recursive "${SYS_PATH}/etc/default-permissions/default-permissions-${INTERNAL_NAME:?}.xml"
+
+    # App libs
+    delete_recursive_wildcard /data/app-lib/"${INTERNAL_NAME:?}"-*
+
+    # Dalvik cache
+    delete_recursive_wildcard /data/dalvik-cache/*/data@app@"${INTERNAL_NAME:?}"-*@classes*
+    delete_recursive_wildcard /data/dalvik-cache/data@app@"${INTERNAL_NAME:?}"-*@classes*
   fi
   if test -n "${FILENAME}"; then
     delete_recursive "${PRIVAPP_PATH}/${FILENAME}"
@@ -121,6 +128,7 @@ uninstall_list | while IFS='|' read -r FILENAME INTERNAL_NAME _; do
     # Dalvik cache
     delete_recursive_wildcard /data/dalvik-cache/*/system@priv-app@"${FILENAME}"[@\.]*@classes*
     delete_recursive_wildcard /data/dalvik-cache/*/system@app@"${FILENAME}"[@\.]*@classes*
+    delete_recursive_wildcard /data/dalvik-cache/system@priv-app@"${FILENAME}"[@\.]*@classes*
     delete_recursive_wildcard /data/dalvik-cache/system@app@"${FILENAME}"[@\.]*@classes*
   fi
 done
