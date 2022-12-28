@@ -1,5 +1,4 @@
 #!/sbin/sh
-
 # SPDX-FileCopyrightText: (c) 2016 ale5000
 # SPDX-License-Identifier: GPL-3.0-or-later
 # SPDX-FileType: SOURCE
@@ -14,6 +13,9 @@ unset UNZIP
 unset UNZIPOPT
 unset UNZIP_OPTS
 unset CDPATH
+
+# shellcheck disable=SC3040
+set -o pipefail || true
 
 ### GLOBAL VARIABLES ###
 
@@ -132,11 +134,13 @@ ui_msg_empty_line
 
 # Extracting
 ui_msg 'Extracting...'
+custom_package_extract_dir 'origin' "${TMP_PATH:?}"
 custom_package_extract_dir 'files' "${TMP_PATH:?}"
 #custom_package_extract_dir 'addon.d' "${TMP_PATH:?}"
 
 # Setting up permissions
 ui_debug 'Setting up permissions...'
+set_std_perm_recursive "${TMP_PATH:?}/origin"
 set_std_perm_recursive "${TMP_PATH:?}/files"
 if test -e "${TMP_PATH:?}/addon.d"; then set_std_perm_recursive "${TMP_PATH:?}/addon.d"; fi
 #set_perm 0 0 0755 "${TMP_PATH:?}/addon.d/00-1-google-sync.sh"

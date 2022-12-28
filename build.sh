@@ -2,15 +2,14 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # SPDX-FileType: SOURCE
 
-# shellcheck disable=SC2310
-# SC2310: This function is invoked in an 'if' condition so set -e will be disabled
-
+# shellcheck disable=SC2310 # This function is invoked in an 'if' condition so set -e will be disabled
 last_command="${_}" # IMPORTANT: This line must be at the start of the script before any other command otherwise it will not work
 
+set -e
 # shellcheck disable=SC3040
-set -eo pipefail
-# shellcheck disable=SC3044
-shopt -s inherit_errexit 2> /dev/null || true
+set -o pipefail || true
+# shellcheck disable=SC3040
+set -o posix 2> /dev/null || true
 
 cat << 'LICENSE'
   SPDX-FileCopyrightText: (c) 2016-2019, 2021-2022 ale5000
@@ -63,6 +62,7 @@ detect_script_dir || return 1 2>&- || exit 1
 # shellcheck source=SCRIPTDIR/scripts/common.sh
 if test "${A5K_FUNCTIONS_INCLUDED:-false}" = 'false'; then . "${SCRIPT_DIR}/scripts/common.sh"; fi
 
+save_last_title
 change_title 'Building the flashable OTA zip...'
 
 # shellcheck source=SCRIPTDIR/conf-1.sh
@@ -108,8 +108,18 @@ if test "${OPENSOURCE_ONLY:-false}" != 'false'; then FILENAME="${FILENAME:?}-OSS
 # shellcheck source=SCRIPTDIR/addition.sh
 . "${SCRIPT_DIR}/addition.sh"
 
+# Verify files in the files list to avoid creating broken packages
+while IFS='|' read -r LOCAL_FILENAME _ _ _ _ FILE_HASH _; do
+  printf '.'
+  verify_sha1 "${SCRIPT_DIR:?}/zip-content/origin/${LOCAL_FILENAME:?}.apk" "${FILE_HASH:?}" || ui_error "Verification of '${LOCAL_FILENAME:-}' failed"
+done 0< "${SCRIPT_DIR:?}/zip-content/origin/file-list.dat" || ui_error 'Failed to open the list of files to verify'
+printf '\n'
+
 # Download files if they are missing
 mkdir -p "${SCRIPT_DIR}/cache"
+
+# shellcheck disable=SC3040
+set +o posix 2> /dev/null || true
 
 # shellcheck disable=SC3001,SC2312
 dl_list < <(oss_files_to_download || ui_error 'Missing download list') || ui_error 'Failed to download the necessary files'
@@ -122,6 +132,9 @@ if test "${OPENSOURCE_ONLY:-false}" = 'false'; then
 else
   echo 'Skipped not OSS files!'
 fi
+
+# shellcheck disable=SC3040
+set -o posix 2> /dev/null || true
 
 # Copy data
 cp -rf "${SCRIPT_DIR}/zip-content" "${TEMP_DIR}/" || ui_error 'Failed to copy data to the temp dir'
@@ -148,9 +161,9 @@ if test "${OPENSOURCE_ONLY:-false}" != 'false'; then
   printf '%s\n%s\n\n%s\n' '# SPDX-FileCopyrightText: none' '# SPDX-License-Identifier: CC0-1.0' 'Include only Open source components.' > "${TEMP_DIR}/zip-content/OPENSOURCE-ONLY" || ui_error 'Failed to create the OPENSOURCE-ONLY file'
 else
   files_to_download | while IFS='|' read -r LOCAL_FILENAME LOCAL_PATH MIN_API MAX_API FINAL_FILENAME INTERNAL_NAME FILE_HASH _; do
-    mkdir -p -- "${TEMP_DIR:?}/zip-content/files/system-apps/${LOCAL_PATH:?}"
-    cp -f -- "${SCRIPT_DIR:?}/cache/${LOCAL_PATH:?}/${LOCAL_FILENAME:?}.apk" "${TEMP_DIR:?}/zip-content/files/system-apps/${LOCAL_PATH:?}/" || ui_error "Failed to copy to the temp dir the file => '${LOCAL_PATH}/${LOCAL_FILENAME}.apk'"
-    printf '%s\n' "${LOCAL_PATH:?}/${LOCAL_FILENAME:?}|${MIN_API:?}|${MAX_API?}|${FINAL_FILENAME:?}|${INTERNAL_NAME:?}|${FILE_HASH:?}" >> "${TEMP_DIR:?}/zip-content/files/system-apps/file-list.dat"
+    mkdir -p -- "${TEMP_DIR:?}/zip-content/origin/${LOCAL_PATH:?}"
+    cp -f -- "${SCRIPT_DIR:?}/cache/${LOCAL_PATH:?}/${LOCAL_FILENAME:?}.apk" "${TEMP_DIR:?}/zip-content/origin/${LOCAL_PATH:?}/" || ui_error "Failed to copy to the temp dir the file => '${LOCAL_PATH}/${LOCAL_FILENAME}.apk'"
+    printf '%s\n' "${LOCAL_PATH:?}/${LOCAL_FILENAME:?}|${MIN_API:?}|${MAX_API?}|${FINAL_FILENAME:?}|${INTERNAL_NAME:?}|${FILE_HASH:?}" >> "${TEMP_DIR:?}/zip-content/origin/file-list.dat"
   done
   STATUS="$?"
   if test "${STATUS:?}" -ne 0; then return "${STATUS}" 2>&- || exit "${STATUS}"; fi
@@ -158,6 +171,8 @@ else
   mkdir -p "${TEMP_DIR}/zip-content/misc/keycheck"
   cp -f "${SCRIPT_DIR}/cache/misc/keycheck/keycheck-arm.bin" "${TEMP_DIR}/zip-content/misc/keycheck/" || ui_error "Failed to copy to the temp dir the file => 'misc/keycheck/keycheck-arm'"
 fi
+
+printf '\n'
 
 # Remove the cache folder only if it is empty
 rmdir --ignore-fail-on-non-empty "${SCRIPT_DIR}/cache" || ui_error 'Failed to remove the empty cache folder'
@@ -224,8 +239,17 @@ echo ''
 echo 'Done.'
 change_title 'Done'
 
-# Ring bell
-if test "${CI:-false}" = 'false'; then printf '%b' '\007'; fi
-
-#wait "${pid}"
 set +e
+
+# Ring bell
+if test "${CI:-false}" = 'false'; then printf '%b' '\007' || true; fi
+
+#wait "${pid:?}" || true
+
+# Pause
+if test "${CI:-false}" = 'false' && test "${APP_BASE_NAME:-false}" != 'gradlew' && test "${APP_BASE_NAME:-false}" != 'gradlew.'; then
+  # shellcheck disable=SC3045
+  IFS='' read -rsn 1 -p 'Press any key to continue...' _ || true
+  printf '\n' || true
+fi
+restore_saved_title_if_exist

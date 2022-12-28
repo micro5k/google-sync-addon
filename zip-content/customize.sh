@@ -1,16 +1,12 @@
 #!/sbin/sh
-# -*- coding: utf-8 -*-
 # SPDX-FileCopyrightText: (c) 2016 ale5000
 # SPDX-License-Identifier: GPL-3.0-or-later
 # SPDX-FileType: SOURCE
 
-# shellcheck disable=SC3043
-# SC3043: In POSIX sh, local is undefined
+# shellcheck disable=SC3043 # In POSIX sh, local is undefined
 
-set -u
-# shellcheck disable=SC3040
-set -o pipefail || true
-umask 022
+set -u || true
+umask 022 || exit 1
 
 ### PREVENTIVE CHECKS ###
 
@@ -205,7 +201,8 @@ if ! test -e "${OUR_BB:?}"; then ui_error 'BusyBox not found'; fi
 
 # Give execution rights (if needed)
 if test -z "${CUSTOM_BUSYBOX:-}" || test "${OUR_BB:?}" != "${CUSTOM_BUSYBOX:?}"; then
-  chmod +x "${OUR_BB:?}" || ui_error "chmod failed on '${OUR_BB:?}'" # Needed to make working the "safe" functions
+  # Legacy versions of chmod don't support +x and --
+  chmod 0755 "${OUR_BB:?}" || ui_error "chmod failed on '${OUR_BB:?}'" # Needed to make working the "safe" functions
 fi
 
 # Delete previous traces (if they exist) and setup our temp folder
@@ -229,7 +226,7 @@ if test "${TEST_INSTALL:-false}" = 'false'; then
   if test -e "${BASE_TMP_PATH:?}/keycheck"; then
     "${OUR_BB:?}" mv -f "${BASE_TMP_PATH:?}/keycheck" "${TMP_PATH:?}/bin/keycheck" || ui_error "Failed to move keycheck to the bin folder"
     # Give execution rights
-    "${OUR_BB:?}" chmod +x "${TMP_PATH:?}/bin/keycheck" || ui_error "chmod failed on keycheck"
+    "${OUR_BB:?}" chmod 0755 "${TMP_PATH:?}/bin/keycheck" || ui_error "chmod failed on keycheck"
     LIVE_SETUP_POSSIBLE=true
     KEYCHECK_ENABLED=true
   fi
