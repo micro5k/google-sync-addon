@@ -261,16 +261,10 @@ delete "${SYS_PATH:?}/etc/zips/google-sync.prop"
 
 # Install survival script
 if test -e "${SYS_PATH:?}/addon.d"; then
-  if test "${API:?}" -lt 19; then
-    : ### Skip it
-  elif test "${API:?}" -lt 21; then
-    : ### Not ready yet
-  else
-    ui_msg 'Installing survival script...'
-    write_file_list "${TMP_PATH}/files" "${TMP_PATH}/files/" "${TMP_PATH}/backup-filelist.lst"
-    replace_line_in_file_with_file "${TMP_PATH}/addon.d/00-1-google-sync.sh" '%PLACEHOLDER-1%' "${TMP_PATH}/backup-filelist.lst"
-    copy_file "${TMP_PATH}/addon.d/00-1-google-sync.sh" "${SYS_PATH}/addon.d"
-  fi
+  ui_msg 'Installing survival script...'
+  write_file_list "${TMP_PATH}/files" "${TMP_PATH}/files/" "${TMP_PATH}/backup-filelist.lst"
+  replace_line_in_file_with_file "${TMP_PATH}/addon.d/00-1-google-sync.sh" '%PLACEHOLDER-1%' "${TMP_PATH}/backup-filelist.lst"
+  copy_file "${TMP_PATH}/addon.d/00-1-google-sync.sh" "${SYS_PATH}/addon.d"
 fi
 
 if test "${SYS_INIT_STATUS}" = '1'; then
