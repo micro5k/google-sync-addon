@@ -42,14 +42,6 @@ if [[ -z "${INSTALLER}" ]]; then
     echo "$1"
   }
 
-  delete_recursive()
-  {
-    if test -e "$1"; then
-      ui_debug "Deleting '$1'..."
-      rm -rf -- "$1" || ui_debug "Failed to delete files/folders"
-    fi
-  }
-
   delete()
   {
     for filename in "${@?}"; do
@@ -72,20 +64,20 @@ if [[ -e '/mnt/sdcard' ]]; then INTERNAL_MEMORY_PATH='/mnt/sdcard'; fi
 
 uninstall_list | while IFS='|' read -r FILENAME INTERNAL_NAME _; do
   if test -n "${INTERNAL_NAME}"; then
-    delete_recursive "${SYS_PATH}/etc/permissions/${INTERNAL_NAME}.xml"
-    delete_recursive "${SYS_PATH}/etc/sysconfig/sysconfig-${INTERNAL_NAME}.xml"
-    delete_recursive "${PRIVAPP_PATH}/${INTERNAL_NAME}"
-    delete_recursive "${PRIVAPP_PATH}/${INTERNAL_NAME}.apk"
-    delete_recursive "${SYS_PATH}/app/${INTERNAL_NAME}"
-    delete_recursive "${SYS_PATH}/app/${INTERNAL_NAME}.apk"
+    delete "${SYS_PATH}/etc/permissions/${INTERNAL_NAME}.xml"
+    delete "${SYS_PATH}/etc/sysconfig/sysconfig-${INTERNAL_NAME}.xml"
+    delete "${PRIVAPP_PATH}/${INTERNAL_NAME}"
+    delete "${PRIVAPP_PATH}/${INTERNAL_NAME}.apk"
+    delete "${SYS_PATH}/app/${INTERNAL_NAME}"
+    delete "${SYS_PATH}/app/${INTERNAL_NAME}.apk"
     delete "/data/app/${INTERNAL_NAME}"-*
     delete "/mnt/asec/${INTERNAL_NAME}"-*
 
     # Legacy xml paths
-    delete_recursive "${SYS_PATH}/etc/default-permissions/${INTERNAL_NAME:?}-permissions.xml"
+    delete "${SYS_PATH}/etc/default-permissions/${INTERNAL_NAME:?}-permissions.xml"
     # Other installers
-    delete_recursive "${SYS_PATH}/etc/permissions/privapp-permissions-${INTERNAL_NAME:?}.xml"
-    delete_recursive "${SYS_PATH}/etc/default-permissions/default-permissions-${INTERNAL_NAME:?}.xml"
+    delete "${SYS_PATH}/etc/permissions/privapp-permissions-${INTERNAL_NAME:?}.xml"
+    delete "${SYS_PATH}/etc/default-permissions/default-permissions-${INTERNAL_NAME:?}.xml"
 
     # App libs
     delete /data/app-lib/"${INTERNAL_NAME:?}"-*
@@ -95,33 +87,33 @@ uninstall_list | while IFS='|' read -r FILENAME INTERNAL_NAME _; do
     delete /data/dalvik-cache/data@app@"${INTERNAL_NAME:?}"-*@classes*
   fi
   if test -n "${FILENAME}"; then
-    delete_recursive "${PRIVAPP_PATH}/${FILENAME}"
-    delete_recursive "${PRIVAPP_PATH}/${FILENAME}.apk"
-    delete_recursive "${PRIVAPP_PATH}/${FILENAME}.odex"
-    delete_recursive "${SYS_PATH}/app/${FILENAME}"
-    delete_recursive "${SYS_PATH}/app/${FILENAME}.apk"
-    delete_recursive "${SYS_PATH}/app/${FILENAME}.odex"
+    delete "${PRIVAPP_PATH}/${FILENAME}"
+    delete "${PRIVAPP_PATH}/${FILENAME}.apk"
+    delete "${PRIVAPP_PATH}/${FILENAME}.odex"
+    delete "${SYS_PATH}/app/${FILENAME}"
+    delete "${SYS_PATH}/app/${FILENAME}.apk"
+    delete "${SYS_PATH}/app/${FILENAME}.odex"
 
-    delete_recursive "${SYS_PATH}/system_ext/priv-app/${FILENAME}"
-    delete_recursive "${SYS_PATH}/system_ext/app/${FILENAME}"
-    delete_recursive "/system_ext/priv-app/${FILENAME}"
-    delete_recursive "/system_ext/app/${FILENAME}"
+    delete "${SYS_PATH}/system_ext/priv-app/${FILENAME}"
+    delete "${SYS_PATH}/system_ext/app/${FILENAME}"
+    delete "/system_ext/priv-app/${FILENAME}"
+    delete "/system_ext/app/${FILENAME}"
 
-    delete_recursive "${SYS_PATH}/product/priv-app/${FILENAME}"
-    delete_recursive "${SYS_PATH}/product/app/${FILENAME}"
-    delete_recursive "/product/priv-app/${FILENAME}"
-    delete_recursive "/product/app/${FILENAME}"
+    delete "${SYS_PATH}/product/priv-app/${FILENAME}"
+    delete "${SYS_PATH}/product/app/${FILENAME}"
+    delete "/product/priv-app/${FILENAME}"
+    delete "/product/app/${FILENAME}"
 
-    delete_recursive "${SYS_PATH}/vendor/priv-app/${FILENAME}"
-    delete_recursive "${SYS_PATH}/vendor/app/${FILENAME}"
-    delete_recursive "/vendor/priv-app/${FILENAME}"
-    delete_recursive "/vendor/app/${FILENAME}"
+    delete "${SYS_PATH}/vendor/priv-app/${FILENAME}"
+    delete "${SYS_PATH}/vendor/app/${FILENAME}"
+    delete "/vendor/priv-app/${FILENAME}"
+    delete "/vendor/app/${FILENAME}"
 
     # Current xml paths
-    delete_recursive "${SYS_PATH}/etc/permissions/privapp-permissions-${FILENAME:?}.xml"
-    delete_recursive "${SYS_PATH}/etc/default-permissions/default-permissions-${FILENAME:?}.xml"
+    delete "${SYS_PATH}/etc/permissions/privapp-permissions-${FILENAME:?}.xml"
+    delete "${SYS_PATH}/etc/default-permissions/default-permissions-${FILENAME:?}.xml"
     # Legacy xml paths
-    delete_recursive "${SYS_PATH}/etc/default-permissions/${FILENAME:?}-permissions.xml"
+    delete "${SYS_PATH}/etc/default-permissions/${FILENAME:?}-permissions.xml"
 
     # Dalvik cache
     delete /data/dalvik-cache/*/system@priv-app@"${FILENAME}"[@\.]*@classes*
@@ -134,9 +126,9 @@ STATUS="$?"; if test "${STATUS}" -ne 0; then exit "${STATUS}"; fi
 
 framework_uninstall_list | while IFS='|' read -r INTERNAL_NAME _; do
   if test -n "${INTERNAL_NAME}"; then
-    delete_recursive "${SYS_PATH}/etc/permissions/${INTERNAL_NAME}.xml"
-    delete_recursive "${SYS_PATH}/framework/${INTERNAL_NAME}.jar"
-    delete_recursive "${SYS_PATH}/framework/${INTERNAL_NAME}.odex"
+    delete "${SYS_PATH}/etc/permissions/${INTERNAL_NAME}.xml"
+    delete "${SYS_PATH}/framework/${INTERNAL_NAME}.jar"
+    delete "${SYS_PATH}/framework/${INTERNAL_NAME}.odex"
     delete "${SYS_PATH}/framework/oat"/*/"${INTERNAL_NAME}.odex"
   fi
 done
@@ -144,12 +136,12 @@ STATUS="$?"; if test "${STATUS}" -ne 0; then exit "${STATUS}"; fi
 
 list_app_filenames | while read -r FILENAME; do
   if [[ -z "${FILENAME}" ]]; then continue; fi
-  delete_recursive "${PRIVAPP_PATH}/${FILENAME}"
-  delete_recursive "${PRIVAPP_PATH}/${FILENAME}.apk"
-  delete_recursive "${PRIVAPP_PATH}/${FILENAME}.odex"
-  delete_recursive "${SYS_PATH}/app/${FILENAME}"
-  delete_recursive "${SYS_PATH}/app/${FILENAME}.apk"
-  delete_recursive "${SYS_PATH}/app/${FILENAME}.odex"
+  delete "${PRIVAPP_PATH}/${FILENAME}"
+  delete "${PRIVAPP_PATH}/${FILENAME}.apk"
+  delete "${PRIVAPP_PATH}/${FILENAME}.odex"
+  delete "${SYS_PATH}/app/${FILENAME}"
+  delete "${SYS_PATH}/app/${FILENAME}.apk"
+  delete "${SYS_PATH}/app/${FILENAME}.odex"
 done
 
 list_app_filenames | while read -r FILENAME; do
@@ -161,14 +153,14 @@ done
 
 list_app_data_to_remove | while read -r FILENAME; do
   if [[ -z "${FILENAME}" ]]; then continue; fi
-  delete_recursive "/data/data/${FILENAME}"
+  delete "/data/data/${FILENAME}"
   delete '/data/user'/*/"${FILENAME}"
   delete '/data/user_de'/*/"${FILENAME}"
-  delete_recursive "${INTERNAL_MEMORY_PATH}/Android/data/${FILENAME}"
+  delete "${INTERNAL_MEMORY_PATH}/Android/data/${FILENAME}"
 done
 
-delete_recursive "${SYS_PATH}"/etc/default-permissions/google-sync-permissions.xml
-delete_recursive "${SYS_PATH}"/etc/default-permissions/contacts-calendar-sync.xml
+delete "${SYS_PATH}"/etc/default-permissions/google-sync-permissions.xml
+delete "${SYS_PATH}"/etc/default-permissions/contacts-calendar-sync.xml
 
 if test -e "${SYS_PATH}/etc/zips"; then rmdir --ignore-fail-on-non-empty -- "${SYS_PATH}/etc/zips"; fi
 
