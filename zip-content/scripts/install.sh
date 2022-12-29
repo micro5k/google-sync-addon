@@ -90,29 +90,36 @@ else
   fi
 fi
 
-cp -pf "${SYS_PATH}/build.prop" "${TMP_PATH}/build.prop"  # Cache the file for faster access
+if test "${SYS_PATH:?}" = '/system' && ! is_mounted_read_write "${SYS_PATH:?}"; then
+  ui_warning "The '${SYS_PATH:-}' partition is read-only, it will be remounted"
+  remount_read_write "${SYS_PATH:?}"
+  is_mounted_read_write "${SYS_PATH:?}" || ui_error "The remounting of '${SYS_PATH:?}' has failed"
+fi
+
+cp -pf "${SYS_PATH}/build.prop" "${TMP_PATH}/build.prop" # Cache the file for faster access
 package_extract_file 'module.prop' "${TMP_PATH}/module.prop"
 install_id="$(simple_get_prop 'id' "${TMP_PATH}/module.prop")" || ui_error 'Failed to parse id string'
 install_version="$(simple_get_prop 'version' "${TMP_PATH}/module.prop")" || ui_error 'Failed to parse version string'
 install_version_code="$(simple_get_prop 'versionCode' "${TMP_PATH}/module.prop")" || ui_error 'Failed to parse version code'
 
 INSTALLATION_SETTINGS_FILE="${install_id}.prop"
-API=$(build_getprop 'build\.version\.sdk')
+API="$(build_getprop 'build\.version\.sdk')"
+readonly API
 
-if test "${API}" -ge 19; then  # KitKat or higher
+if test "${API:?}" -ge 19; then # KitKat or higher
   PRIVAPP_PATH="${SYS_PATH}/priv-app"
 else
   PRIVAPP_PATH="${SYS_PATH}/app"
 fi
 if test ! -e "${PRIVAPP_PATH:?}"; then ui_error 'The priv-app folder does NOT exist'; fi
 
-if test "${API}" -ge 24; then  # 23
-  :  ### New Android versions
-elif test "${API}" -ge 21; then
+if test "${API:?}" -ge 24; then # 23
+  : ### Supported Android versions
+elif test "${API:?}" -ge 21; then
   ui_error 'ERROR: Unsupported Android version'
-elif test "${API}" -ge 19; then
+elif test "${API:?}" -ge 19; then
   :
-elif test "${API}" -ge 1; then
+elif test "${API:?}" -ge 1; then
   ui_error 'Your Android version is too old'
 else
   ui_error 'Invalid API level'
