@@ -7,13 +7,13 @@
 
 list_app_filenames()
 {
-cat <<'EOF'
+  cat << 'EOF'
 EOF
 }
 
 list_app_data_to_remove()
 {
-cat <<'EOF'
+  cat << 'EOF'
 com.google.android.syncadapters.contacts
 com.google.android.syncadapters.calendar
 com.google.android.backuptransport
@@ -22,7 +22,7 @@ EOF
 
 uninstall_list()
 {
-cat <<'EOF'
+  cat << 'EOF'
 GoogleContactsSyncAdapter|com.google.android.syncadapters.contacts
 GoogleCalendarSyncAdapter|com.google.android.syncadapters.calendar
 CalendarGooglePrebuilt|com.google.android.calendar
@@ -32,7 +32,7 @@ EOF
 
 framework_uninstall_list()
 {
-cat <<'EOF'
+  cat << 'EOF'
 EOF
 }
 
@@ -122,7 +122,8 @@ uninstall_list | while IFS='|' read -r FILENAME INTERNAL_NAME _; do
     delete /data/dalvik-cache/system@app@"${FILENAME}"[@\.]*@classes*
   fi
 done
-STATUS="$?"; if test "${STATUS}" -ne 0; then exit "${STATUS}"; fi
+STATUS="$?"
+if test "${STATUS}" -ne 0; then exit "${STATUS}"; fi
 
 framework_uninstall_list | while IFS='|' read -r INTERNAL_NAME _; do
   if test -n "${INTERNAL_NAME}"; then
@@ -132,7 +133,8 @@ framework_uninstall_list | while IFS='|' read -r INTERNAL_NAME _; do
     delete "${SYS_PATH}/framework/oat"/*/"${INTERNAL_NAME}.odex"
   fi
 done
-STATUS="$?"; if test "${STATUS}" -ne 0; then exit "${STATUS}"; fi
+STATUS="$?"
+if test "${STATUS}" -ne 0; then exit "${STATUS}"; fi
 
 list_app_filenames | while read -r FILENAME; do
   if [[ -z "${FILENAME}" ]]; then continue; fi

@@ -5,7 +5,7 @@
 
 files_to_download()
 {
-cat <<'EOF'
+  cat << 'EOF'
 GoogleBackupTransport44|priv-app|19|20|GoogleBackupTransport|com.google.android.backuptransport|6f186d368014022b0038ad2f5d8aa46bb94b5c14|www.apkmirror.com/apk/google-inc/google-backup-transport/google-backup-transport-4-4-4-1227136-release/google-backup-transport-4-4-4-1227136-android-apk-download/|gitlab.opengapps.org/opengapps/all/-/raw/b458223777512c97639cb6bb54bfad93047406d7/priv-app/com.google.android.backuptransport/19/nodpi/19.apk
 GoogleContactsSyncAdapter44|app|19|20|GoogleContactsSyncAdapter|com.google.android.syncadapters.contacts|68597be59f16d2e26a79def6fa20bc85d1d2c3b3|www.apkmirror.com/apk/google-inc/google-contacts-sync/google-contacts-sync-4-4-4-1227136-release/google-contacts-sync-4-4-4-1227136-android-apk-download/|gitlab.opengapps.org/opengapps/all/-/raw/b458223777512c97639cb6bb54bfad93047406d7/app/com.google.android.syncadapters.contacts/19/nodpi/19.apk
 GoogleContactsSyncAdapter8|priv-app|24||GoogleContactsSyncAdapter|com.google.android.syncadapters.contacts|d6913b4a2fa5377b2b2f9e43056599b5e987df83|www.apkmirror.com/apk/google-inc/google-contacts-sync/google-contacts-sync-8-1-0-release/google-contacts-sync-8-1-0-2-android-apk-download/|gitlab.opengapps.org/opengapps/all/-/raw/b458223777512c97639cb6bb54bfad93047406d7/app/com.google.android.syncadapters.contacts/27/nodpi/27.apk

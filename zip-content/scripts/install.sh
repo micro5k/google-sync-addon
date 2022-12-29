@@ -24,12 +24,10 @@ TMP_PATH="$2"
 
 SYS_PATH=''
 
-
 ### FUNCTIONS ###
 
 # shellcheck source=SCRIPTDIR/../inc/common-functions.sh
 . "${TMP_PATH}/inc/common-functions.sh"
-
 
 ### CODE ###
 
@@ -60,7 +58,11 @@ fi
 if test "${live_setup_enabled:?}" = 'true'; then
   ui_msg 'LIVE SETUP ENABLED!'
   if test "${DEBUG_LOG}" = '0'; then
-    choose 'Do you want to enable the debug log?' '+) Yes' '-) No'; if test "${?}" = '3'; then export DEBUG_LOG=1; enable_debug_log; fi
+    choose 'Do you want to enable the debug log?' '+) Yes' '-) No'
+    if test "${?}" = '3'; then
+      export DEBUG_LOG=1
+      enable_debug_log
+    fi
   fi
 fi
 
@@ -115,7 +117,7 @@ PRIVAPP_PATH="${SYS_PATH:?}/${PRIVAPP_FOLDER:?}"
 readonly PRIVAPP_FOLDER PRIVAPP_PATH
 if test ! -e "${PRIVAPP_PATH:?}"; then ui_error 'The priv-app folder does NOT exist'; fi
 
-if test "${API:?}" -ge 24; then # 23
+if test "${API:?}" -ge 24; then
   : ### Supported Android versions
 elif test "${API:?}" -ge 21; then
   ui_error 'ERROR: Unsupported Android version'
