@@ -107,10 +107,12 @@ API="$(build_getprop 'build\.version\.sdk')"
 readonly API
 
 if test "${API:?}" -ge 19; then # KitKat or higher
-  PRIVAPP_PATH="${SYS_PATH}/priv-app"
+  PRIVAPP_FOLDER='priv-app'
 else
-  PRIVAPP_PATH="${SYS_PATH}/app"
+  PRIVAPP_FOLDER='app'
 fi
+PRIVAPP_PATH="${SYS_PATH:?}/${PRIVAPP_FOLDER:?}"
+readonly PRIVAPP_FOLDER PRIVAPP_PATH
 if test ! -e "${PRIVAPP_PATH:?}"; then ui_error 'The priv-app folder does NOT exist'; fi
 
 if test "${API:?}" -ge 24; then # 23
@@ -212,6 +214,10 @@ if test "${DATA_INIT_STATUS}" = '1'; then unmount '/data'; fi
 # Preparing
 ui_msg 'Preparing...'
 
+if test -e "${TMP_PATH:?}/files/priv-app" && test "${PRIVAPP_FOLDER:?}" != 'priv-app'; then
+  copy_dir_content "${TMP_PATH:?}/files/priv-app" "${TMP_PATH:?}/files/${PRIVAPP_FOLDER:?}"
+  delete "${TMP_PATH:?}/files/priv-app"
+fi
 delete_dir_if_empty "${TMP_PATH:?}/files/app"
 
 if test "${API:?}" -ge 21; then
