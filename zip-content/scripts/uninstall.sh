@@ -52,12 +52,12 @@ if [[ -z "${INSTALLER}" ]]; then
     fi
   }
 
-  delete_recursive_wildcard()
+  delete()
   {
-    for filename in "$@"; do
-      if test -e "${filename}"; then
-        ui_debug "Deleting '${filename}'...."
-        rm -rf -- "${filename:?}" || ui_debug "Failed to delete files/folders"
+    for filename in "${@?}"; do
+      if test -e "${filename?}"; then
+        ui_debug "Deleting '${filename?}'...."
+        rm -rf -- "${filename:?}" || ui_debug 'Failed to delete files/folders'
       fi
     done
   }
@@ -80,8 +80,8 @@ uninstall_list | while IFS='|' read -r FILENAME INTERNAL_NAME _; do
     delete_recursive "${PRIVAPP_PATH}/${INTERNAL_NAME}.apk"
     delete_recursive "${SYS_PATH}/app/${INTERNAL_NAME}"
     delete_recursive "${SYS_PATH}/app/${INTERNAL_NAME}.apk"
-    delete_recursive_wildcard "/data/app/${INTERNAL_NAME}"-*
-    delete_recursive_wildcard "/mnt/asec/${INTERNAL_NAME}"-*
+    delete "/data/app/${INTERNAL_NAME}"-*
+    delete "/mnt/asec/${INTERNAL_NAME}"-*
 
     # Legacy xml paths
     delete_recursive "${SYS_PATH}/etc/default-permissions/${INTERNAL_NAME:?}-permissions.xml"
@@ -90,11 +90,11 @@ uninstall_list | while IFS='|' read -r FILENAME INTERNAL_NAME _; do
     delete_recursive "${SYS_PATH}/etc/default-permissions/default-permissions-${INTERNAL_NAME:?}.xml"
 
     # App libs
-    delete_recursive_wildcard /data/app-lib/"${INTERNAL_NAME:?}"-*
+    delete /data/app-lib/"${INTERNAL_NAME:?}"-*
 
     # Dalvik cache
-    delete_recursive_wildcard /data/dalvik-cache/*/data@app@"${INTERNAL_NAME:?}"-*@classes*
-    delete_recursive_wildcard /data/dalvik-cache/data@app@"${INTERNAL_NAME:?}"-*@classes*
+    delete /data/dalvik-cache/*/data@app@"${INTERNAL_NAME:?}"-*@classes*
+    delete /data/dalvik-cache/data@app@"${INTERNAL_NAME:?}"-*@classes*
   fi
   if test -n "${FILENAME}"; then
     delete_recursive "${PRIVAPP_PATH}/${FILENAME}"
@@ -126,10 +126,10 @@ uninstall_list | while IFS='|' read -r FILENAME INTERNAL_NAME _; do
     delete_recursive "${SYS_PATH}/etc/default-permissions/${FILENAME:?}-permissions.xml"
 
     # Dalvik cache
-    delete_recursive_wildcard /data/dalvik-cache/*/system@priv-app@"${FILENAME}"[@\.]*@classes*
-    delete_recursive_wildcard /data/dalvik-cache/*/system@app@"${FILENAME}"[@\.]*@classes*
-    delete_recursive_wildcard /data/dalvik-cache/system@priv-app@"${FILENAME}"[@\.]*@classes*
-    delete_recursive_wildcard /data/dalvik-cache/system@app@"${FILENAME}"[@\.]*@classes*
+    delete /data/dalvik-cache/*/system@priv-app@"${FILENAME}"[@\.]*@classes*
+    delete /data/dalvik-cache/*/system@app@"${FILENAME}"[@\.]*@classes*
+    delete /data/dalvik-cache/system@priv-app@"${FILENAME}"[@\.]*@classes*
+    delete /data/dalvik-cache/system@app@"${FILENAME}"[@\.]*@classes*
   fi
 done
 STATUS="$?"; if test "${STATUS}" -ne 0; then exit "${STATUS}"; fi
@@ -139,7 +139,7 @@ framework_uninstall_list | while IFS='|' read -r INTERNAL_NAME _; do
     delete_recursive "${SYS_PATH}/etc/permissions/${INTERNAL_NAME}.xml"
     delete_recursive "${SYS_PATH}/framework/${INTERNAL_NAME}.jar"
     delete_recursive "${SYS_PATH}/framework/${INTERNAL_NAME}.odex"
-    delete_recursive_wildcard "${SYS_PATH}/framework/oat"/*/"${INTERNAL_NAME}.odex"
+    delete "${SYS_PATH}/framework/oat"/*/"${INTERNAL_NAME}.odex"
   fi
 done
 STATUS="$?"; if test "${STATUS}" -ne 0; then exit "${STATUS}"; fi
@@ -156,16 +156,16 @@ done
 
 list_app_filenames | while read -r FILENAME; do
   if [[ -z "${FILENAME}" ]]; then continue; fi
-  delete_recursive_wildcard /data/dalvik-cache/system@app@"${FILENAME}"[@\.]*@classes*
-  delete_recursive_wildcard /data/dalvik-cache/*/system@priv-app@"${FILENAME}"[@\.]*@classes*
-  delete_recursive_wildcard /data/dalvik-cache/*/system@app@"${FILENAME}"[@\.]*@classes*
+  delete /data/dalvik-cache/system@app@"${FILENAME}"[@\.]*@classes*
+  delete /data/dalvik-cache/*/system@priv-app@"${FILENAME}"[@\.]*@classes*
+  delete /data/dalvik-cache/*/system@app@"${FILENAME}"[@\.]*@classes*
 done
 
 list_app_data_to_remove | while read -r FILENAME; do
   if [[ -z "${FILENAME}" ]]; then continue; fi
   delete_recursive "/data/data/${FILENAME}"
-  delete_recursive_wildcard '/data/user'/*/"${FILENAME}"
-  delete_recursive_wildcard '/data/user_de'/*/"${FILENAME}"
+  delete '/data/user'/*/"${FILENAME}"
+  delete '/data/user_de'/*/"${FILENAME}"
   delete_recursive "${INTERNAL_MEMORY_PATH}/Android/data/${FILENAME}"
 done
 
