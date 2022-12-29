@@ -261,9 +261,6 @@ set_perm 0 0 0750 "${SYS_PATH:?}/etc/zips"
 
 copy_dir_content "${USED_SETTINGS_PATH:?}" "${SYS_PATH:?}/etc/zips"
 
-# Clean legacy file
-delete "${SYS_PATH:?}/etc/zips/google-sync.prop"
-
 # Install survival script
 if test -e "${SYS_PATH:?}/addon.d"; then
   ui_msg 'Installing survival script...'
