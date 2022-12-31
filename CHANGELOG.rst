@@ -23,6 +23,7 @@ All notable changes to this project will be documented in this file.
 - Add support for addon.d
 - Improve uninstaller
 - Refactored some code, now most apps can be enabled/disabled directly in the Live setup
+- Add an helper script (:code:`zip-install.sh`) for the installation of the flashable zip via terminal or via ADB (recovery not needed)
 - Sync setup with microG unofficial installer
 
 `1.0.3-beta`_
