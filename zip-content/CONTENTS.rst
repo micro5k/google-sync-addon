@@ -9,6 +9,10 @@ CONTENTS
 .. |star| replace:: ⭐️
 .. |fire| replace:: 🔥
 .. |boom| replace:: 💥
+.. |yes| replace:: ✔
+.. |no| replace:: ✖
+.. |red-no| replace:: ❌
+.. |no-upd| replace:: 🙈
 
 Android 7+
 ----------

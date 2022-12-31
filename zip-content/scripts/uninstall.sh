@@ -5,12 +5,6 @@
 
 # shellcheck disable=SC3010 # In POSIX sh, [[ ]] is undefined
 
-list_app_filenames()
-{
-  cat << 'EOF'
-EOF
-}
-
 list_app_data_to_remove()
 {
   cat << 'EOF'
@@ -135,23 +129,6 @@ framework_uninstall_list | while IFS='|' read -r INTERNAL_NAME _; do
 done
 STATUS="$?"
 if test "${STATUS}" -ne 0; then exit "${STATUS}"; fi
-
-list_app_filenames | while read -r FILENAME; do
-  if [[ -z "${FILENAME}" ]]; then continue; fi
-  delete "${PRIVAPP_PATH}/${FILENAME}"
-  delete "${PRIVAPP_PATH}/${FILENAME}.apk"
-  delete "${PRIVAPP_PATH}/${FILENAME}.odex"
-  delete "${SYS_PATH}/app/${FILENAME}"
-  delete "${SYS_PATH}/app/${FILENAME}.apk"
-  delete "${SYS_PATH}/app/${FILENAME}.odex"
-done
-
-list_app_filenames | while read -r FILENAME; do
-  if [[ -z "${FILENAME}" ]]; then continue; fi
-  delete /data/dalvik-cache/system@app@"${FILENAME}"[@\.]*@classes*
-  delete /data/dalvik-cache/*/system@priv-app@"${FILENAME}"[@\.]*@classes*
-  delete /data/dalvik-cache/*/system@app@"${FILENAME}"[@\.]*@classes*
-done
 
 list_app_data_to_remove | while read -r FILENAME; do
   if [[ -z "${FILENAME}" ]]; then continue; fi
