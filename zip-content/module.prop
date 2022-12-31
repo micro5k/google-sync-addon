@@ -5,8 +5,8 @@
 
 id=google-sync-addon
 name=Google Sync add-on
-version=v1.0.3-beta
-versionCode=1
+version=v1.2.0-beta
+versionCode=2
 author=ale5000
 description=It is an installer made to simplify the installation of Google sync adapters.
 support=https://github.com/micro5k/google-sync-addon/issues
