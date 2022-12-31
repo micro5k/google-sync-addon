@@ -14,6 +14,17 @@ All notable changes to this project will be documented in this file.
 -------------
 - Click above to see all the changes.
 
+`1.2.0-beta`_ - 2022-12-31
+--------------------------
+- Update Google Contacts Sync to 8.1.0 on recent devices (tested)
+- Update Google Calendar Sync to 5.2.3 on older devices
+- Add Google Calendar Sync 6.0.44 for recent devices (tested)
+- Improve installation performance by verifying only the files that are really installed
+- Add support for addon.d
+- Improve uninstaller
+- Refactored some code, now most apps can be enabled/disabled directly in the Live setup
+- Sync setup with microG unofficial installer
+
 `1.0.3-beta`_
 -------------
 - Updated Google Contacts Sync to 8.0.0 for Nougat (tested)
@@ -41,6 +52,7 @@ All notable changes to this project will be documented in this file.
 - Initial release
 
 
-.. _Unreleased: https://github.com/micro5k/google-sync-addon/compare/7d869eb31a90645b742c434001df9f0ac6df0a76...HEAD
+.. _Unreleased: https://github.com/micro5k/google-sync-addon/compare/v1.2.0-beta...HEAD
+.. _1.2.0-beta: https://github.com/micro5k/google-sync-addon/compare/7d869eb31a90645b742c434001df9f0ac6df0a76...v1.2.0-beta
 .. _1.0.3-beta: https://github.com/micro5k/google-sync-addon/compare/572b41b384523f24028ff5c11dc898054b0b3145...7d869eb31a90645b742c434001df9f0ac6df0a76
 .. _1.0.2-alpha: https://github.com/micro5k/google-sync-addon/tree/572b41b384523f24028ff5c11dc898054b0b3145
