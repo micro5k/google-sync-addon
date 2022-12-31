@@ -14,17 +14,15 @@ on:
   workflow_dispatch:
 jobs:
   shellchecker:
-    permissions: {}
     name: "ShellChecker"
     runs-on: ubuntu-latest
+    permissions: {}
 
     steps:
       - name: "Check out code"
         uses: actions/checkout@v3
       - name: "ShellChecker"
         uses: a5k-actions/shellchecker@v0
-        with:
-          ignore-files: "gradlew|.simplecov"
 
   codacy:
     permissions:

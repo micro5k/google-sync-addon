@@ -44,6 +44,14 @@ Copyright
 
 Code analysis
 -------------
+.. image:: https://github.com/micro5k/google-sync-addon/actions/workflows/code-linting.yml/badge.svg
+   :alt: Code linting of GitHub
+   :target: https://github.com/micro5k/google-sync-addon/actions/workflows/code-linting.yml
+
+.. image:: https://www.codefactor.io/repository/github/micro5k/google-sync-addon/badge
+   :alt: CodeFactor Badge
+   :target: https://www.codefactor.io/repository/github/micro5k/google-sync-addon
+
 .. image:: https://app.codacy.com/project/badge/Grade/a490a45291bb45208c025b26421402f5
    :alt: Codacy Badge
    :target: https://www.codacy.com/gh/micro5k/google-sync-addon/dashboard

@@ -28,13 +28,13 @@ jobs:
         run: |
           ### Building...
           workspace_path='${{ github.workspace }}'; readonly workspace_path
-          "${workspace_path:?}/gradlew" buildOtaOSS
+          "${workspace_path:?}/gradlew" clean buildOtaOSS
       - name: "Upload release"
         if: "${{ github.repository_owner == 'micro5k' }}"
         uses: ncipollo/release-action@v1
         with:
           allowUpdates: true
-          #artifactErrorsFailBuild: true
-          #artifacts: "output/*.zip*"
-          body: "See [**changelog**](./CHANGELOG.rst)."
+          # artifactErrorsFailBuild: true
+          # artifacts: "output/*.zip*"
+          body: "See the full [**changelog**](./CHANGELOG.rst)."
           replacesArtifacts: false
