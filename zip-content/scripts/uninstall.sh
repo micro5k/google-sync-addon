@@ -96,8 +96,6 @@ uninstall_list | while IFS='|' read -r FILENAME INTERNAL_NAME DEL_SYS_APPS_ONLY 
     delete_tracked "${PRIVAPP_PATH}/${INTERNAL_NAME}.apk"
     delete_tracked "${SYS_PATH}/app/${INTERNAL_NAME}"
     delete_tracked "${SYS_PATH}/app/${INTERNAL_NAME}.apk"
-    delete "/data/app/${INTERNAL_NAME}"-*
-    delete "/mnt/asec/${INTERNAL_NAME}"-*
 
     # Legacy xml paths
     delete "${SYS_PATH}/etc/default-permissions/${INTERNAL_NAME:?}-permissions.xml"
@@ -113,6 +111,7 @@ uninstall_list | while IFS='|' read -r FILENAME INTERNAL_NAME DEL_SYS_APPS_ONLY 
     delete /data/dalvik-cache/*/data@app@"${INTERNAL_NAME:?}"-*@classes*
     delete /data/dalvik-cache/data@app@"${INTERNAL_NAME:?}"-*@classes*
   fi
+
   if test -n "${FILENAME}"; then
     delete_tracked "${PRIVAPP_PATH}/${FILENAME}"
     delete_tracked "${PRIVAPP_PATH}/${FILENAME}.apk"
@@ -148,6 +147,18 @@ uninstall_list | while IFS='|' read -r FILENAME INTERNAL_NAME DEL_SYS_APPS_ONLY 
     delete /data/dalvik-cache/system@priv-app@"${FILENAME}"[@\.]*@classes*
     delete /data/dalvik-cache/system@app@"${FILENAME}"[@\.]*@classes*
   fi
+
+  if test -n "${INTERNAL_NAME}"; then
+    if test "${DEL_SYS_APPS_ONLY:-false}" = false || track_really_deleted; then
+      delete "/data/app/${INTERNAL_NAME}"
+      delete "/data/app/${INTERNAL_NAME}.apk"
+      delete "/data/app/${INTERNAL_NAME}"-*
+      delete "/mnt/asec/${INTERNAL_NAME}"
+      delete "/mnt/asec/${INTERNAL_NAME}.apk"
+      delete "/mnt/asec/${INTERNAL_NAME}"-*
+    fi
+    # Check also /data/app-private /data/app-asec /data/preload
+  fi
 done
 STATUS="$?"
 if test "${STATUS}" -ne 0; then exit "${STATUS}"; fi
@@ -157,7 +168,7 @@ framework_uninstall_list | while IFS='|' read -r INTERNAL_NAME _; do
     delete "${SYS_PATH:?}/etc/permissions/${INTERNAL_NAME:?}.xml"
     delete "${SYS_PATH:?}/framework/${INTERNAL_NAME:?}.jar"
     delete "${SYS_PATH:?}/framework/${INTERNAL_NAME:?}.odex"
-    delete "${SYS_PATH:?}/framework/oat"/*/"${INTERNAL_NAME:?}.odex"
+    delete "${SYS_PATH:?}"/framework/oat/*/"${INTERNAL_NAME:?}.odex"
 
     # Dalvik cache
     delete /data/dalvik-cache/*/system@framework@"${INTERNAL_NAME:?}".jar@classes*
