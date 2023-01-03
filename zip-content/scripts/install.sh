@@ -14,8 +14,12 @@ unset UNZIPOPT
 unset UNZIP_OPTS
 unset CDPATH
 
-# shellcheck disable=SC3040
-set -o pipefail || true
+# shellcheck disable=SC3040,SC2015
+{
+  # Unsupported set -o options may cause the shell to exit (even without set -e), so first try them in a subshell to avoid this issue and also handle the set -e case
+  (set -o posix 2> /dev/null) && set -o posix || true
+  (set -o pipefail) && set -o pipefail || true
+}
 
 ### GLOBAL VARIABLES ###
 
@@ -72,6 +76,8 @@ if test -f "${ANDROID_ROOT:-/system_root/system}/build.prop"; then
   SYS_PATH="${ANDROID_ROOT:-/system_root/system}"
 elif test -f '/system_root/system/build.prop'; then
   SYS_PATH='/system_root/system'
+elif test -f '/mnt/system/system/build.prop'; then
+  SYS_PATH='/mnt/system/system'
 elif test -f '/system/system/build.prop'; then
   SYS_PATH='/system/system'
 elif test -f '/system/build.prop'; then
@@ -83,6 +89,8 @@ else
     SYS_PATH="${ANDROID_ROOT:-}"
   elif test -e '/system_root' && mount_partition '/system_root' && test -f '/system_root/system/build.prop'; then
     SYS_PATH='/system_root/system'
+  elif test -e '/mnt/system' && mount_partition '/mnt/system' && test -f '/mnt/system/system/build.prop'; then
+    SYS_PATH='/mnt/system/system'
   elif test -e '/system' && mount_partition '/system' && test -f '/system/system/build.prop'; then
     SYS_PATH='/system/system'
   elif test -f '/system/build.prop'; then
@@ -277,8 +285,9 @@ if test -e "${SYS_PATH:?}/addon.d"; then
   copy_file "${TMP_PATH}/addon.d/00-1-google-sync.sh" "${SYS_PATH}/addon.d"
 fi
 
-if test "${SYS_INIT_STATUS}" = '1'; then
+if test "${SYS_INIT_STATUS:?}" = '1'; then
   if test -e '/system_root'; then unmount '/system_root'; fi
+  if test -e '/mnt/system'; then unmount '/mnt/system'; fi
   if test -e '/system'; then unmount '/system'; fi
 fi
 
