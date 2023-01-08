@@ -20,53 +20,148 @@ mkdir -p "${TMP_PATH:?}/func-tmp" || ui_error 'Failed to create the functions te
 
 ### FUNCTIONS ###
 
+_verify_system_partition()
+{
+  if test -e "${1:?}/system/build.prop"; then
+    MOUNT_POINT="${1:?}"
+    SYS_PATH="${1:?}/system"
+    return 0
+  fi
+
+  if test "${2:-false}" != 'false' && test -e "${1:?}/build.prop"; then
+    MOUNT_POINT="${1:?}"
+    SYS_PATH="${1:?}"
+    return 0
+  fi
+
+  return 1
+}
+
+_mount_and_verify_system_partition()
+{
+  if test -e "${1:?}" && mount_partition "${1:?}" && test -e "${1:?}/system/build.prop"; then
+    MOUNT_POINT="${1:?}"
+    SYS_PATH="${1:?}/system"
+    return 0
+  fi
+
+  if test "${2:-false}" != 'false' && test -e "${1:?}/build.prop"; then
+    MOUNT_POINT="${1:?}"
+    SYS_PATH="${1:?}"
+    return 0
+  fi
+
+  return 1
+}
+
+_get_mount_info()
+{
+  if test ! -e "${1:?}"; then return 2; fi
+
+  if test "${TEST_INSTALL:-false}" = 'false' && test -e '/proc/mounts'; then
+    grep -m 1 -e '[[:blank:]]'"${1:?}"'[[:blank:]]' '/proc/mounts' 2> /dev/null || return 1
+    return 0
+  fi
+
+  local _mount_result
+  if _mount_result="$(mount 2> /dev/null)" || {
+    test -n "${DEVICE_MOUNT:-}" && _mount_result="$("${DEVICE_MOUNT:?}")"
+  }; then
+    echo "${_mount_result:?}" | grep -m 1 -e '[[:blank:]]'"${1:?}"'[[:blank:]]' || return 1
+    return 0
+  fi
+
+  ui_warning "_get_mount_info has failed"
+  return 3
+}
+
+is_mounted()
+{
+  if _get_mount_info "${1:?}" 1> /dev/null; then return 0; fi # Mounted
+  return 1                                                    # NOT mounted
+}
+
+is_mounted_read_only()
+{
+  local _mount_info
+  _mount_info="$(_get_mount_info "${1:?}")" || {
+    ui_warning "is_mounted_read_only has failed, it will be assumed read-write"
+    return 2
+  }
+  if test ! -w "${1:?}"; then
+    ui_debug 'is_mounted_read_only: test ! -w'
+    return 0
+  fi
+
+  if printf '%s' "${_mount_info:?}" | grep -q -e '[(,[:blank:]]ro[[:blank:],)]'; then
+    return 0
+  fi
+
+  return 1
+}
+
+remount_read_write()
+{
+  local _retry='false'
+  if ! mount -o 'remount,rw' "${1:?}" && ! mount -o 'remount,rw' "${1:?}" "${1:?}"; then
+    _retry='true'
+  fi
+
+  if test "${_retry:?}" = 'true' || is_mounted_read_only "${1:?}"; then
+    if test -n "${DEVICE_MOUNT:-}"; then
+      "${DEVICE_MOUNT:?}" -o 'remount,rw' "${1:?}" || "${DEVICE_MOUNT:?}" -o 'remount,rw' "${1:?}" "${1:?}" || return 1
+    else
+      return 1
+    fi
+  fi
+
+  return 0
+}
+
 initialize()
 {
   SYS_INIT_STATUS=0
 
-  if test -f "${ANDROID_ROOT:-/system_root/system}/build.prop"; then
-    SYS_PATH="${ANDROID_ROOT:-/system_root/system}"
-  elif test -f '/system_root/system/build.prop'; then
-    SYS_PATH='/system_root/system'
-  elif test -f '/mnt/system/system/build.prop'; then
-    SYS_PATH='/mnt/system/system'
-  elif test -f '/system/system/build.prop'; then
-    SYS_PATH='/system/system'
-  elif test -f '/system/build.prop'; then
-    SYS_PATH='/system'
+  if test -n "${ANDROID_ROOT:-}" && test -f "${ANDROID_ROOT:?}/build.prop"; then
+    MOUNT_POINT="${ANDROID_ROOT:?}"
+    SYS_PATH="${ANDROID_ROOT:?}"
+  elif _verify_system_partition '/system_root'; then
+    :
+  elif _verify_system_partition '/mnt/system'; then
+    :
+  elif _verify_system_partition '/system' true; then
+    :
   else
     SYS_INIT_STATUS=1
 
-    if test -n "${ANDROID_ROOT:-}" && test "${ANDROID_ROOT:-}" != '/system_root' && test "${ANDROID_ROOT:-}" != '/system' && mount_partition "${ANDROID_ROOT:-}" && test -f "${ANDROID_ROOT:-}/build.prop"; then
-      SYS_PATH="${ANDROID_ROOT:-}"
-    elif test -e '/system_root' && mount_partition '/system_root' && test -f '/system_root/system/build.prop'; then
-      SYS_PATH='/system_root/system'
-    elif test -e '/mnt/system' && mount_partition '/mnt/system' && test -f '/mnt/system/system/build.prop'; then
-      SYS_PATH='/mnt/system/system'
-    elif test -e '/system' && mount_partition '/system' && test -f '/system/system/build.prop'; then
-      SYS_PATH='/system/system'
-    elif test -f '/system/build.prop'; then
-      SYS_PATH='/system'
+    if test -n "${ANDROID_ROOT:-}" && test "${ANDROID_ROOT:?}" != '/system_root' && test "${ANDROID_ROOT:?}" != '/system' && mount_partition "${ANDROID_ROOT:?}" && test -f "${ANDROID_ROOT:?}/build.prop"; then
+      MOUNT_POINT="${ANDROID_ROOT:?}"
+      SYS_PATH="${ANDROID_ROOT:?}"
+    elif _mount_and_verify_system_partition '/system_root'; then
+      :
+    elif _mount_and_verify_system_partition '/mnt/system'; then
+      :
+    elif _mount_and_verify_system_partition '/system' true; then
+      :
     else
       ui_error 'The ROM cannot be found'
     fi
   fi
-
-  if test "${SYS_PATH:?}" = '/system' && is_mounted_read_only "${SYS_PATH:?}"; then
-    ui_warning "The '${SYS_PATH:-}' partition is read-only, it will be remounted"
-    remount_read_write "${SYS_PATH:?}"
-    is_mounted_read_only "${SYS_PATH:?}" && ui_error "The remounting of '${SYS_PATH:?}' has failed"
-  fi
+  readonly MOUNT_POINT SYS_PATH
 
   cp -pf "${SYS_PATH}/build.prop" "${TMP_PATH}/build.prop" # Cache the file for faster access
+
+  if is_mounted_read_only "${MOUNT_POINT:?}"; then
+    ui_warning "The '${MOUNT_POINT:-}' mount point is read-only, it will be remounted"
+    remount_read_write "${MOUNT_POINT:?}" || ui_error "Remounting of '${MOUNT_POINT:?}' failed (2)"
+    if is_mounted_read_only "${MOUNT_POINT:?}"; then ui_error "Remounting of '${MOUNT_POINT:?}' failed"; fi
+  fi
 }
 
 deinitialize()
 {
   if test "${SYS_INIT_STATUS:?}" = '1'; then
-    if test -e '/system_root'; then unmount '/system_root'; fi
-    if test -e '/mnt/system'; then unmount '/mnt/system'; fi
-    if test -e '/system'; then unmount '/system'; fi
+    unmount "${MOUNT_POINT:?}"
   fi
 }
 
@@ -89,9 +184,14 @@ ui_error()
 {
   ERROR_CODE=91
   if test -n "${2:-}"; then ERROR_CODE="${2:?}"; fi
-  _show_text_on_recovery "ERROR: ${1:?}"
-  printf 1>&2 '\033[1;31m%s\033[0m\n' "ERROR ${ERROR_CODE:?}: ${1:?}"
-  abort '' 2> /dev/null || exit "${ERROR_CODE:?}"
+
+  if test "${BOOTMODE:?}" = 'true'; then
+    printf 1>&2 '\033[1;31m%s\033[0m\n' "ERROR ${ERROR_CODE:?}: ${1:?}"
+  else
+    _show_text_on_recovery "ERROR ${ERROR_CODE:?}: ${1:?}"
+  fi
+
+  exit "${ERROR_CODE:?}"
 }
 
 ui_warning()
@@ -191,30 +291,12 @@ unmount()
   return 0 # Never fail
 }
 
-is_mounted()
-{
-  local _partition _mount_result _silent
-  _silent="${2:-false}"
-  _partition="$(readlink -f "${1:?}")" || {
-    _partition="${1:?}"
-    if test "${_silent:?}" = false; then ui_warning "Failed to canonicalize '${1}'"; fi
-  }
-
-  { test "${TEST_INSTALL:-false}" = 'false' && test -e '/proc/mounts' && _mount_result="$(cat /proc/mounts)"; } || _mount_result="$(mount 2> /dev/null)" || { test -n "${DEVICE_MOUNT:-}" && _mount_result="$("${DEVICE_MOUNT:?}")"; } || ui_error 'is_mounted has failed'
-
-  case "${_mount_result:?}" in
-    *[[:blank:]]"${_partition:?}"[[:blank:]]*) return 0 ;; # Mounted
-    *) ;;                                                  # NOT mounted
-  esac
-  return 1 # NOT mounted
-}
-
 _mount_if_needed_silent()
 {
-  if is_mounted "${1:?}" true; then return 1; fi
+  if is_mounted "${1:?}"; then return 1; fi
 
   mount_partition_silent "${1:?}"
-  is_mounted "${1:?}" true
+  is_mounted "${1:?}"
   return "${?}"
 }
 
@@ -246,39 +328,6 @@ unmount_extra_partitions()
   fi
 
   return 0 # Never fail
-}
-
-ensure_system_is_mounted()
-{
-  if ! is_mounted '/system'; then
-    mount '/system'
-    if ! is_mounted '/system'; then ui_error '/system cannot be mounted'; fi
-  fi
-  return 0 # OK
-}
-
-is_mounted_read_only()
-{
-  mount | grep " ${1:?} " | head -n1 | grep -qi -e "[(\s,]ro[\s,)]"
-}
-
-get_mount_status()
-{
-  local mount_line
-  mount_line="$(mount | grep " $1 " | head -n1)"
-  if test -z "${mount_line}"; then return 1; fi                             # NOT mounted
-  if echo "${mount_line}" | grep -qi -e "[(\s,]rw[\s,)]"; then return 0; fi # Mounted read-write (RW)
-  return 2                                                                  # Mounted read-only (RO)
-}
-
-remount_read_write()
-{
-  mount -o 'remount,rw' -- "${1:?}" || mount -o 'remount,rw' -- "${1:?}" "${1:?}" || ui_error "Remounting of '${1:-}' failed"
-}
-
-remount_read_only()
-{
-  mount -o remount,ro "$1" "$1"
 }
 
 # Getprop related functions
