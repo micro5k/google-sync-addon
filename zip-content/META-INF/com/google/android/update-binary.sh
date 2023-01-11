@@ -29,11 +29,10 @@ _ub_detect_bootmode()
   if test -n "${BOOTMODE:-}"; then return; fi
   BOOTMODE=false
   # shellcheck disable=SC2009
-  ps | grep zygote | grep -qv grep && BOOTMODE=true
-  # shellcheck disable=SC2009
-  "${BOOTMODE:?}" || {
-    ps -A 2> /dev/null | grep zygote | grep -qv grep && BOOTMODE=true
-  }
+  if pgrep -f -x 'zygote' 1> /dev/null 2>&1 || pgrep -f -x 'zygote64' 1> /dev/null 2>&1 || ps | grep 'zygote' | grep -v 'grep' 1> /dev/null || ps -A 2> /dev/null | grep 'zygote' | grep -v 'grep' 1> /dev/null; then
+    BOOTMODE=true
+  fi
+  readonly BOOTMODE
   export BOOTMODE
 }
 

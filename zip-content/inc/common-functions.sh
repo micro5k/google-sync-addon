@@ -20,17 +20,43 @@ mkdir -p "${TMP_PATH:?}/func-tmp" || ui_error 'Failed to create the functions te
 
 ### FUNCTIONS ###
 
-_verify_system_partition()
+_canonicalize()
 {
-  if test -e "${1:?}/system/build.prop"; then
-    MOUNT_POINT="${1:?}"
-    SYS_PATH="${1:?}/system"
+  if test ! -e "${1:?}"; then
+    printf '%s' "${1:?}"
     return 0
   fi
 
-  if test "${2:-false}" != 'false' && test -e "${1:?}/build.prop"; then
-    MOUNT_POINT="${1:?}"
-    SYS_PATH="${1:?}"
+  local _path
+  _path="$(realpath "${1:?}")" || _path="$(readlink -f -- "${1:?}")" || {
+    ui_warning "Failed to canonicalize '${1:-}'"
+    _path="${1:?}"
+  }
+  printf '%s' "${_path:?}"
+  return 0
+}
+
+_verify_system_partition()
+{
+  local _path
+  _path="$(_canonicalize "${1:?}")"
+
+  if test -e "${_path:?}/system/build.prop"; then
+    SYS_PATH="${_path:?}/system"
+    MOUNT_POINT="${_path:?}"
+    return 0
+  fi
+
+  if test "${2:-false}" != 'false' && test -e "${_path:?}/build.prop"; then
+    SYS_PATH="${_path:?}"
+    if is_mounted "${_path:?}"; then
+      MOUNT_POINT="${_path:?}"
+    elif _path="$(_canonicalize "${_path:?}/../")" && is_mounted "${_path:?}"; then
+      MOUNT_POINT="${_path:?}"
+    else
+      ui_error "Found system path but failed to find mount point"
+    fi
+
     return 0
   fi
 
@@ -54,6 +80,12 @@ _mount_and_verify_system_partition()
   return 1
 }
 
+_device_mount()
+{
+  if test -n "${DEVICE_MOUNT:-}" && "${DEVICE_MOUNT:?}" "${@}"; then return 0; fi
+  return 1
+}
+
 _get_mount_info()
 {
   if test ! -e "${1:?}"; then return 2; fi
@@ -67,16 +99,30 @@ _get_mount_info()
   if _mount_result="$(mount 2> /dev/null)" || {
     test -n "${DEVICE_MOUNT:-}" && _mount_result="$("${DEVICE_MOUNT:?}")"
   }; then
-    echo "${_mount_result:?}" | grep -m 1 -e '[[:blank:]]'"${1:?}"'[[:blank:]]' || return 1
-    return 0
+    if printf '%s' "${_mount_result:?}" | grep -m 1 -e '[[:blank:]]'"${1:?}"'[[:blank:]]'; then return 0; fi
+    return 1
   fi
 
   ui_warning "_get_mount_info has failed"
   return 3
 }
 
+mount_partition()
+{
+  local _partition
+  _partition="$(_canonicalize "${1:?}")"
+
+  mount "${_partition:?}" 2> /dev/null || _device_mount "${_partition:?}" || ui_warning "Failed to mount '${_partition:-}'"
+  return 0 # Never fail
+}
+
 is_mounted()
 {
+  if test "${TEST_INSTALL:-false}" = 'false' && command -v mountpoint 1> /dev/null; then
+    if mountpoint "${1:?}" 1> /dev/null 2>&1; then return 0; fi # Mounted
+    return 1                                                    # NOT mounted
+  fi
+
   if _get_mount_info "${1:?}" 1> /dev/null; then return 0; fi # Mounted
   return 1                                                    # NOT mounted
 }
@@ -84,14 +130,7 @@ is_mounted()
 is_mounted_read_only()
 {
   local _mount_info
-  _mount_info="$(_get_mount_info "${1:?}")" || {
-    ui_warning "is_mounted_read_only has failed, it will be assumed read-write"
-    return 2
-  }
-  if test ! -w "${1:?}"; then
-    ui_debug 'is_mounted_read_only: test ! -w'
-    return 0
-  fi
+  _mount_info="$(_get_mount_info "${1:?}")" || ui_error "is_mounted_read_only has failed for '${1:-}'"
 
   if printf '%s' "${_mount_info:?}" | grep -q -e '[(,[:blank:]]ro[[:blank:],)]'; then
     return 0
@@ -110,6 +149,7 @@ remount_read_write()
   if test "${_retry:?}" = 'true' || is_mounted_read_only "${1:?}"; then
     if test -n "${DEVICE_MOUNT:-}"; then
       "${DEVICE_MOUNT:?}" -o 'remount,rw' "${1:?}" || "${DEVICE_MOUNT:?}" -o 'remount,rw' "${1:?}" "${1:?}" || return 1
+      if is_mounted_read_only "${1:?}"; then return 1; fi
     else
       return 1
     fi
@@ -122,9 +162,8 @@ initialize()
 {
   SYS_INIT_STATUS=0
 
-  if test -n "${ANDROID_ROOT:-}" && test -f "${ANDROID_ROOT:?}/build.prop"; then
-    MOUNT_POINT="${ANDROID_ROOT:?}"
-    SYS_PATH="${ANDROID_ROOT:?}"
+  if test -n "${ANDROID_ROOT:-}" && _verify_system_partition "${ANDROID_ROOT:?}" true; then
+    :
   elif _verify_system_partition '/system_root'; then
     :
   elif _verify_system_partition '/mnt/system'; then
@@ -134,35 +173,46 @@ initialize()
   else
     SYS_INIT_STATUS=1
 
-    if test -n "${ANDROID_ROOT:-}" && test "${ANDROID_ROOT:?}" != '/system_root' && test "${ANDROID_ROOT:?}" != '/system' && mount_partition "${ANDROID_ROOT:?}" && test -f "${ANDROID_ROOT:?}/build.prop"; then
-      MOUNT_POINT="${ANDROID_ROOT:?}"
-      SYS_PATH="${ANDROID_ROOT:?}"
-    elif _mount_and_verify_system_partition '/system_root'; then
+    if test -n "${ANDROID_ROOT:-}" && _mount_and_verify_system_partition "${ANDROID_ROOT:?}" true; then
       :
-    elif _mount_and_verify_system_partition '/mnt/system'; then
+    elif test "${ANDROID_ROOT:-}" != '/system_root' && _mount_and_verify_system_partition '/system_root'; then
       :
-    elif _mount_and_verify_system_partition '/system' true; then
+    elif test "${ANDROID_ROOT:-}" != '/mnt/system' && _mount_and_verify_system_partition '/mnt/system'; then
+      :
+    elif test "${ANDROID_ROOT:-}" != '/system' && _mount_and_verify_system_partition '/system' true; then
       :
     else
-      ui_error 'The ROM cannot be found'
+      ui_error "The ROM cannot be found. Android root ENV: ${ANDROID_ROOT:-}"
     fi
   fi
   readonly MOUNT_POINT SYS_PATH
 
-  cp -pf "${SYS_PATH}/build.prop" "${TMP_PATH}/build.prop" # Cache the file for faster access
+  cp -pf "${SYS_PATH:?}/build.prop" "${TMP_PATH:?}/build.prop" # Cache the file for faster access
 
   if is_mounted_read_only "${MOUNT_POINT:?}"; then
     ui_warning "The '${MOUNT_POINT:-}' mount point is read-only, it will be remounted"
-    remount_read_write "${MOUNT_POINT:?}" || ui_error "Remounting of '${MOUNT_POINT:?}' failed (2)"
-    if is_mounted_read_only "${MOUNT_POINT:?}"; then ui_error "Remounting of '${MOUNT_POINT:?}' failed"; fi
+    remount_read_write "${MOUNT_POINT:?}" || ui_error "Remounting of '${MOUNT_POINT:-}' failed"
+  fi
+
+  if test ! -w "${SYS_PATH:?}"; then
+    ui_error "The '${SYS_PATH:-}' partition is NOT writable"
+  fi
+
+  DATA_INIT_STATUS=0
+  if test "${TEST_INSTALL:-false}" = 'false' && test ! -e '/data/data' && ! is_mounted '/data'; then
+    mount_partition '/data'
+    if is_mounted '/data'; then
+      DATA_INIT_STATUS=1
+    else
+      ui_warning "The /data partition cannot be mounted so I can't clean app updates and Dalvik cache but it doesn't matter if you do a factory reset"
+    fi
   fi
 }
 
 deinitialize()
 {
-  if test "${SYS_INIT_STATUS:?}" = '1'; then
-    unmount "${MOUNT_POINT:?}"
-  fi
+  if test "${SYS_INIT_STATUS:?}" = '1'; then unmount "${MOUNT_POINT:?}"; fi
+  if test "${DATA_INIT_STATUS}" = '1'; then unmount '/data'; fi
 }
 
 # Message related functions
@@ -256,18 +306,6 @@ validate_return_code_warning()
 }
 
 # Mounting related functions
-mount_partition()
-{
-  local partition
-  partition="$(readlink -f "${1:?}")" || {
-    partition="${1:?}"
-    ui_warning "Failed to canonicalize '${1}'"
-  }
-
-  mount "${partition:?}" || ui_warning "Failed to mount '${partition}'"
-  return 0 # Never fail
-}
-
 mount_partition_silent()
 {
   local partition
@@ -937,8 +975,16 @@ enable_debug_log()
 {
   if test "${DEBUG_LOG_ENABLED}" -eq 1; then return; fi
   DEBUG_LOG_ENABLED=1
+
+  ui_debug "Creating log: ${LOG_PATH:?}"
+  touch "${LOG_PATH:?}" || {
+    ui_warning "Unable to write the log file at: ${LOG_PATH:-}"
+    DEBUG_LOG_ENABLED=0
+    return
+  }
+
   exec 3>&1 4>&2 # Backup stdout and stderr
-  exec 1>> "${ZIP_PATH:?}/debug-a5k.log" 2>&1
+  exec 1>> "${LOG_PATH:?}" 2>&1
 }
 
 disable_debug_log()

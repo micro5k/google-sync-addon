@@ -31,7 +31,7 @@ SYS_PATH=''
 ### FUNCTIONS ###
 
 # shellcheck source=SCRIPTDIR/../inc/common-functions.sh
-. "${TMP_PATH}/inc/common-functions.sh"
+. "${TMP_PATH}/inc/common-functions.sh" || exit "${?}"
 
 ### CODE ###
 
@@ -103,17 +103,24 @@ else
 fi
 
 # Info
+ui_msg_empty_line
 ui_msg '------------------'
 ui_msg 'Google Sync Add-on'
 ui_msg "${install_version}"
 ui_msg '(by ale5000)'
 ui_msg '------------------'
 ui_msg "Boot mode: ${BOOTMODE:?}"
+ui_msg "Sideload: ${SIDELOAD:?}"
+ui_msg "Zip install: ${ZIP_INSTALL:?}"
 ui_msg "Recovery API ver: ${RECOVERY_API_VER:-}"
 ui_msg_empty_line
 ui_msg "Android API: ${API:?}"
+ui_msg "Mount point: ${MOUNT_POINT:?}"
 ui_msg "System path: ${SYS_PATH:?}"
 ui_msg "Priv-app path: ${PRIVAPP_PATH:?}"
+ui_msg_empty_line
+ui_msg "Android root ENV: ${ANDROID_ROOT:-}"
+ui_msg '------------------'
 ui_msg_empty_line
 
 # Extracting
@@ -136,13 +143,7 @@ setup_app 1 'Google Contacts Sync 8.1' 'GoogleContactsSyncAdapter8' 'priv-app'
 setup_app 1 'Google Calendar Sync 5.2' 'GoogleCalendarSyncAdapter5' 'app'
 setup_app 1 'Google Calendar Sync 6.0' 'GoogleCalendarSyncAdapter6' 'app'
 
-# MOUNT /data PARTITION
-DATA_INIT_STATUS=0
-if test "${TEST_INSTALL:-false}" = 'false' && ! is_mounted '/data'; then
-  DATA_INIT_STATUS=1
-  mount '/data'
-  if ! is_mounted '/data'; then ui_error '/data cannot be mounted'; fi
-fi
+delete "${TMP_PATH:?}/origin"
 
 # Resetting Android runtime permissions
 if test "${API}" -ge 23; then
@@ -182,9 +183,6 @@ if test "${API}" -ge 23; then
 else
   delete_recursive "${TMP_PATH}/files/etc/default-permissions"
 fi
-
-# UNMOUNT /data PARTITION
-if test "${DATA_INIT_STATUS}" = '1'; then unmount '/data'; fi
 
 # Preparing
 ui_msg 'Preparing...'

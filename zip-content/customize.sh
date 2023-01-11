@@ -35,21 +35,51 @@ export OUTFD
 export RECOVERY_PIPE
 export ZIPFILE
 export TMPDIR
+export ANDROID_ROOT
 unset REPLACE
 
 ### MAGISK VARIABLES ###
 
 SKIPUNZIP=1
-export SKIPUNZIP
+ASH_STANDALONE=1
+export SKIPUNZIP ASH_STANDALONE
 
 ### GLOBAL VARIABLES ###
 
+if test "${4:-}" = 'zip-install'; then
+  export ZIP_INSTALL='true'
+else
+  export ZIP_INSTALL='false'
+fi
 export RECOVERY_API_VER="${1:-}"
+
+readonly ZIP_INSTALL RECOVERY_API_VER
+
 ZIP_PATH="$(dirname "${ZIPFILE:?}")"
 export ZIP_PATH
 
 BASE_TMP_PATH="${TMPDIR:?}"
 TMP_PATH="${TMPDIR:?}/custom-setup-a5k"
+
+case "${ZIP_PATH:?}" in
+  /sideload) SIDELOAD='true' ;;
+  /dev/rootfs*/sideload) SIDELOAD='true' ;;
+  *) SIDELOAD='false' ;;
+esac
+readonly SIDELOAD
+export SIDELOAD
+
+if test "${SIDELOAD:?}" = 'false' && test -w "${ZIP_PATH:?}"; then
+  LOG_PATH="${ZIP_PATH:?}/debug-a5k.log"
+elif test -e '/sdcard0' && test -w '/sdcard0'; then
+  LOG_PATH='/sdcard0/debug-a5k.log'
+elif test -e '/sdcard' && test -w '/sdcard'; then
+  LOG_PATH='/sdcard/debug-a5k.log'
+else
+  LOG_PATH="${TMPDIR:?}/debug-a5k.log"
+fi
+readonly LOG_PATH
+export LOG_PATH
 
 export LIVE_SETUP_POSSIBLE=false
 export KEYCHECK_ENABLED=false
@@ -61,8 +91,16 @@ enable_debug_log()
 {
   if test "${DEBUG_LOG_ENABLED}" -eq 1; then return; fi
   DEBUG_LOG_ENABLED=1
+
+  ui_debug "Creating log: ${LOG_PATH:?}"
+  touch "${LOG_PATH:?}" || {
+    ui_warning "Unable to write the log file at: ${LOG_PATH:-}"
+    DEBUG_LOG_ENABLED=0
+    return
+  }
+
   exec 3>&1 4>&2 # Backup stdout and stderr
-  exec 1>> "${ZIP_PATH}/debug-a5k.log" 2>&1
+  exec 1>> "${LOG_PATH:?}" 2>&1
 }
 
 disable_debug_log()
