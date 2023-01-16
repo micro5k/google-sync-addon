@@ -28,12 +28,25 @@ _canonicalize()
   fi
 
   local _path
-  _path="$(realpath "${1:?}")" || _path="$(readlink -f -- "${1:?}")" || {
+  _path="$(readlink -f "${1:?}")" || _path="$(realpath "${1:?}")" || {
     ui_warning "Failed to canonicalize '${1:-}'"
     _path="${1:?}"
   }
   printf '%s' "${_path:?}"
   return 0
+}
+
+_detect_slot()
+{
+  if test ! -e '/proc/cmdline'; then return 1; fi
+
+  local _slot
+  if _slot="$(grep -o -e 'androidboot.slot_suffix=[_[:alpha:]]*' '/proc/cmdline' | cut -d '=' -f 2)"; then
+    printf '%s' "${_slot:?}"
+    return 0
+  fi
+
+  return 1
 }
 
 _verify_system_partition()
@@ -112,7 +125,7 @@ mount_partition()
   local _partition
   _partition="$(_canonicalize "${1:?}")"
 
-  mount "${_partition:?}" 2> /dev/null || _device_mount "${_partition:?}" || ui_warning "Failed to mount '${_partition:-}'"
+  mount -o 'rw' "${_partition:?}" 2> /dev/null || _device_mount -o 'rw' "${_partition:?}" || ui_warning "Failed to mount '${_partition:-}'"
   return 0 # Never fail
 }
 
@@ -158,7 +171,7 @@ remount_read_write()
   return 0
 }
 
-initialize()
+_find_and_mount_system()
 {
   SYS_INIT_STATUS=0
 
@@ -185,8 +198,17 @@ initialize()
       ui_error "The ROM cannot be found. Android root ENV: ${ANDROID_ROOT:-}"
     fi
   fi
-  readonly MOUNT_POINT SYS_PATH
 
+  readonly MOUNT_POINT SYS_PATH
+}
+
+initialize()
+{
+  SLOT="$(_detect_slot)" || SLOT=''
+  readonly SLOT
+  export SLOT
+
+  _find_and_mount_system
   cp -pf "${SYS_PATH:?}/build.prop" "${TMP_PATH:?}/build.prop" # Cache the file for faster access
 
   if is_mounted_read_only "${MOUNT_POINT:?}"; then
@@ -309,21 +331,16 @@ validate_return_code_warning()
 mount_partition_silent()
 {
   local partition
-  partition="$(readlink -f "${1:?}")" || {
-    partition="${1:?}"
-  }
+  partition="$(_canonicalize "${1:?}")"
 
-  mount "${partition:?}" 2> /dev/null || true
+  mount -o 'rw' "${partition:?}" 2> /dev/null || true
   return 0 # Never fail
 }
 
 unmount()
 {
   local partition
-  partition="$(readlink -f "${1:?}")" || {
-    partition="${1:?}"
-    ui_warning "Failed to canonicalize '${1}'"
-  }
+  partition="$(_canonicalize "${1:?}")"
 
   umount "${partition:?}" || ui_warning "Failed to unmount '${partition}'"
   return 0 # Never fail
@@ -486,6 +503,7 @@ custom_package_extract_dir()
 
 zip_extract_file()
 {
+  test -e "${1:?}" || ui_error "Missing archive for extraction: '${1:?}'" 96
   mkdir -p "$3" || ui_error "Failed to create the dir '$3' for extraction" 96
   set_perm 0 0 0755 "$3"
   unzip -oq "$1" "$2" -d "$3" || ui_error "Failed to extract the file '$2' from the archive '$1'" 96
@@ -493,6 +511,7 @@ zip_extract_file()
 
 zip_extract_dir()
 {
+  test -e "${1:?}" || ui_error "Missing archive for extraction: '${1:?}'" 96
   mkdir -p "$3" || ui_error "Failed to create the dir '$3' for extraction" 96
   set_perm 0 0 0755 "$3"
   unzip -oq "$1" "$2/*" -d "$3" || ui_error "Failed to extract the dir '$2' from the archive '$1'" 96
