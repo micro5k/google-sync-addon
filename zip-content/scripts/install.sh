@@ -115,7 +115,11 @@ ui_msg "Zip install: ${ZIP_INSTALL:?}"
 ui_msg "Recovery API ver: ${RECOVERY_API_VER:-}"
 ui_msg_empty_line
 ui_msg "Android API: ${API:?}"
-ui_msg "Mount point: ${MOUNT_POINT:?}"
+ui_msg_empty_line
+ui_msg "Dynamic partitions: ${DYNAMIC_PARTITIONS:?}"
+ui_msg "Current slot: ${SLOT:-no slot}"
+ui_msg_empty_line
+ui_msg "System mount point: ${MOUNT_POINT:?}"
 ui_msg "System path: ${SYS_PATH:?}"
 ui_msg "Priv-app path: ${PRIVAPP_PATH:?}"
 ui_msg_empty_line

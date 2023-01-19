@@ -18,6 +18,10 @@ fi
 
 mkdir -p "${TMP_PATH:?}/func-tmp" || ui_error 'Failed to create the functions temp folder'
 
+NL='
+'
+readonly NL
+
 ### FUNCTIONS ###
 
 _canonicalize()
@@ -51,45 +55,71 @@ _detect_slot()
 
 _verify_system_partition()
 {
-  local _path
-  _path="$(_canonicalize "${1:?}")"
+  local _backup_ifs _path
+  _backup_ifs="${IFS:-}"
+  IFS="${NL:?}"
 
-  if test -e "${_path:?}/system/build.prop"; then
-    SYS_PATH="${_path:?}/system"
-    MOUNT_POINT="${_path:?}"
-    return 0
-  fi
+  for _path in ${1?}; do
+    _path="$(_canonicalize "${_path:?}")"
 
-  if test "${2:-false}" != 'false' && test -e "${_path:?}/build.prop"; then
-    SYS_PATH="${_path:?}"
-    if is_mounted "${_path:?}"; then
+    if test -e "${_path:?}/system/build.prop"; then
+      SYS_PATH="${_path:?}/system"
       MOUNT_POINT="${_path:?}"
-    elif _path="$(_canonicalize "${_path:?}/../")" && is_mounted "${_path:?}"; then
-      MOUNT_POINT="${_path:?}"
-    else
-      ui_error "Found system path but failed to find mount point"
+
+      IFS="${_backup_ifs:-}"
+      return 0
     fi
 
-    return 0
-  fi
+    if test -e "${_path:?}/build.prop"; then
+      SYS_PATH="${_path:?}"
+      if is_mounted "${_path:?}"; then
+        MOUNT_POINT="${_path:?}"
+      elif _path="$(_canonicalize "${_path:?}/../")" && is_mounted "${_path:?}"; then
+        MOUNT_POINT="${_path:?}"
+      else
+        IFS="${_backup_ifs:-}"
+        ui_error "Found system path at '${SYS_PATH:-}' but failed to find the mount point"
+      fi
 
+      IFS="${_backup_ifs:-}"
+      return 0
+    fi
+  done
+
+  IFS="${_backup_ifs:-}"
   return 1
 }
 
 _mount_and_verify_system_partition()
 {
-  if test -e "${1:?}" && mount_partition "${1:?}" && test -e "${1:?}/system/build.prop"; then
-    MOUNT_POINT="${1:?}"
-    SYS_PATH="${1:?}/system"
-    return 0
-  fi
+  local _backup_ifs _path
+  _backup_ifs="${IFS:-}"
+  IFS="${NL:?}"
 
-  if test "${2:-false}" != 'false' && test -e "${1:?}/build.prop"; then
-    MOUNT_POINT="${1:?}"
-    SYS_PATH="${1:?}"
-    return 0
-  fi
+  for _path in ${1?}; do
+    _path="$(_canonicalize "${_path:?}")"
+    mount_partition "${_path:?}"
 
+    if test -e "${_path:?}/system/build.prop"; then
+      SYS_PATH="${_path:?}/system"
+      MOUNT_POINT="${_path:?}"
+      ui_msg "Mounted: ${MOUNT_POINT:-}"
+
+      IFS="${_backup_ifs:-}"
+      return 0
+    fi
+
+    if test -e "${_path:?}/build.prop"; then
+      SYS_PATH="${_path:?}"
+      MOUNT_POINT="${_path:?}"
+      ui_msg "Mounted: ${MOUNT_POINT:-}"
+
+      IFS="${_backup_ifs:-}"
+      return 0
+    fi
+  done
+
+  IFS="${_backup_ifs:-}"
   return 1
 }
 
@@ -171,31 +201,95 @@ remount_read_write()
   return 0
 }
 
+_upperize()
+{
+  printf '%s' "${1:?}" | LC_ALL=C tr '[:lower:]' '[:upper:]' || ui_error "_upperize has failed for '${1:-}'"
+}
+
+_find_block()
+{
+  if test ! -e '/sys/dev/block'; then return 1; fi
+
+  local _block _partname
+  _partname="${1:?}"
+
+  for uevent in /sys/dev/block/*/uevent; do
+    if grep -q -i -F -e "PARTNAME=${_partname:?}" "${uevent:?}"; then
+      if _block="$(grep -m 1 -o -e 'DEVNAME=.*' "${uevent:?}" | cut -d '=' -f 2)"; then
+        if test -e "/dev/block/${_block:?}"; then
+          _block="$(_canonicalize "/dev/block/${_block:?}")"
+          printf '%s' "${_block:?}"
+          return 0
+        fi
+      fi
+    fi
+  done
+
+  return 1
+}
+
+_advanced_find_and_mount_system()
+{
+  local _block
+
+  if test -n "${SLOT:-}" && test -e "/dev/block/mapper/system${SLOT:?}" && _block="/dev/block/mapper/system${SLOT:?}"; then
+    ui_msg "Found 'mapper/system${SLOT:-no slot}' block at: ${_block:-}"
+  elif test -e "/dev/block/mapper/system" && _block="/dev/block/mapper/system"; then
+    ui_msg "Found 'mapper/system' block at: ${_block:-}"
+  elif test -n "${SLOT:-}" && _block="$(_find_block "system${SLOT:?}")"; then
+    ui_msg "Found 'system${SLOT:-no slot}' block at: ${_block:-}"
+  elif _block="$(_find_block "system")"; then
+    ui_msg "Found 'system' block at: ${_block:-}"
+  elif _block="$(_find_block "FACTORYFS")"; then
+    ui_msg "Found 'FACTORYFS' block at: ${_block:-}"
+  else
+    return 1
+  fi
+
+  if test -e '/mnt/system'; then
+    umount '/mnt/system' 2> /dev/null || true
+    mount -o 'rw' "${_block:?}" '/mnt/system' 2> /dev/null || _device_mount -o 'rw' "${_block:?}" '/mnt/system' || _device_mount -t 'auto' -o 'rw' "${_block:?}" '/mnt/system' || return 1
+    return 0
+  elif test -n "${ANDROID_ROOT:-}" && test -e "${ANDROID_ROOT:?}"; then
+    umount "${ANDROID_ROOT:?}" 2> /dev/null || true
+    mount -o 'rw' "${_block:?}" "${ANDROID_ROOT:?}" 2> /dev/null || _device_mount -o 'rw' "${_block:?}" "${ANDROID_ROOT:?}" || _device_mount -t 'auto' -o 'rw' "${_block:?}" "${ANDROID_ROOT:?}" || return 1
+    return 0
+  fi
+
+  return 1
+}
+
 _find_and_mount_system()
 {
-  SYS_INIT_STATUS=0
+  SYS_MOUNTPOINT_LIST='' # This is a list of paths separated by newlines
+  if test "${TEST_INSTALL:-false}" != 'false' && test -n "${ANDROID_ROOT:-}" && test -e "${ANDROID_ROOT:?}"; then
+    SYS_MOUNTPOINT_LIST="${ANDROID_ROOT:?}${NL:?}"
+  else
+    if test -e '/mnt/system'; then SYS_MOUNTPOINT_LIST="${SYS_MOUNTPOINT_LIST?}/mnt/system${NL:?}"; fi
+    if test -n "${ANDROID_ROOT:-}" && test -e "${ANDROID_ROOT:?}"; then SYS_MOUNTPOINT_LIST="${SYS_MOUNTPOINT_LIST?}${ANDROID_ROOT:?}${NL:?}"; fi
+    if test "${ANDROID_ROOT:-}" != '/system_root' && test -e '/system_root'; then SYS_MOUNTPOINT_LIST="${SYS_MOUNTPOINT_LIST?}/system_root${NL:?}"; fi
+    if test "${ANDROID_ROOT:-}" != '/system' && test -e '/system'; then SYS_MOUNTPOINT_LIST="${SYS_MOUNTPOINT_LIST?}/system${NL:?}"; fi
+  fi
+  ui_debug "SYS_MOUNTPOINT_LIST:"
+  ui_debug "${SYS_MOUNTPOINT_LIST:-}"
 
-  if test -n "${ANDROID_ROOT:-}" && _verify_system_partition "${ANDROID_ROOT:?}" true; then
-    :
-  elif _verify_system_partition '/system_root'; then
-    :
-  elif _verify_system_partition '/mnt/system'; then
-    :
-  elif _verify_system_partition '/system' true; then
-    :
+  if _verify_system_partition "${SYS_MOUNTPOINT_LIST?}"; then
+    : # Found
   else
     SYS_INIT_STATUS=1
 
-    if test -n "${ANDROID_ROOT:-}" && _mount_and_verify_system_partition "${ANDROID_ROOT:?}" true; then
-      :
-    elif test "${ANDROID_ROOT:-}" != '/system_root' && _mount_and_verify_system_partition '/system_root'; then
-      :
-    elif test "${ANDROID_ROOT:-}" != '/mnt/system' && _mount_and_verify_system_partition '/mnt/system'; then
-      :
-    elif test "${ANDROID_ROOT:-}" != '/system' && _mount_and_verify_system_partition '/system' true; then
+    if _mount_and_verify_system_partition "${SYS_MOUNTPOINT_LIST?}"; then
+      : # Mounted and found
+    elif _advanced_find_and_mount_system && _find_and_mount_system; then
       :
     else
-      ui_error "The ROM cannot be found. Android root ENV: ${ANDROID_ROOT:-}"
+      deinitialize
+
+      ui_msg_empty_line
+      ui_msg "Current slot: ${SLOT:-no slot}"
+      ui_msg "Android root ENV: ${ANDROID_ROOT:-}"
+      ui_msg_empty_line
+      ui_error "The ROM cannot be found!"
     fi
   fi
 
@@ -204,11 +298,19 @@ _find_and_mount_system()
 
 initialize()
 {
+  if test -e '/dev/block/mapper'; then DYNAMIC_PARTITIONS='true'; else DYNAMIC_PARTITIONS='false'; fi
+  readonly DYNAMIC_PARTITIONS
+  export DYNAMIC_PARTITIONS
+
   SLOT="$(_detect_slot)" || SLOT=''
   readonly SLOT
   export SLOT
 
+  SYS_INIT_STATUS=0
+  DATA_INIT_STATUS=0
+
   _find_and_mount_system
+
   cp -pf "${SYS_PATH:?}/build.prop" "${TMP_PATH:?}/build.prop" # Cache the file for faster access
 
   if is_mounted_read_only "${MOUNT_POINT:?}"; then
@@ -220,7 +322,6 @@ initialize()
     ui_error "The '${SYS_PATH:-}' partition is NOT writable"
   fi
 
-  DATA_INIT_STATUS=0
   if test "${TEST_INSTALL:-false}" = 'false' && test ! -e '/data/data' && ! is_mounted '/data'; then
     mount_partition '/data'
     if is_mounted '/data'; then
@@ -233,8 +334,8 @@ initialize()
 
 deinitialize()
 {
-  if test "${SYS_INIT_STATUS:?}" = '1'; then unmount "${MOUNT_POINT:?}"; fi
-  if test "${DATA_INIT_STATUS}" = '1'; then unmount '/data'; fi
+  if test "${SYS_INIT_STATUS:?}" = '1' && test -n "${MOUNT_POINT:-}"; then unmount "${MOUNT_POINT:?}"; fi
+  if test "${DATA_INIT_STATUS:?}" = '1'; then unmount '/data'; fi
 }
 
 # Message related functions
