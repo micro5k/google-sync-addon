@@ -103,18 +103,18 @@ _mount_and_verify_system_partition()
     if test -e "${_path:?}/system/build.prop"; then
       SYS_PATH="${_path:?}/system"
       MOUNT_POINT="${_path:?}"
-      ui_msg "Mounted: ${MOUNT_POINT:-}"
 
       IFS="${_backup_ifs:-}"
+      ui_msg "Mounted: ${MOUNT_POINT:-}"
       return 0
     fi
 
     if test -e "${_path:?}/build.prop"; then
       SYS_PATH="${_path:?}"
       MOUNT_POINT="${_path:?}"
-      ui_msg "Mounted: ${MOUNT_POINT:-}"
 
       IFS="${_backup_ifs:-}"
+      ui_msg "Mounted: ${MOUNT_POINT:-}"
       return 0
     fi
   done
@@ -210,57 +210,66 @@ _find_block()
 {
   if test ! -e '/sys/dev/block'; then return 1; fi
 
-  local _block _partname
-  _partname="${1:?}"
+  local _backup_ifs _uevent _block
+  _backup_ifs="${IFS:-}"
+  IFS=''
 
-  for uevent in /sys/dev/block/*/uevent; do
-    if grep -q -i -F -e "PARTNAME=${_partname:?}" "${uevent:?}"; then
-      if _block="$(grep -m 1 -o -e 'DEVNAME=.*' "${uevent:?}" | cut -d '=' -f 2)"; then
+  for _uevent in /sys/dev/block/*/uevent; do
+    if grep -q -i -F -e "PARTNAME=${1:?}" "${_uevent:?}"; then
+      if _block="$(grep -m 1 -o -e 'DEVNAME=.*' "${_uevent:?}" | cut -d '=' -f 2)"; then
         if test -e "/dev/block/${_block:?}"; then
-          _block="$(_canonicalize "/dev/block/${_block:?}")"
-          printf '%s' "${_block:?}"
+          IFS="${_backup_ifs:-}"
+          _canonicalize "/dev/block/${_block:?}"
           return 0
         fi
       fi
     fi
   done
 
+  IFS="${_backup_ifs:-}"
   return 1
 }
 
 _advanced_find_and_mount_system()
 {
-  local _block
-
-  if test -n "${SLOT:-}" && test -e "/dev/block/mapper/system${SLOT:?}" && _block="/dev/block/mapper/system${SLOT:?}"; then
-    ui_msg "Found 'mapper/system${SLOT:-no slot}' block at: ${_block:-}"
-  elif test -e "/dev/block/mapper/system" && _block="/dev/block/mapper/system"; then
-    ui_msg "Found 'mapper/system' block at: ${_block:-}"
-  elif test -n "${SLOT:-}" && _block="$(_find_block "system${SLOT:?}")"; then
-    ui_msg "Found 'system${SLOT:-no slot}' block at: ${_block:-}"
-  elif _block="$(_find_block "system")"; then
-    ui_msg "Found 'system' block at: ${_block:-}"
-  elif _block="$(_find_block "FACTORYFS")"; then
-    ui_msg "Found 'FACTORYFS' block at: ${_block:-}"
-  else
-    return 1
-  fi
-
-  local _backup_ifs _path
+  local _backup_ifs _path _block _found
   _backup_ifs="${IFS:-}"
   IFS="${NL:?}"
 
-  for _path in ${1?}; do
-    _path="$(_canonicalize "${_path:?}")"
+  _found='false'
+  if test -e "/dev/block/mapper"; then
+    for _path in ${1?}; do
+      if test -e "/dev/block/mapper/${_path:?}"; then
+        _block="$(_canonicalize "/dev/block/mapper/${_path:?}")"
+        ui_msg "Found 'mapper/${_path:-}' block at: ${_block:-}"
+        _found='true'
+        break
+      fi
+    done
+  fi
 
-    umount "${_path:?}" 2> /dev/null || true
-    if mount -o 'rw' "${_block:?}" "${_path:?}" 2> /dev/null || _device_mount -t 'auto' -o 'rw' "${_block:?}" "${_path:?}"; then
-      ui_msg "Mounted: ${_path:-}"
+  if test "${_found:?}" = 'false'; then
+    for _path in ${1?}; do
+      if _block="$(_find_block "${_path:?}")"; then
+        ui_msg "Found '${_path:-}' block at: ${_block:-}"
+        _found='true'
+        break
+      fi
+    done
+  fi
 
-      IFS="${_backup_ifs:-}"
-      return 0
-    fi
-  done
+  if test "${_found:?}" != 'false'; then
+    for _path in ${2?}; do
+      _path="$(_canonicalize "${_path:?}")"
+
+      umount "${_path:?}" 2> /dev/null || true
+      if mount -o 'rw' "${_block:?}" "${_path:?}" 2> /dev/null || _device_mount -t 'auto' -o 'rw' "${_block:?}" "${_path:?}"; then
+        IFS="${_backup_ifs:-}"
+        ui_msg "Mounted: ${_path:-}"
+        return 0
+      fi
+    done
+  fi
 
   IFS="${_backup_ifs:-}"
   return 1
@@ -287,7 +296,7 @@ _find_and_mount_system()
 
     if _mount_and_verify_system_partition "${SYS_MOUNTPOINT_LIST?}"; then
       : # Mounted and found
-    elif _advanced_find_and_mount_system "${SYS_MOUNTPOINT_LIST?}" && _verify_system_partition "${SYS_MOUNTPOINT_LIST?}"; then
+    elif _advanced_find_and_mount_system "system${SLOT:-}${NL:?}system${NL:?}FACTORYFS${NL:?}" "${SYS_MOUNTPOINT_LIST?}" && _verify_system_partition "${SYS_MOUNTPOINT_LIST?}"; then
       : # Mounted and found
     else
       deinitialize
@@ -349,7 +358,7 @@ deinitialize()
 _show_text_on_recovery()
 {
   if test "${BOOTMODE:?}" = 'true'; then
-    printf '%s\n' "${1?}"
+    printf '%s\n' "${1?}" # ToDO: Improve output handling
     return
   elif test -e "${RECOVERY_PIPE:?}"; then
     printf 'ui_print %s\nui_print\n' "${1?}" >> "${RECOVERY_PIPE:?}"
@@ -357,7 +366,7 @@ _show_text_on_recovery()
     printf 'ui_print %s\nui_print\n' "${1?}" 1>&"${OUTFD:?}"
   fi
 
-  if test "${DEBUG_LOG:?}" -ne 0; then printf '%s\n' "${1?}"; fi
+  if test "${DEBUG_LOG:?}" -ne 0; then printf 1>&2 '%s\n' "${1?}"; fi
 }
 
 ui_error()
@@ -403,7 +412,7 @@ ui_msg_sameline_start()
   else
     printf 'ui_print %s' "${1:?}" 1>&"${OUTFD:?}"
   fi
-  if test "${DEBUG_LOG}" -ne 0; then printf '%s\n' "${1:?}"; fi
+  if test "${DEBUG_LOG:?}" -ne 0; then printf 1>&2 '%s\n' "${1:?}"; fi
 }
 
 ui_msg_sameline_end()
@@ -416,7 +425,7 @@ ui_msg_sameline_end()
   else
     printf '%s\nui_print\n' "${1:?}" 1>&"${OUTFD:?}"
   fi
-  if test "${DEBUG_LOG}" -ne 0; then printf '%s\n' "${1:?}"; fi
+  if test "${DEBUG_LOG:?}" -ne 0; then printf 1>&2 '%s\n' "${1:?}"; fi
 }
 
 ui_debug()
