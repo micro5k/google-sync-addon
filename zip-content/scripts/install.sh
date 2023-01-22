@@ -117,8 +117,9 @@ ui_msg "Android API: ${API:?}"
 ui_msg_empty_line
 ui_msg "Dynamic partitions: ${DYNAMIC_PARTITIONS:?}"
 ui_msg "Current slot: ${SLOT:-no slot}"
+ui_msg "Recov. fake system: ${RECOVERY_FAKE_SYSTEM:?}"
 ui_msg_empty_line
-ui_msg "System mount point: ${MOUNT_POINT:?}"
+ui_msg "System mount point: ${SYS_MOUNTPOINT:?}"
 ui_msg "System path: ${SYS_PATH:?}"
 ui_msg "Priv-app path: ${PRIVAPP_PATH:?}"
 ui_msg_empty_line
@@ -150,18 +151,18 @@ delete "${TMP_PATH:?}/origin"
 
 # Resetting Android runtime permissions
 if test "${API}" -ge 23; then
-  if test -e '/data/system/users/0/runtime-permissions.xml'; then
-    if ! grep -q 'com.google.android.syncadapters.contacts' /data/system/users/*/runtime-permissions.xml; then
+  if test -e "${DATA_PATH:?}/system/users/0/runtime-permissions.xml"; then
+    if ! grep -q 'com.google.android.syncadapters.contacts' "${DATA_PATH:?}"/system/users/*/runtime-permissions.xml; then
       # Purge the runtime permissions to prevent issues when the user flash this on a dirty install
       ui_msg "Resetting legacy Android runtime permissions..."
-      delete /data/system/users/*/runtime-permissions.xml
+      delete "${DATA_PATH:?}"/system/users/*/runtime-permissions.xml
     fi
   fi
-  if test -e '/data/misc_de/0/apexdata/com.android.permission/runtime-permissions.xml'; then
-    if ! grep -q 'com.google.android.syncadapters.contacts' /data/misc_de/*/apexdata/com.android.permission/runtime-permissions.xml; then
+  if test -e "${DATA_PATH:?}/misc_de/0/apexdata/com.android.permission/runtime-permissions.xml"; then
+    if ! grep -q 'com.google.android.syncadapters.contacts' "${DATA_PATH:?}"/misc_de/*/apexdata/com.android.permission/runtime-permissions.xml; then
       # Purge the runtime permissions to prevent issues when the user flash this on a dirty install
       ui_msg "Resetting Android runtime permissions..."
-      delete /data/misc_de/*/apexdata/com.android.permission/runtime-permissions.xml
+      delete "${DATA_PATH:?}"/misc_de/*/apexdata/com.android.permission/runtime-permissions.xml
     fi
   fi
 fi

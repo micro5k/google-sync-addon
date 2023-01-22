@@ -45,12 +45,20 @@ _detect_slot()
   if test ! -e '/proc/cmdline'; then return 1; fi
 
   local _slot
-  if _slot="$(grep -o -e 'androidboot.slot_suffix=[_[:alpha:]]*' '/proc/cmdline' | cut -d '=' -f 2)"; then
+  if _slot="$(grep -o -e 'androidboot.slot_suffix=[_[:alpha:]]*' '/proc/cmdline' | cut -d '=' -f 2)" && test -n "${_slot:-}"; then
     printf '%s' "${_slot:?}"
     return 0
   fi
 
   return 1
+}
+
+_mount_helper()
+{
+  mount "${@}" 2> /dev/null || {
+    test -n "${DEVICE_MOUNT:-}" && "${DEVICE_MOUNT:?}" -t 'auto' "${@}"
+  } || return "${?}"
+  return 0
 }
 
 _verify_system_partition()
@@ -64,7 +72,7 @@ _verify_system_partition()
 
     if test -e "${_path:?}/system/build.prop"; then
       SYS_PATH="${_path:?}/system"
-      MOUNT_POINT="${_path:?}"
+      SYS_MOUNTPOINT="${_path:?}"
 
       IFS="${_backup_ifs:-}"
       return 0
@@ -73,9 +81,9 @@ _verify_system_partition()
     if test -e "${_path:?}/build.prop"; then
       SYS_PATH="${_path:?}"
       if is_mounted "${_path:?}"; then
-        MOUNT_POINT="${_path:?}"
+        SYS_MOUNTPOINT="${_path:?}"
       elif _path="$(_canonicalize "${_path:?}/../")" && is_mounted "${_path:?}"; then
-        MOUNT_POINT="${_path:?}"
+        SYS_MOUNTPOINT="${_path:?}"
       else
         IFS="${_backup_ifs:-}"
         ui_error "Found system path at '${SYS_PATH:-}' but failed to find the mount point"
@@ -98,34 +106,28 @@ _mount_and_verify_system_partition()
 
   for _path in ${1?}; do
     _path="$(_canonicalize "${_path:?}")"
-    mount_partition "${_path:?}"
+    _mount_helper '-o' 'rw' "${_path:?}" || true
 
     if test -e "${_path:?}/system/build.prop"; then
       SYS_PATH="${_path:?}/system"
-      MOUNT_POINT="${_path:?}"
+      SYS_MOUNTPOINT="${_path:?}"
 
       IFS="${_backup_ifs:-}"
-      ui_msg "Mounted: ${MOUNT_POINT:-}"
+      ui_debug "Mounted: ${SYS_MOUNTPOINT:-}"
       return 0
     fi
 
     if test -e "${_path:?}/build.prop"; then
       SYS_PATH="${_path:?}"
-      MOUNT_POINT="${_path:?}"
+      SYS_MOUNTPOINT="${_path:?}"
 
       IFS="${_backup_ifs:-}"
-      ui_msg "Mounted: ${MOUNT_POINT:-}"
+      ui_debug "Mounted: ${SYS_MOUNTPOINT:-}"
       return 0
     fi
   done
 
   IFS="${_backup_ifs:-}"
-  return 1
-}
-
-_device_mount()
-{
-  if test -n "${DEVICE_MOUNT:-}" && "${DEVICE_MOUNT:?}" "${@}"; then return 0; fi
   return 1
 }
 
@@ -152,10 +154,10 @@ _get_mount_info()
 
 mount_partition()
 {
-  local _partition
-  _partition="$(_canonicalize "${1:?}")"
+  local _path
+  _path="$(_canonicalize "${1:?}")"
 
-  mount -o 'rw' "${_partition:?}" 2> /dev/null || _device_mount -o 'rw' "${_partition:?}" || ui_warning "Failed to mount '${_partition:-}'"
+  _mount_helper '-o' 'rw' "${_path:?}" || ui_warning "Failed to mount '${_path:-}'"
   return 0 # Never fail
 }
 
@@ -208,8 +210,6 @@ _upperize()
 
 _find_block()
 {
-  if test ! -e '/sys/dev/block'; then return 1; fi
-
   local _backup_ifs _uevent _block
   _backup_ifs="${IFS:-}"
   IFS=''
@@ -230,14 +230,14 @@ _find_block()
   return 1
 }
 
-_advanced_find_and_mount_system()
+_manual_partition_mount()
 {
   local _backup_ifs _path _block _found
   _backup_ifs="${IFS:-}"
   IFS="${NL:?}"
 
   _found='false'
-  if test -e "/dev/block/mapper"; then
+  if test -e '/dev/block/mapper'; then
     for _path in ${1?}; do
       if test -e "/dev/block/mapper/${_path:?}"; then
         _block="$(_canonicalize "/dev/block/mapper/${_path:?}")"
@@ -248,7 +248,7 @@ _advanced_find_and_mount_system()
     done
   fi
 
-  if test "${_found:?}" = 'false'; then
+  if test "${_found:?}" = 'false' && test -e '/sys/dev/block'; then
     for _path in ${1?}; do
       if _block="$(_find_block "${_path:?}")"; then
         ui_msg "Found '${_path:-}' block at: ${_block:-}"
@@ -260,12 +260,13 @@ _advanced_find_and_mount_system()
 
   if test "${_found:?}" != 'false'; then
     for _path in ${2?}; do
+      if test -z "${_path:-}"; then continue; fi
       _path="$(_canonicalize "${_path:?}")"
 
       umount "${_path:?}" 2> /dev/null || true
-      if mount -o 'rw' "${_block:?}" "${_path:?}" 2> /dev/null || _device_mount -t 'auto' -o 'rw' "${_block:?}" "${_path:?}"; then
+      if _mount_helper '-o' 'rw' "${_block:?}" "${_path:?}"; then
         IFS="${_backup_ifs:-}"
-        ui_msg "Mounted: ${_path:-}"
+        ui_debug "Mounted: ${_path:-}"
         return 0
       fi
     done
@@ -277,81 +278,111 @@ _advanced_find_and_mount_system()
 
 _find_and_mount_system()
 {
-  SYS_MOUNTPOINT_LIST='' # This is a list of paths separated by newlines
-  if test "${TEST_INSTALL:-false}" != 'false' && test -n "${ANDROID_ROOT:-}" && test -e "${ANDROID_ROOT:?}"; then
-    SYS_MOUNTPOINT_LIST="${ANDROID_ROOT:?}${NL:?}"
-  else
-    if test -e '/mnt/system'; then SYS_MOUNTPOINT_LIST="${SYS_MOUNTPOINT_LIST?}/mnt/system${NL:?}"; fi
-    if test -n "${ANDROID_ROOT:-}" && test -e "${ANDROID_ROOT:?}"; then SYS_MOUNTPOINT_LIST="${SYS_MOUNTPOINT_LIST?}${ANDROID_ROOT:?}${NL:?}"; fi
-    if test "${ANDROID_ROOT:-}" != '/system_root' && test -e '/system_root'; then SYS_MOUNTPOINT_LIST="${SYS_MOUNTPOINT_LIST?}/system_root${NL:?}"; fi
-    if test "${ANDROID_ROOT:-}" != '/system' && test -e '/system'; then SYS_MOUNTPOINT_LIST="${SYS_MOUNTPOINT_LIST?}/system${NL:?}"; fi
-  fi
-  ui_debug "SYS_MOUNTPOINT_LIST:"
-  ui_debug "${SYS_MOUNTPOINT_LIST:-}"
+  local _sys_mountpoint_list='' # This is a list of paths separated by newlines
 
-  if _verify_system_partition "${SYS_MOUNTPOINT_LIST?}"; then
+  if test "${TEST_INSTALL:-false}" != 'false' && test -n "${ANDROID_ROOT:-}" && test -e "${ANDROID_ROOT:?}"; then
+    _sys_mountpoint_list="${ANDROID_ROOT:?}${NL:?}"
+  else
+    if test -e '/mnt/system'; then
+      _sys_mountpoint_list="${_sys_mountpoint_list?}/mnt/system${NL:?}"
+    fi
+    if test -n "${ANDROID_ROOT:-}" &&
+      test "${ANDROID_ROOT:?}" != '/system_root' &&
+      test "${ANDROID_ROOT:?}" != '/system' &&
+      test -e "${ANDROID_ROOT:?}"; then
+      _sys_mountpoint_list="${_sys_mountpoint_list?}${ANDROID_ROOT:?}${NL:?}"
+    fi
+    if test -e '/system_root'; then
+      _sys_mountpoint_list="${_sys_mountpoint_list?}/system_root${NL:?}"
+    fi
+    if test "${RECOVERY_FAKE_SYSTEM:?}" = 'false' && test -e '/system'; then
+      _sys_mountpoint_list="${_sys_mountpoint_list?}/system${NL:?}"
+    fi
+  fi
+  ui_debug 'System mountpoint list:'
+  ui_debug "${_sys_mountpoint_list:-}"
+
+  if _verify_system_partition "${_sys_mountpoint_list?}"; then
     : # Found
   else
     SYS_INIT_STATUS=1
 
-    if _mount_and_verify_system_partition "${SYS_MOUNTPOINT_LIST?}"; then
+    if _mount_and_verify_system_partition "${_sys_mountpoint_list?}"; then
       : # Mounted and found
-    elif _advanced_find_and_mount_system "system${SLOT:-}${NL:?}system${NL:?}FACTORYFS${NL:?}" "${SYS_MOUNTPOINT_LIST?}" && _verify_system_partition "${SYS_MOUNTPOINT_LIST?}"; then
+    elif _manual_partition_mount "system${SLOT:-}${NL:?}system${NL:?}FACTORYFS${NL:?}" "${_sys_mountpoint_list?}" && _verify_system_partition "${_sys_mountpoint_list?}"; then
       : # Mounted and found
     else
       deinitialize
 
       ui_msg_empty_line
+      ui_msg "Dynamic partitions: ${DYNAMIC_PARTITIONS:?}"
       ui_msg "Current slot: ${SLOT:-no slot}"
+      ui_msg "Recov. fake system: ${RECOVERY_FAKE_SYSTEM:?}"
+      ui_msg_empty_line
       ui_msg "Android root ENV: ${ANDROID_ROOT:-}"
       ui_msg_empty_line
       ui_error "The ROM cannot be found!"
     fi
   fi
 
-  readonly MOUNT_POINT SYS_PATH
+  readonly SYS_MOUNTPOINT SYS_PATH
 }
 
 initialize()
 {
-  if test -e '/dev/block/mapper'; then DYNAMIC_PARTITIONS='true'; else DYNAMIC_PARTITIONS='false'; fi
-  readonly DYNAMIC_PARTITIONS
+  ui_msg_empty_line
+
+  SYS_INIT_STATUS=0
+  DATA_INIT_STATUS=0
+
+  # Some recoveries have a fake system folder when nothing is mounted with just bin, etc and lib / lib64.
+  # Usable binaries are under the fake /system/bin so the /system mountpoint mustn't be used while in this recovery.
+  if test "${BOOTMODE:?}" != 'true' &&
+    test -e '/system/bin' &&
+    test -e '/system/etc' &&
+    test ! -e '/system/build.prop' &&
+    test ! -e '/system/system/build.prop'; then
+    readonly RECOVERY_FAKE_SYSTEM='true'
+  else
+    readonly RECOVERY_FAKE_SYSTEM='false'
+  fi
+  export RECOVERY_FAKE_SYSTEM
+
+  if test -e '/dev/block/mapper'; then readonly DYNAMIC_PARTITIONS='true'; else readonly DYNAMIC_PARTITIONS='false'; fi
   export DYNAMIC_PARTITIONS
 
   SLOT="$(_detect_slot)" || SLOT=''
   readonly SLOT
   export SLOT
 
-  SYS_INIT_STATUS=0
-  DATA_INIT_STATUS=0
-
   _find_and_mount_system
 
   cp -pf "${SYS_PATH:?}/build.prop" "${TMP_PATH:?}/build.prop" # Cache the file for faster access
 
-  if is_mounted_read_only "${MOUNT_POINT:?}"; then
-    ui_warning "The '${MOUNT_POINT:-}' mount point is read-only, it will be remounted"
-    remount_read_write "${MOUNT_POINT:?}" || ui_error "Remounting of '${MOUNT_POINT:-}' failed"
+  if is_mounted_read_only "${SYS_MOUNTPOINT:?}"; then
+    ui_msg "INFO: The '${SYS_MOUNTPOINT:-}' mount point is read-only, it will be remounted"
+    remount_read_write "${SYS_MOUNTPOINT:?}" || ui_error "Remounting of '${SYS_MOUNTPOINT:-}' failed"
   fi
 
   if test ! -w "${SYS_PATH:?}"; then
     ui_error "The '${SYS_PATH:-}' partition is NOT writable"
   fi
 
-  if test "${TEST_INSTALL:-false}" = 'false' && test ! -e '/data/data' && ! is_mounted '/data'; then
-    mount_partition '/data'
-    if is_mounted '/data'; then
+  DATA_PATH="$(_canonicalize "${ANDROID_DATA:-/data}")"
+  if test ! -e "${DATA_PATH:?}/data" && ! is_mounted "${DATA_PATH:?}"; then
+    _mount_helper '-o' 'rw' "${DATA_PATH:?}" || _manual_partition_mount "userdata${NL:?}DATAFS${NL:?}" "${ANDROID_DATA:-}${NL:?}/data${NL:?}" || true
+    if is_mounted "${DATA_PATH:?}"; then
       DATA_INIT_STATUS=1
     else
-      ui_warning "The /data partition cannot be mounted so I can't clean app updates and Dalvik cache but it doesn't matter if you do a factory reset"
+      ui_warning "The data partition cannot be mounted, so updates of installed / removed apps cannot be deleted and their Dalvik cache cannot be cleaned, but it doesn't matter if you do a factory reset"
     fi
   fi
 }
 
 deinitialize()
 {
-  if test "${SYS_INIT_STATUS:?}" = '1' && test -n "${MOUNT_POINT:-}"; then unmount "${MOUNT_POINT:?}"; fi
-  if test "${DATA_INIT_STATUS:?}" = '1'; then unmount '/data'; fi
+  if test "${SYS_INIT_STATUS:?}" = '1' && test -n "${SYS_MOUNTPOINT:-}"; then unmount "${SYS_MOUNTPOINT:?}"; fi
+  if test "${DATA_INIT_STATUS:?}" = '1' && test -n "${DATA_PATH:-}"; then unmount "${DATA_PATH:?}"; fi
 }
 
 # Message related functions
@@ -637,9 +668,9 @@ zip_extract_dir()
 # Data reset functions
 reset_gms_data_of_all_apps()
 {
-  if test -e '/data/data/'; then
+  if test -e "${DATA_PATH:?}/data"; then
     ui_debug 'Resetting GMS data of all apps...'
-    find /data/data/*/shared_prefs -name 'com.google.android.gms.*.xml' -delete
+    find "${DATA_PATH:?}"/data/*/shared_prefs -name 'com.google.android.gms.*.xml' -delete
     validate_return_code_warning "$?" 'Failed to reset GMS data of all apps'
   fi
 }
