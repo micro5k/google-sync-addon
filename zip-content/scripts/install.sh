@@ -23,7 +23,6 @@ unset CDPATH
 
 ### GLOBAL VARIABLES ###
 
-export INSTALLER=1
 TMP_PATH="$2"
 
 SYS_PATH=''
@@ -171,6 +170,9 @@ mount_extra_partitions_silent
 
 # Clean previous installations
 delete "${SYS_PATH:?}/etc/zips/${install_id:?}.prop"
+
+readonly INSTALLER='true'
+export INSTALLER
 # shellcheck source=SCRIPTDIR/uninstall.sh
 . "${TMP_PATH:?}/uninstall.sh"
 
