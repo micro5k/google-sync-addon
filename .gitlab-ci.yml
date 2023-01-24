@@ -37,10 +37,12 @@ stages:
 build-ota-oss:
   stage: build
   script: "./gradlew buildOtaOSS"
-  # artifacts:
-  #   paths:
-  #     - output/*.zip*
-  #   expire_in: 1 day
+  rules:
+    - if: "false"
+  artifacts:
+    paths:
+      - output/*.zip*
+    expire_in: 1 day
   only:
     - main
 
