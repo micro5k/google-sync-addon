@@ -266,6 +266,7 @@ _manual_partition_mount()
       umount "${_path:?}" 2> /dev/null || true
       if _mount_helper '-o' 'rw' "${_block:?}" "${_path:?}"; then
         IFS="${_backup_ifs:-}"
+        LAST_MOUNTPOINT="${_path:?}"
         ui_debug "Mounted: ${_path:-}"
         return 0
       fi
@@ -306,6 +307,7 @@ _find_and_mount_system()
     : # Found
   else
     SYS_INIT_STATUS=1
+    ui_debug "Mounting system..."
 
     if _mount_and_verify_system_partition "${_sys_mountpoint_list?}"; then
       : # Mounted and found
@@ -330,7 +332,7 @@ _find_and_mount_system()
 
 initialize()
 {
-  ui_msg_empty_line
+  ui_debug ''
 
   SYS_INIT_STATUS=0
   DATA_INIT_STATUS=0
@@ -368,11 +370,15 @@ initialize()
     ui_error "The '${SYS_PATH:-}' partition is NOT writable"
   fi
 
-  if test "${ANDROID_DATA:-}" = '/data'; then ANDROID_DATA=''; fi # Avoid duplicates
+  if test "${ANDROID_DATA:-}" = '/data'; then ANDROID_DATA=''; fi # Avoid double checks
 
   DATA_PATH="$(_canonicalize "${ANDROID_DATA:-/data}")"
   if test ! -e "${DATA_PATH:?}/data" && ! is_mounted "${DATA_PATH:?}"; then
+    ui_debug "Mounting data..."
+    unset LAST_MOUNTPOINT
     _mount_helper '-o' 'rw' "${DATA_PATH:?}" || _manual_partition_mount "userdata${NL:?}DATAFS${NL:?}" "${ANDROID_DATA:-}${NL:?}/data${NL:?}" || true
+    if test -n "${LAST_MOUNTPOINT:-}"; then DATA_PATH="${LAST_MOUNTPOINT:?}"; fi
+
     if is_mounted "${DATA_PATH:?}"; then
       DATA_INIT_STATUS=1
     else
@@ -380,6 +386,8 @@ initialize()
     fi
   fi
   readonly DATA_PATH
+
+  unset LAST_MOUNTPOINT
 }
 
 deinitialize()
@@ -391,7 +399,7 @@ deinitialize()
 # Message related functions
 _show_text_on_recovery()
 {
-  if test "${BOOTMODE:?}" = 'true'; then
+  if test "${RECOVERY_OUTPUT:?}" = 'false'; then
     printf '%s\n' "${1?}" # ToDO: Improve output handling
     return
   elif test -e "${RECOVERY_PIPE:?}"; then
@@ -408,10 +416,10 @@ ui_error()
   ERROR_CODE=91
   if test -n "${2:-}"; then ERROR_CODE="${2:?}"; fi
 
-  if test "${BOOTMODE:?}" = 'true'; then
-    printf 1>&2 '\033[1;31m%s\033[0m\n' "ERROR ${ERROR_CODE:?}: ${1:?}"
-  else
+  if test "${RECOVERY_OUTPUT:?}" = 'true'; then
     _show_text_on_recovery "ERROR ${ERROR_CODE:?}: ${1:?}"
+  else
+    printf 1>&2 '\033[1;31m%s\033[0m\n' "ERROR ${ERROR_CODE:?}: ${1:?}"
   fi
 
   exit "${ERROR_CODE:?}"
@@ -419,10 +427,10 @@ ui_error()
 
 ui_warning()
 {
-  if test "${BOOTMODE:?}" = 'true'; then
-    printf 1>&2 '\033[0;33m%s\033[0m\n' "WARNING: ${1:?}"
-  else
+  if test "${RECOVERY_OUTPUT:?}" = 'true'; then
     _show_text_on_recovery "WARNING: ${1:?}"
+  else
+    printf 1>&2 '\033[0;33m%s\033[0m\n' "WARNING: ${1:?}"
   fi
 }
 
@@ -438,7 +446,7 @@ ui_msg()
 
 ui_msg_sameline_start()
 {
-  if test "${BOOTMODE:?}" = 'true'; then
+  if test "${RECOVERY_OUTPUT:?}" = 'false'; then
     printf '%s ' "${1:?}"
     return
   elif test -e "${RECOVERY_PIPE:?}"; then
@@ -451,7 +459,7 @@ ui_msg_sameline_start()
 
 ui_msg_sameline_end()
 {
-  if test "${BOOTMODE:?}" = 'true'; then
+  if test "${RECOVERY_OUTPUT:?}" = 'false'; then
     printf '%s\n' "${1:?}"
     return
   elif test -e "${RECOVERY_PIPE:?}"; then
@@ -889,36 +897,45 @@ write_file_list()
 # Input related functions
 _find_hardware_keys()
 {
-  if ! test -e '/proc/bus/input/devices'; then return 1; fi
+  if test ! -e '/proc/bus/input/devices'; then return 1; fi # NOT found
+
   local _last_device_name=''
-  while IFS=': ' read -r line_type full_line; do
+  # shellcheck disable=SC2002
+  cat '/proc/bus/input/devices' | while IFS=': ' read -r line_type full_line; do
     if test "${line_type?}" = 'N'; then
-      _last_device_name="${full_line:?}"
+      _last_device_name="${full_line?}"
     elif test "${line_type?}" = 'H' && test "${_last_device_name?}" = 'Name="gpio-keys"'; then
-      local _not_found=1
-      echo "${full_line:?}" | cut -d '=' -f 2 | while IFS='' read -r my_line; do
+
+      local _found=0
+      printf '%s' "${full_line?}" | cut -d '=' -f 2 | while IFS='' read -r my_line; do
+        IFS=' '
         for elem in ${my_line:?}; do
-          echo "${elem:?}" | grep -e '^event' && {
-            _not_found=0
+          printf '%s' "${elem:?}" | grep -e '^event' && {
+            _found=4
             break
           }
         done
-        return "${_not_found:?}"
+        return "${_found:?}"
       done
       return "${?}"
+
     fi
-  done < '/proc/bus/input/devices'
-  return 1
+  done
+  if test "${?}" -eq 4; then return 0; fi # Found
+  return 1                                # NOT found
 }
 
 _parse_input_event()
 {
-  if ! test -e "/dev/input/${1:?}"; then return 1; fi
-  hexdump -n 14 -d 0< "/dev/input/${1:?}" | while IFS=' ' read -r _ _ _ _ _ _ cur_button key_down _; do
+  if test ! -e "/dev/input/${1:?}"; then return 1; fi
+
+  # shellcheck disable=SC2002
+  cat "/dev/input/${1:?}" | hexdump -n 14 -d | while IFS=' ' read -r _ _ _ _ _ _ cur_button key_down _; do
     if test "${key_down:?}" -ne 1; then return 2; fi
-    echo "${cur_button:?}" | awk '{$0=int($0)}1' || return 1
-    break
+    if test -n "${cur_button:-}" && printf '%.0f' "${cur_button:?}"; then return 4; fi
   done
+  if test "${?}" -eq 4; then return 0; fi
+  return 1
 }
 
 _timeout_exit_code_remapper()
@@ -929,9 +946,11 @@ _timeout_exit_code_remapper()
       ;;
     125) # The timeout command itself fails
       ;;
-    126) # COMMAND is found but cannot be invoked
+    126) # COMMAND is found but cannot be invoked - Example: missing execute permission
       ;;
     127) # COMMAND cannot be found
+      ui_warning 'timeout returned "COMMAND cannot be found" (127)'
+      return 127
       ;;
     132) # SIGILL signal (128+4) - Example: illegal instruction
       ui_warning 'timeout returned SIGILL signal (128+4)'
@@ -957,17 +976,22 @@ _timeout_exit_code_remapper()
 
 _timeout_compat()
 {
-  local _timeout_ver _timeout_secs
+  local _status _timeout_ver _timeout_secs
 
   _timeout_ver="$(timeout --help 2>&1 | parse_busybox_version)" || _timeout_ver=''
   _timeout_secs="${1:?}" || ui_error 'Missing "secs" parameter for _timeout_compat'
   shift
+
   if test -z "${_timeout_ver?}" || test "$(numerically_comparable_version "${_timeout_ver:?}" || true)" -ge "$(numerically_comparable_version '1.30.0' || true)"; then
     timeout -- "${_timeout_secs:?}" "${@:?}"
+    _status="${?}"
   else
-    timeout -t "${_timeout_secs:?}" -- "${@:?}" 2> /dev/null
+    {
+      timeout -t "${_timeout_secs:?}" -- "${@:?}"
+      _status="${?}"
+    } 2> /dev/null
   fi
-  _timeout_exit_code_remapper "${?}"
+  _timeout_exit_code_remapper "${_status:?}"
   return "${?}"
 }
 
@@ -978,7 +1002,7 @@ _choose_remapper()
   _key="${1?}" || ui_error 'Missing parameter for _choose_remapper'
   if test -z "${_key?}"; then _key='Enter'; elif test "${_key:?}" = "${_esc_keycode:?}"; then _key='ESC'; fi
   ui_msg_empty_line
-  ui_msg "Key press: ${_key:?}"
+  ui_msg "Key press: ${_key:-}"
   ui_msg_empty_line
 
   case "${_key:?}" in
@@ -1008,22 +1032,23 @@ _keycheck_map_keycode_to_key()
 choose_keycheck_with_timeout()
 {
   local _key _status
-  _timeout_compat "${1:?}" keycheck
+  _timeout_compat "${1:?}" "${TMP_PATH:?}/bin/keycheck"
   _status="${?}"
 
   if test "${_status:?}" -eq 124; then
     ui_msg 'Key: No key pressed'
     return 0
-  elif test "${_status:?}" -eq 132; then
-    : #export KEYCHECK_ENABLED=false
-    #choose_inputevent
+  elif test "${_status:?}" -eq 127 || test "${_status:?}" -eq 132; then
+    export KEYCHECK_ENABLED=false
+    choose_inputevent
+    return "${?}"
   fi
   _key="$(_keycheck_map_keycode_to_key "${_status:?}")" || {
     ui_warning 'Key detection failed'
     return 1
   }
 
-  _choose_remapper "${_key:?}"
+  _choose_remapper "${_key?}"
   return "${?}"
 }
 
@@ -1038,7 +1063,7 @@ choose_keycheck()
     return 1
   }
 
-  _choose_remapper "${_key:?}"
+  _choose_remapper "${_key?}"
   return "${?}"
 }
 
@@ -1070,13 +1095,15 @@ choose_read_with_timeout()
 choose_read()
 {
   local _key
+
   # shellcheck disable=SC3045
-  IFS='' read -rsn 1 -- _key || {
+  until _key='FAIL' && IFS='' read -r -s -n '1' _key && test -n "${_key:-}"; do
+    if test -z "${_key:-}"; then continue; fi # Retry if only the enter key was pressed
     ui_warning 'Key detection failed'
     return 1
-  }
+  done
 
-  clear
+  #clear
   _choose_remapper "${_key?}"
   return "${?}"
 }
@@ -1084,22 +1111,28 @@ choose_read()
 choose_inputevent()
 {
   local _key _hard_keys_event
+
   _hard_keys_event="$(_find_hardware_keys)" || {
     ui_warning 'Key detection failed'
     return 1
   }
   _key="$(_parse_input_event "${_hard_keys_event:?}")" || {
-    ui_warning 'Key detection failed'
+    ui_warning 'Key detection failed (2)'
     return 1
   }
 
-  ui_msg "Key code: ${_key:?}"
+  ui_msg "Key code: ${_key:-}"
   # 102 Menu
   # 114 Vol -
   # 115 Vol +
   # 116 Power
   #_choose_inputevent_remapper "${_key:?}"
   #return "${?}"
+  if test "${_key?}" -eq 115; then
+    return 3
+  elif test "${_key?}" -eq 114; then
+    return 2
+  fi
 }
 
 choose()
@@ -1109,10 +1142,12 @@ choose()
     ui_msg "QUESTION: ${1:?}"
     ui_msg "${2:?}"
     ui_msg "${3:?}"
-    if "${KEYCHECK_ENABLED:?}"; then
+    if test "${ZIP_INSTALL:?}" = 'true' || test "${TEST_INSTALL:-false}" != 'false'; then
+      choose_read "${@}"
+    elif "${KEYCHECK_ENABLED:?}"; then
       choose_keycheck "${@}"
     else
-      choose_read "${@}"
+      choose_inputevent "${@}"
     fi
     _last_status="${?}"
     if test "${_last_status:?}" -eq 123; then

@@ -9,6 +9,7 @@ version=v1.2.0.1-alpha
 versionCode=2
 author=ale5000
 description=It is an installer made to simplify the installation of Google sync adapters.
+applicationId=net.ale5000.google_sync_addon.ota
 support=https://github.com/micro5k/google-sync-addon/issues
 donate=https://liberapay.com/microg-unofficial-by-ale5000/donate
 minApi=19

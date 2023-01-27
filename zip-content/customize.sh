@@ -16,7 +16,7 @@ set -u || true
 
 ### PREVENTIVE CHECKS ###
 
-DEBUG_LOG=0
+DEBUG_LOG="${DEBUG_LOG:-0}"
 if test -z "${BOOTMODE:-}"; then
   printf 1>&2 '%s\n' 'Missing BOOTMODE variable'
   abort 'Missing BOOTMODE variable' 2> /dev/null || exit 1
@@ -47,14 +47,10 @@ export SKIPUNZIP ASH_STANDALONE
 
 ### GLOBAL VARIABLES ###
 
-if test "${4:-}" = 'zip-install'; then
-  export ZIP_INSTALL='true'
-else
-  export ZIP_INSTALL='false'
-fi
-export RECOVERY_API_VER="${1:-}"
-
-readonly ZIP_INSTALL RECOVERY_API_VER
+if test "${4:-}" = 'zip-install'; then readonly ZIP_INSTALL='true'; else readonly ZIP_INSTALL='false'; fi
+if test "${ZIP_INSTALL:?}" = 'true' || test "${BOOTMODE:?}" = 'true'; then readonly RECOVERY_OUTPUT='false'; else readonly RECOVERY_OUTPUT='true'; fi
+readonly RECOVERY_API_VER="${1:-}"
+export ZIP_INSTALL RECOVERY_OUTPUT RECOVERY_API_VER
 
 ZIP_PATH="$(dirname "${ZIPFILE:?}")"
 export ZIP_PATH
@@ -125,7 +121,7 @@ disable_debug_log()
 
 _show_text_on_recovery()
 {
-  if test "${BOOTMODE:?}" = 'true'; then
+  if test "${RECOVERY_OUTPUT:?}" = 'false'; then
     printf '%s\n' "${1?}"
     return
   elif test -e "${RECOVERY_PIPE:?}"; then
@@ -142,10 +138,10 @@ ui_error()
   ERROR_CODE=79
   if test -n "${2:-}"; then ERROR_CODE="${2:?}"; fi
 
-  if test "${BOOTMODE:?}" = 'true'; then
-    printf 1>&2 '\033[1;31m%s\033[0m\n' "ERROR ${ERROR_CODE:?}: ${1:?}"
-  else
+  if test "${RECOVERY_OUTPUT:?}" = 'true'; then
     _show_text_on_recovery "ERROR ${ERROR_CODE:?}: ${1:?}"
+  else
+    printf 1>&2 '\033[1;31m%s\033[0m\n' "ERROR ${ERROR_CODE:?}: ${1:?}"
   fi
 
   abort '' 2> /dev/null || exit "${ERROR_CODE:?}"
@@ -153,10 +149,10 @@ ui_error()
 
 ui_warning()
 {
-  if test "${BOOTMODE:?}" = 'true'; then
-    printf 1>&2 '\033[0;33m%s\033[0m\n' "WARNING: ${1:?}"
-  else
+  if test "${RECOVERY_OUTPUT:?}" = 'true'; then
     _show_text_on_recovery "WARNING: ${1:?}"
+  else
+    printf 1>&2 '\033[0;33m%s\033[0m\n' "WARNING: ${1:?}"
   fi
 }
 
@@ -311,6 +307,7 @@ if test "${CI:-false}" != 'false' || test "${APP_NAME:-false}" = 'Gradle'; then
 fi
 
 # Extract scripts
+test "${DEBUG_LOG:?}" -ne 0 && enable_debug_log # Enable file logging if needed
 ui_debug 'Extracting scripts...'
 create_dir_safe "${TMP_PATH:?}/inc"
 package_extract_file_safe 'inc/common-functions.sh' "${TMP_PATH:?}/inc/common-functions.sh"
@@ -324,7 +321,7 @@ set_perm_safe 0 0 0755 "${TMP_PATH:?}/install.sh"
 package_extract_file_safe 'settings.conf' "${TMP_PATH:?}/default-settings.conf"
 # shellcheck source=SCRIPTDIR/settings-full.conf
 . "${TMP_PATH:?}/default-settings.conf"
-test "${DEBUG_LOG}" -eq 1 && enable_debug_log # Enable file logging if needed
+test "${DEBUG_LOG:?}" -ne 0 && enable_debug_log # Enable file logging if needed
 
 # If the debug log was enabled at startup (not in the settings or in the live setup) we cannot allow overriding it from the settings
 if test "${DEBUG_LOG_ENABLED}" -eq 1; then export DEBUG_LOG=1; fi
@@ -340,5 +337,5 @@ delete_recursive_safe "${TMP_PATH:?}"
 
 #!!! UNSAFE ENVIRONMENT FROM HERE !!!#
 
-test "${DEBUG_LOG}" -eq 1 && disable_debug_log # Disable debug log and restore normal output
+test "${DEBUG_LOG:?}" -ne 0 && disable_debug_log # Disable debug log and restore normal output
 delete_safe "${BASE_TMP_PATH:?}/busybox"
