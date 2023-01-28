@@ -90,7 +90,6 @@ unset -f _log_path_setter || true
 readonly LOG_PATH
 export LOG_PATH
 
-export LIVE_SETUP_POSSIBLE=false
 export KEYCHECK_ENABLED=false
 
 ### FUNCTIONS ###
@@ -281,30 +280,36 @@ if test "${TEST_INSTALL:-false}" = 'false'; then
   # Clean search path so only internal BusyBox applets will be used
   export PATH="${TMP_PATH:?}/bin"
 
-  # Temporarily setup BusyBox
+  # Setup BusyBox in the temp folder
   "${OUR_BB:?}" --install -s "${TMP_PATH:?}/bin" || ui_error "Failed to setup BusyBox"
+fi
 
-  # Temporarily setup Keycheck
+LIVE_SETUP_ALLOWED='false'
+KEYCHECK_PATH=''
+if test "${ZIP_INSTALL:?}" = 'true' || test "${TEST_INSTALL:-false}" != 'false'; then
+  # Enable the binary-free live setup when using zip-install.sh or when inside the recovery simulator
+  LIVE_SETUP_ALLOWED='true'
+  "${OUR_BB:?}" rm -f "${BASE_TMP_PATH:?}/keycheck" || ui_error "Failed to remove keycheck"
+else
+  # Setup Keycheck in the temp folder
   if test -e "${BASE_TMP_PATH:?}/keycheck"; then
-    "${OUR_BB:?}" mv -f "${BASE_TMP_PATH:?}/keycheck" "${TMP_PATH:?}/bin/keycheck" || ui_error "Failed to move keycheck to the bin folder"
+    LIVE_SETUP_ALLOWED='true'
+    KEYCHECK_PATH="${TMP_PATH:?}/bin/keycheck"
+    "${OUR_BB:?}" mv -f "${BASE_TMP_PATH:?}/keycheck" "${KEYCHECK_PATH:?}" || ui_error "Failed to move keycheck to the bin folder"
     # Give execution rights
-    "${OUR_BB:?}" chmod 0755 "${TMP_PATH:?}/bin/keycheck" || ui_error "chmod failed on keycheck"
-    LIVE_SETUP_POSSIBLE=true
-    KEYCHECK_ENABLED=true
+    "${OUR_BB:?}" chmod 0755 "${KEYCHECK_PATH:?}" || ui_error "chmod failed on keycheck"
+    KEYCHECK_ENABLED='true'
   fi
 fi
 
-# Enable the binary-free live setup when inside the recovery simulator
-if test "${TEST_INSTALL:-false}" != 'false'; then
-  LIVE_SETUP_POSSIBLE=true
-  KEYCHECK_ENABLED=false
-fi
-
-# Live setup isn't supported under continuous integration system
+# Live setup under continuous integration systems doesn't make sense
 # Live setup doesn't work when executed through Gradle
 if test "${CI:-false}" != 'false' || test "${APP_NAME:-false}" = 'Gradle'; then
-  LIVE_SETUP_POSSIBLE=false
+  LIVE_SETUP_ALLOWED='false'
 fi
+
+readonly LIVE_SETUP_ALLOWED KEYCHECK_PATH
+export LIVE_SETUP_ALLOWED KEYCHECK_PATH
 
 # Extract scripts
 test "${DEBUG_LOG:?}" -ne 0 && enable_debug_log # Enable file logging if needed
