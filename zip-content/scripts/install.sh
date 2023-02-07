@@ -67,7 +67,6 @@ else
 fi
 
 # Info
-ui_msg_empty_line
 ui_msg '------------------'
 ui_msg 'Google Sync Add-on'
 ui_msg "${install_version}"
