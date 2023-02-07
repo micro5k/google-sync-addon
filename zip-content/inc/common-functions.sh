@@ -11,7 +11,7 @@
 
 ### PREVENTIVE CHECKS ###
 
-if test -z "${RECOVERY_PIPE:-}" || test -z "${OUTFD:-}" || test -z "${ZIPFILE:-}" || test -z "${TMP_PATH:-}" || test -z "${DEBUG_LOG:-}"; then
+if test -z "${RECOVERY_PIPE:-}" || test -z "${OUTFD:-}" || test -z "${ZIPFILE:-}" || test -z "${TMP_PATH:-}" || test -z "${DEBUG_LOG_ENABLED:-}"; then
   echo 'Some variables are NOT set.'
   exit 90
 fi
@@ -333,7 +333,13 @@ _find_and_mount_system()
 
 initialize()
 {
-  ui_debug ''
+  # Make sure that the commands are still overridden here (most shells don't have the ability to export functions)
+  if test "${TEST_INSTALL:-false}" != 'false' && test -f "${RS_OVERRIDE_SCRIPT:?}"; then
+    # shellcheck source=SCRIPTDIR/../../recovery-simulator/inc/configure-overrides.sh
+    . "${RS_OVERRIDE_SCRIPT:?}" || exit "${?}"
+  fi
+
+  live_setup_choice
 
   SYS_INIT_STATUS=0
   DATA_INIT_STATUS=0
@@ -399,16 +405,15 @@ deinitialize()
 # Message related functions
 _show_text_on_recovery()
 {
-  if test "${RECOVERY_OUTPUT:?}" = 'false'; then
-    printf '%s\n' "${1?}" # ToDO: Improve output handling
-    return
-  elif test -e "${RECOVERY_PIPE:?}"; then
+  if test "${RECOVERY_OUTPUT:?}" != 'true'; then return; fi # Nothing to do here
+
+  if test -e "${RECOVERY_PIPE:?}"; then
     printf 'ui_print %s\nui_print\n' "${1?}" >> "${RECOVERY_PIPE:?}"
   else
     printf 'ui_print %s\nui_print\n' "${1?}" 1>&"${OUTFD:?}"
   fi
 
-  if test "${DEBUG_LOG:?}" -ne 0; then printf 1>&2 '%s\n' "${1?}"; fi
+  if test "${DEBUG_LOG_ENABLED:?}" -eq 1; then printf 1>&2 '%s\n' "${1?}"; fi
 }
 
 ui_error()
@@ -436,12 +441,20 @@ ui_warning()
 
 ui_msg_empty_line()
 {
-  _show_text_on_recovery ' '
+  if test "${RECOVERY_OUTPUT:?}" = 'true'; then
+    _show_text_on_recovery ' '
+  else
+    printf '\n'
+  fi
 }
 
 ui_msg()
 {
-  _show_text_on_recovery "${1:?}"
+  if test "${RECOVERY_OUTPUT:?}" = 'true'; then
+    _show_text_on_recovery "${1:?}"
+  else
+    printf '%s\n' "${1:?}"
+  fi
 }
 
 ui_msg_sameline_start()
@@ -454,7 +467,8 @@ ui_msg_sameline_start()
   else
     printf 'ui_print %s' "${1:?}" 1>&"${OUTFD:?}"
   fi
-  if test "${DEBUG_LOG:?}" -ne 0; then printf 1>&2 '%s\n' "${1:?}"; fi
+
+  if test "${DEBUG_LOG_ENABLED:?}" -eq 1; then printf 1>&2 '%s\n' "${1:?}"; fi
 }
 
 ui_msg_sameline_end()
@@ -467,7 +481,8 @@ ui_msg_sameline_end()
   else
     printf '%s\nui_print\n' "${1:?}" 1>&"${OUTFD:?}"
   fi
-  if test "${DEBUG_LOG:?}" -ne 0; then printf 1>&2 '%s\n' "${1:?}"; fi
+
+  if test "${DEBUG_LOG_ENABLED:?}" -eq 1; then printf 1>&2 '%s\n' "${1:?}"; fi
 }
 
 ui_debug()
@@ -821,7 +836,7 @@ setup_app()
   _optional="${6:-true}"
 
   if test "${API:?}" -ge "${_min_api:?}" && test "${API:?}" -le "${_max_api:-99}"; then
-    if test "${_optional:?}" = 'true' && test "${live_setup_enabled:?}" = 'true'; then
+    if test "${_optional:?}" = 'true' && test "${LIVE_SETUP_ENABLED:?}" = 'true'; then
       choose "Do you want to install ${2:?}?" '+) Yes' '-) No'
       if test "${?}" -eq 3; then _install='1'; else _install='0'; fi
     fi
@@ -943,9 +958,9 @@ _timeout_exit_code_remapper()
       ;;
     125) # The timeout command itself fails
       ;;
-    126) # COMMAND is found but cannot be invoked - Example: missing execute permission
+    126) # COMMAND is found but cannot be invoked (126) - Example: missing execute permission
       ;;
-    127) # COMMAND cannot be found (127)
+    127) # COMMAND cannot be found (127) - Note: this return value may even be used when timeout is unable to execute the COMMAND
       ui_msg_empty_line
       ui_warning 'timeout returned cmd NOT found (127)'
       return 127
@@ -1070,21 +1085,27 @@ choose_keycheck()
 choose_read_with_timeout()
 {
   local _key _status
+  if test "${RECOVERY_OUTPUT:?}" = 'true'; then return 1; fi
 
   while true; do
     _key=''
     _status=0
     # shellcheck disable=SC3045
     IFS='' read -r -s -n '1' -t "${1:?}" _key || _status="${?}"
+    printf '\r                 \r' # Clean invalid choice message (if printed)
 
     case "${_status:?}" in
       0) ;;    # Command terminated successfully
       1 | 142) # 1 => Command timed out on BusyBox / Toybox; 142 => Command timed out on Bash
+        ui_msg_empty_line
         ui_msg 'Key: No key pressed'
+        ui_msg_empty_line
         return 0
         ;;
       *)
+        ui_msg_empty_line
         ui_warning 'Key detection failed'
+        ui_msg_empty_line
         return 1
         ;;
     esac
@@ -1095,7 +1116,7 @@ choose_read_with_timeout()
       'c' | 'C' | "${_esc_keycode:?}") _key='ESC' ;; # ESC or C key (allowed)
       '') continue ;;                                # Enter key (ignored)
       *)
-        ui_msg 'Invalid choice!!!'
+        printf 'Invalid choice!!!'
         continue
         ;; # NOT allowed
     esac
@@ -1110,14 +1131,18 @@ choose_read_with_timeout()
 choose_read()
 {
   local _key
+  if test "${RECOVERY_OUTPUT:?}" = 'true'; then return 1; fi
 
   while true; do
     _key=''
     # shellcheck disable=SC3045
     IFS='' read -r -s -n '1' _key || {
+      ui_msg_empty_line
       ui_warning 'Key detection failed'
+      ui_msg_empty_line
       return 1
     }
+    printf '\r                 \r' # Clean invalid choice message (if printed)
 
     case "${_key?}" in
       '+') ;;                                        # + key (allowed)
@@ -1125,7 +1150,7 @@ choose_read()
       'c' | 'C' | "${_esc_keycode:?}") _key='ESC' ;; # ESC or C key (allowed)
       '') continue ;;                                # Enter key (ignored)
       *)
-        ui_msg 'Invalid choice!!!'
+        printf 'Invalid choice!!!'
         continue
         ;; # NOT allowed
     esac
@@ -1167,7 +1192,7 @@ choose_inputevent()
       115) ;;          # Vol + key (allowed)
       114) ;;          # Vol - key (allowed)
       *)
-        ui_msg 'Invalid choice!!!'
+        ui_msg "Invalid choice!!! Key code: ${_key:-}"
         continue
         ;; # NOT allowed
     esac
@@ -1213,7 +1238,71 @@ choose()
   return "${_last_status:?}"
 }
 
+_live_setup_choice_msg()
+{
+  ui_msg '---------------------------------------------------'
+  ui_msg 'INFO: Select the VOLUME + key to enable live setup.'
+  ui_msg '---------------------------------------------------'
+
+  if test -n "${1:-}"; then
+    ui_msg "Waiting input for ${1:?} seconds..."
+  else
+    ui_msg "Waiting input..."
+  fi
+}
+
+live_setup_choice()
+{
+  # Currently we don't handle this case properly so return in this case
+  if test "${RECOVERY_OUTPUT:?}" != 'true' && test "${DEBUG_LOG_ENABLED}" -eq 1; then
+    return
+  fi
+
+  LIVE_SETUP_ENABLED='false'
+  if test "${LIVE_SETUP_ALLOWED:?}" = 'true'; then
+    if test "${LIVE_SETUP_DEFAULT:?}" -ne 0; then
+      LIVE_SETUP_ENABLED='true'
+    elif test "${LIVE_SETUP_TIMEOUT:?}" -gt 0; then
+
+      # Check if STDIN (0) is valid
+      if test -t 0 && {
+        test "${ZIP_INSTALL:?}" = 'true' || test "${TEST_INSTALL:-false}" != 'false'
+      }; then
+        _live_setup_choice_msg "$((LIVE_SETUP_TIMEOUT + 3))"
+        choose_read_with_timeout "$((LIVE_SETUP_TIMEOUT + 3))"
+      elif "${KEYCHECK_ENABLED}"; then
+        _live_setup_choice_msg "${LIVE_SETUP_TIMEOUT}"
+        choose_keycheck_with_timeout "${LIVE_SETUP_TIMEOUT}"
+      else
+        _live_setup_choice_msg
+        choose_inputevent
+      fi
+      if test "${?}" = '3'; then LIVE_SETUP_ENABLED='true'; fi
+
+    fi
+  fi
+  readonly LIVE_SETUP_ENABLED
+
+  if test "${LIVE_SETUP_ENABLED:?}" = 'true'; then
+    ui_msg 'LIVE SETUP ENABLED!'
+
+    if test "${DEBUG_LOG_ENABLED:?}" -ne 1; then
+      choose 'Do you want to enable the debug log?' '+) Yes' '-) No'
+      if test "${?}" = '3'; then
+        enable_debug_log
+      fi
+    fi
+  fi
+}
+
 # Other
+kill_app()
+{
+  if command -v am 1> /dev/null; then
+    am force-stop "${1:?}" 2> /dev/null || am kill "${1:?}" 2> /dev/null || true
+  fi
+}
+
 parse_busybox_version()
 {
   head -n1 | grep -oE 'BusyBox v[0-9]+\.[0-9]+\.[0-9]+' | cut -d 'v' -f 2
@@ -1233,24 +1322,41 @@ remove_ext()
 enable_debug_log()
 {
   if test "${DEBUG_LOG_ENABLED}" -eq 1; then return; fi
-  DEBUG_LOG_ENABLED=1
+  export DEBUG_LOG_ENABLED=1
 
   ui_debug "Creating log: ${LOG_PATH:?}"
   touch "${LOG_PATH:?}" || {
     ui_warning "Unable to write the log file at: ${LOG_PATH:-}"
-    DEBUG_LOG_ENABLED=0
+    export DEBUG_LOG_ENABLED=0
     return
   }
 
-  exec 3>&1 4>&2 # Backup stdout and stderr
+  # If they are already in use, then use alternatives
+  if {
+    command 1>&6 || command 1>&7
+  } 2> /dev/null; then
+    export ALTERNATIVE_FDS=1
+    # shellcheck disable=SC3023
+    exec 88>&1 89>&2 # Backup stdout and stderr
+  else
+    export ALTERNATIVE_FDS=0
+    exec 6>&1 7>&2 # Backup stdout and stderr
+  fi
   exec 1>> "${LOG_PATH:?}" 2>&1
 }
 
 disable_debug_log()
 {
-  if test "${DEBUG_LOG_ENABLED}" -eq 0; then return; fi
-  DEBUG_LOG_ENABLED=0
-  exec 1>&3 2>&4 # Restore stdout and stderr
+  if test "${DEBUG_LOG_ENABLED}" -ne 1; then return; fi
+  export DEBUG_LOG_ENABLED=0
+  if test "${ALTERNATIVE_FDS:?}" -eq 0; then
+    exec 1>&6 2>&7 # Restore stdout and stderr
+    exec 6>&- 7>&-
+  else
+    exec 1>&88 2>&89 # Restore stdout and stderr
+    # shellcheck disable=SC3023
+    exec 88>&- 89>&-
+  fi
 }
 
 # Find test: this is useful to test 'find' - if every file/folder, even the ones with spaces, is displayed in a single line then your version is good
