@@ -45,7 +45,7 @@ if test "$(whoami || id -un || true)" != 'root'; then
       ui_show_error 'Unable to find myself'
       exit 3
     }
-    exec su -c "AUTO_ELEVATED=true sh -- '${ZIP_INSTALL_SCRIPT:?}' \"\${@}\"" -- 0 -- _ "${@}" || ui_show_error 'failed: exec'
+    exec su -c "AUTO_ELEVATED=true DEBUG_LOG='${DEBUG_LOG:-0}' sh -- '${ZIP_INSTALL_SCRIPT:?}' \"\${@}\"" -- 0 -- _ "${@}" || ui_show_error 'failed: exec'
     exit 127
 
   fi
@@ -58,9 +58,8 @@ if test -z "${1:-}"; then
   ui_show_error 'You must specify the ZIP file to install'
   exit 5
 fi
-ZIPFILE="${1:?}"
-unset SCRIPT_NAME
 
+unset SCRIPT_NAME
 _clean_at_exit()
 {
   if test -n "${SCRIPT_NAME:-}" && test -e "${SCRIPT_NAME:?}"; then
@@ -88,18 +87,20 @@ elif test -e '/dev'; then
   }
   chmod 01775 '/dev/tmp' || {
     ui_show_error "chmod failed on '/dev/tmp'"
+    rmdir '/dev/tmp' 2> /dev/null || true
     exit 10
   }
   TMPDIR='/dev/tmp'
 fi
 
 if test -z "${TMPDIR:-}" || test ! -w "${TMPDIR:?}"; then
-  ui_show_error 'Unable to create a temp folder'
+  ui_show_error 'Unable to find a temp folder'
   exit 11
 fi
 export TMPDIR
 
 SCRIPT_NAME="${TMPDIR:?}/update-binary.sh" || exit 12
+ZIPFILE="${1:?}"
 unzip -p -qq "${ZIPFILE:?}" 'META-INF/com/google/android/update-binary' 1> "${SCRIPT_NAME:?}" || {
   ui_show_error 'Failed to extract update-binary'
   exit 13
