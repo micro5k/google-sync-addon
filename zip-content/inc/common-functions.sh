@@ -369,6 +369,7 @@ initialize()
 
   if is_mounted_read_only "${SYS_MOUNTPOINT:?}"; then
     ui_msg "INFO: The '${SYS_MOUNTPOINT:-}' mount point is read-only, it will be remounted"
+    ui_msg_empty_line
     remount_read_write "${SYS_MOUNTPOINT:?}" || ui_error "Remounting of '${SYS_MOUNTPOINT:-}' failed"
   fi
 
@@ -1085,7 +1086,8 @@ choose_keycheck()
 choose_read_with_timeout()
 {
   local _key _status
-  if test "${RECOVERY_OUTPUT:?}" = 'true'; then return 1; fi
+  if test ! -t 0; then return 1; fi
+  if test "${RECOVERY_OUTPUT:?}" = 'true' && test "${TEST_INSTALL:-false}" = 'false'; then return 1; fi
 
   while true; do
     _key=''
@@ -1131,7 +1133,8 @@ choose_read_with_timeout()
 choose_read()
 {
   local _key
-  if test "${RECOVERY_OUTPUT:?}" = 'true'; then return 1; fi
+  if test ! -t 0; then return 1; fi
+  if test "${RECOVERY_OUTPUT:?}" = 'true' && test "${TEST_INSTALL:-false}" = 'false'; then return 1; fi
 
   while true; do
     _key=''
@@ -1217,24 +1220,25 @@ choose_inputevent()
 choose()
 {
   local _last_status=0
-  while true; do
-    ui_msg "QUESTION: ${1:?}"
-    ui_msg "${2:?}"
-    ui_msg "${3:?}"
-    if test "${ZIP_INSTALL:?}" = 'true' || test "${TEST_INSTALL:-false}" != 'false'; then
-      choose_read "${@}"
-    elif "${KEYCHECK_ENABLED:?}"; then
-      choose_keycheck "${@}"
-    else
-      choose_inputevent "${@}"
-    fi
-    _last_status="${?}"
-    if test "${_last_status:?}" -eq 123; then
-      ui_msg 'Invalid choice!!!'
-    else
-      break
-    fi
-  done
+
+  ui_msg "QUESTION: ${1:?}"
+  ui_msg "${2:?}"
+  ui_msg "${3:?}"
+
+  if {
+    test "${ZIP_INSTALL:?}" = 'true' || test "${TEST_INSTALL:-false}" != 'false'
+  } && test -t 0; then # Check if STDIN (0) is valid
+    choose_read "${@}"
+  elif "${KEYCHECK_ENABLED:?}"; then
+    choose_keycheck "${@}"
+  else
+    choose_inputevent "${@}"
+  fi
+  _last_status="${?}"
+  if test "${_last_status:?}" -eq 123; then
+    ui_msg 'Invalid choice!!!'
+  fi
+
   return "${_last_status:?}"
 }
 
@@ -1253,21 +1257,21 @@ _live_setup_choice_msg()
 
 live_setup_choice()
 {
+  LIVE_SETUP_ENABLED='false'
+
   # Currently we don't handle this case properly so return in this case
   if test "${RECOVERY_OUTPUT:?}" != 'true' && test "${DEBUG_LOG_ENABLED}" -eq 1; then
     return
   fi
 
-  LIVE_SETUP_ENABLED='false'
   if test "${LIVE_SETUP_ALLOWED:?}" = 'true'; then
     if test "${LIVE_SETUP_DEFAULT:?}" -ne 0; then
       LIVE_SETUP_ENABLED='true'
     elif test "${LIVE_SETUP_TIMEOUT:?}" -gt 0; then
 
-      # Check if STDIN (0) is valid
-      if test -t 0 && {
+      if {
         test "${ZIP_INSTALL:?}" = 'true' || test "${TEST_INSTALL:-false}" != 'false'
-      }; then
+      } && test -t 0; then # Check if STDIN (0) is valid
         _live_setup_choice_msg "$((LIVE_SETUP_TIMEOUT + 3))"
         choose_read_with_timeout "$((LIVE_SETUP_TIMEOUT + 3))"
       elif "${KEYCHECK_ENABLED}"; then
@@ -1286,7 +1290,7 @@ live_setup_choice()
   if test "${LIVE_SETUP_ENABLED:?}" = 'true'; then
     ui_msg 'LIVE SETUP ENABLED!'
 
-    if test "${DEBUG_LOG_ENABLED:?}" -ne 1; then
+    if test "${DEBUG_LOG_ENABLED:?}" -ne 1 && test "${RECOVERY_OUTPUT:?}" = 'true'; then
       choose 'Do you want to enable the debug log?' '+) Yes' '-) No'
       if test "${?}" = '3'; then
         enable_debug_log
