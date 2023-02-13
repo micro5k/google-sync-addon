@@ -25,8 +25,14 @@ if test -z "${OUTFD:-}" || test "${OUTFD:?}" -lt 1; then
   abort 'Missing or invalid OUTFD variable' 2> /dev/null || exit 1
 fi
 RECOVERY_PIPE="/proc/self/fd/${OUTFD:?}"
-if test -z "${ZIPFILE:-}"; then ui_error 'Missing ZIPFILE variable'; fi
-if test -z "${TMPDIR:-}" || test ! -e "${TMPDIR:?}"; then ui_error 'The temp folder is missing (2)'; fi
+if test -z "${ZIPFILE:-}"; then
+  printf 1>&2 '%s\n' 'Missing ZIPFILE variable'
+  abort 'Missing ZIPFILE variable' 2> /dev/null || exit 1
+fi
+if test -z "${TMPDIR:-}" || test ! -e "${TMPDIR:?}"; then
+  printf 1>&2 '%s\n' 'The temp folder is missing (2)'
+  abort 'The temp folder is missing (2)' 2> /dev/null || exit 1
+fi
 
 export BOOTMODE
 export OUTFD
@@ -41,21 +47,23 @@ unset REPLACE
 
 SKIPUNZIP=1
 ASH_STANDALONE=1
+readonly SKIPUNZIP ASH_STANDALONE
 export SKIPUNZIP ASH_STANDALONE
 
 ### GLOBAL VARIABLES ###
 
-if test "${4:-}" = 'zip-install'; then readonly ZIP_INSTALL='true'; else readonly ZIP_INSTALL='false'; fi
+export DEBUG_LOG_ENABLED=0
 
-if test "${ZIP_INSTALL:?}" = 'true' || test "${BOOTMODE:?}" = 'true' || test "${OUTFD:?}" = '1'; then
+readonly RECOVERY_API_VER="${1:-}"
+if test "${4:-}" = 'zip-install'; then readonly ZIP_INSTALL='true'; else readonly ZIP_INSTALL='false'; fi
+export RECOVERY_API_VER ZIP_INSTALL
+
+if test "${ZIP_INSTALL:?}" = 'true' || test "${BOOTMODE:?}" = 'true' || test "${OUTFD:?}" -le 2; then
   readonly RECOVERY_OUTPUT='false'
 else
   readonly RECOVERY_OUTPUT='true'
 fi
-
-readonly RECOVERY_API_VER="${1:-}"
-
-export ZIP_INSTALL RECOVERY_OUTPUT RECOVERY_API_VER
+export RECOVERY_OUTPUT
 
 ZIP_PATH="$(dirname "${ZIPFILE:?}")"
 export ZIP_PATH
@@ -104,7 +112,6 @@ ui_debug()
   printf '%s\n' "${1?}"
 }
 
-export DEBUG_LOG_ENABLED=0
 enable_debug_log()
 {
   if test "${DEBUG_LOG_ENABLED}" -eq 1; then return; fi
