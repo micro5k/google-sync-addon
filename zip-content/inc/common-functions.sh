@@ -388,6 +388,7 @@ initialize()
 
     if is_mounted "${DATA_PATH:?}"; then
       DATA_INIT_STATUS=1
+      ui_debug "Mounted: ${DATA_PATH:-}"
     else
       ui_warning "The data partition cannot be mounted, so updates of installed / removed apps cannot be deleted and their Dalvik cache cannot be cleaned, but it doesn't matter if you do a factory reset"
     fi
@@ -1203,7 +1204,7 @@ choose_inputevent()
     break
   done
 
-  ui_msg "Key code: ${_key:-}"
+  #ui_msg "Key code: ${_key:-}"
   # 102 Menu
   # 114 Vol -
   # 115 Vol +
@@ -1211,8 +1212,14 @@ choose_inputevent()
   #_choose_inputevent_remapper "${_key:?}"
   #return "${?}"
   if test "${_key?}" -eq 115; then
+    ui_msg_empty_line
+    ui_msg "Key press: +"
+    ui_msg_empty_line
     return 3
   elif test "${_key?}" -eq 114; then
+    ui_msg_empty_line
+    ui_msg "Key press: -"
+    ui_msg_empty_line
     return 2
   fi
 }
