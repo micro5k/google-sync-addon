@@ -912,16 +912,17 @@ write_file_list()
 }
 
 # Input related functions
-_find_hardware_keys()
+_find_input_device()
 {
+  local _last_device_name=''
+
   if test ! -e '/proc/bus/input/devices'; then return 1; fi # NOT found
 
-  local _last_device_name=''
   # shellcheck disable=SC2002
   cat '/proc/bus/input/devices' | while IFS=': ' read -r line_type full_line; do
     if test "${line_type?}" = 'N'; then
       _last_device_name="${full_line?}"
-    elif test "${line_type?}" = 'H' && test "${_last_device_name?}" = 'Name="gpio-keys"'; then
+    elif test "${line_type?}" = 'H' && test "${_last_device_name?}" = "Name=\"${1:?}\""; then
 
       local _found=0
       printf '%s' "${full_line?}" | cut -d '=' -f 2 | while IFS='' read -r my_line; do
@@ -942,10 +943,55 @@ _find_hardware_keys()
   return 1                                # NOT found
 }
 
+_find_hardware_keys()
+{
+  if test "${1:?}" = "${INPUT_DEVICE_NAME:-}" && test -n "${INPUT_DEVICE_PATH:-}"; then return 0; fi
+
+  INPUT_DEVICE_NAME="${1:?}"
+  INPUT_DEVICE_PATH=''
+
+  local _input_device_event
+  if _input_device_event="$(_find_input_device "${INPUT_DEVICE_NAME:?}")" && test -e "/dev/input/${_input_device_event:?}"; then
+    INPUT_DEVICE_PATH="/dev/input/${_input_device_event:?}"
+    if test "${DEBUG_LOG_ENABLED:?}" -eq 1; then ui_debug "Found ${INPUT_DEVICE_NAME:-} device at: ${INPUT_DEVICE_PATH:-}"; fi
+
+    # Set the default values, useful when the parsing fails
+    INPUT_CODE_VOLUME_UP='115'
+    INPUT_CODE_VOLUME_DOWN='114'
+    INPUT_CODE_POWER='116'
+    INPUT_CODE_HOME='102'
+
+    if test -e "/system/usr/keylayout/${INPUT_DEVICE_NAME:?}.kl"; then
+      while IFS=' ' read -r key_type key_code key_name _; do
+        if test "${key_type:-}" != 'key'; then continue; fi
+
+        if test -z "${key_name:-}" || test -z "${key_code:-}"; then
+          ui_warning "Missing key code, debug info: '${key_type:-}' '${key_code:-}' '${key_name:-}'"
+          continue
+        fi
+
+        case "${key_name:?}" in
+          'VOLUME_UP') INPUT_CODE_VOLUME_UP="${key_code:?}" ;;
+          'VOLUME_DOWN') INPUT_CODE_VOLUME_DOWN="${key_code:?}" ;;
+          'POWER') INPUT_CODE_POWER="${key_code:?}" ;;
+          'HOME') INPUT_CODE_HOME="${key_code:?}" ;;
+          *) ui_debug "Unknown key: ${key_name:-}" ;;
+        esac
+      done 0< "/system/usr/keylayout/${INPUT_DEVICE_NAME:?}.kl" || ui_warning "Failed parsing '/system/usr/keylayout/${INPUT_DEVICE_NAME:-}.kl'"
+    else
+      ui_debug "Missing keylayout: '/system/usr/keylayout/${INPUT_DEVICE_NAME:-}.kl'"
+    fi
+
+    return 0
+  fi
+
+  return 1
+}
+
 _parse_input_event()
 {
   # shellcheck disable=SC2002
-  cat "/dev/input/${1:?}" | hexdump -n 14 -d | while IFS=' ' read -r _ _ _ _ _ _ cur_button key_down _; do
+  cat "${INPUT_DEVICE_PATH:?}" | hexdump -d -n 14 | while IFS=' ' read -r _ _ _ _ _ _ cur_button key_down _; do
     if test "${key_down:-0}" -ne 1; then return 85; fi
     if test -n "${cur_button:-}" && printf '%.0f' "${cur_button:?}"; then return 4; fi
   done
@@ -996,11 +1042,12 @@ _timeout_compat()
 {
   local _status _timeout_ver _timeout_secs
 
-  _timeout_ver="$(timeout --help 2>&1 | parse_busybox_version)" || _timeout_ver=''
+  # timeout may return failure when displaying "--help" so be sure to ignore it
+  _timeout_ver="$({ timeout --help 2>&1 || true; } | parse_busybox_version)" || _timeout_ver=''
   _timeout_secs="${1:?}" || ui_error 'Missing "secs" parameter for _timeout_compat'
   shift
 
-  if test -z "${_timeout_ver?}" || test "$(numerically_comparable_version "${_timeout_ver:?}" || true)" -ge "$(numerically_comparable_version '1.30.0' || true)"; then
+  if test -z "${_timeout_ver:-}" || test "$(numerically_comparable_version "${_timeout_ver:?}" || true)" -ge "$(numerically_comparable_version '1.30.0' || true)"; then
     timeout -- "${_timeout_secs:?}" "${@:?}"
     _status="${?}"
   else
@@ -1056,9 +1103,12 @@ choose_keycheck_with_timeout()
   _status="${?}"
 
   if test "${_status:?}" -eq 124; then
+    ui_msg_empty_line
     ui_msg 'Key: No key pressed'
+    ui_msg_empty_line
     return 0
   elif test "${_status:?}" -eq 127 || test "${_status:?}" -eq 132; then
+    true # This is just to waste some time otherwise the warning about "timeout" failure may appear earlier than the message
     ui_msg 'Fallbacking to manual input parsing, waiting input...'
     export KEYCHECK_ENABLED='false'
     choose_inputevent
@@ -1172,19 +1222,19 @@ choose_read()
 
 choose_inputevent()
 {
-  local _key _hard_keys_event _status
+  local _key _status
 
-  if _hard_keys_event="$(_find_hardware_keys)" && test -e "/dev/input/${_hard_keys_event:?}"; then
-    : # OK
-  else
+  _find_hardware_keys 'gpio-keys' || {
+    ui_msg_empty_line
     ui_warning 'Key detection failed'
+    ui_msg_empty_line
     return 1
-  fi
+  }
 
   while true; do
     _key=''
     _status=0
-    _key="$(_parse_input_event "${_hard_keys_event:?}")" || _status="${?}"
+    _key="$(_parse_input_event)" || _status="${?}"
 
     case "${_status:?}" in
       4) ;;           # Key down event read (allowed)
@@ -1196,9 +1246,9 @@ choose_inputevent()
     esac
 
     case "${_key?}" in
-      116) continue ;; # Power key (ignored)
-      115) ;;          # Vol + key (allowed)
-      114) ;;          # Vol - key (allowed)
+      "${INPUT_CODE_VOLUME_UP:?}") ;;      # Vol + key (allowed)
+      "${INPUT_CODE_VOLUME_DOWN:?}") ;;    # Vol - key (allowed)
+      "${INPUT_CODE_POWER:?}") continue ;; # Power key (ignored)
       *)
         ui_msg "Invalid choice!!! Key code: ${_key:-}"
         continue
@@ -1208,24 +1258,23 @@ choose_inputevent()
     break
   done
 
-  #ui_msg "Key code: ${_key:-}"
-  # 102 Menu
-  # 114 Vol -
-  # 115 Vol +
-  # 116 Power
-  #_choose_inputevent_remapper "${_key:?}"
-  #return "${?}"
-  if test "${_key?}" -eq 115; then
+  if test "${_key?}" = "${INPUT_CODE_VOLUME_UP:?}"; then
     ui_msg_empty_line
-    ui_msg "Key press: + (115)"
+    ui_msg "Key press: + (${INPUT_CODE_VOLUME_UP:-})"
     ui_msg_empty_line
     return 3
-  elif test "${_key?}" -eq 114; then
+  elif test "${_key?}" = "${INPUT_CODE_VOLUME_DOWN:?}"; then
     ui_msg_empty_line
-    ui_msg "Key press: - (114)"
+    ui_msg "Key press: - (${INPUT_CODE_VOLUME_DOWN:-})"
     ui_msg_empty_line
     return 2
+  else
+    ui_error "choose_inputevent failed, key code: ${_key:-}"
   fi
+
+  #ui_msg "Key code: ${_key:-}"
+  #_choose_inputevent_remapper "${_key:?}"
+  #return "${?}"
 }
 
 choose()
@@ -1296,6 +1345,7 @@ live_setup_choice()
 
   if test "${LIVE_SETUP_ENABLED:?}" = 'true'; then
     ui_msg 'LIVE SETUP ENABLED!'
+    ui_msg_empty_line
 
     if test "${DEBUG_LOG_ENABLED:?}" -ne 1 && test "${RECOVERY_OUTPUT:?}" = 'true'; then
       choose 'Do you want to enable the debug log?' '+) Yes' '-) No'
@@ -1340,7 +1390,7 @@ enable_app()
 
 parse_busybox_version()
 {
-  head -n1 | grep -oE 'BusyBox v[0-9]+\.[0-9]+\.[0-9]+' | cut -d 'v' -f 2
+  grep -m 1 -o -e 'BusyBox v[0-9]*\.[0-9]*\.[0-9]*' | cut -d 'v' -f 2
 }
 
 numerically_comparable_version()
