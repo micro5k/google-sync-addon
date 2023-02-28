@@ -68,7 +68,7 @@ fi
 
 # Info
 ui_msg '------------------'
-ui_msg 'Google Sync Add-on'
+ui_msg 'Google Sync add-on'
 ui_msg "${install_version}"
 ui_msg '(by ale5000)'
 ui_msg '------------------'
