@@ -1,0 +1,1 @@
+Google Sync add-on is a flashable zip created for a simple installation of Google sync adapters on Android.

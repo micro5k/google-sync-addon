@@ -1,0 +1,1 @@
+It installs Google sync adapters on Android.
