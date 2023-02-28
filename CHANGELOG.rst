@@ -29,7 +29,7 @@ All notable changes to this project will be documented in this file.
 `1.0.3-beta`_
 -------------
 - Updated Google Contacts Sync to 8.0.0 for Nougat (tested)
-- Improved Google Sync Add-on / GApps uninstaller
+- Improved Google Sync add-on / GApps uninstaller
 
 `1.0.2-alpha`_
 --------------
