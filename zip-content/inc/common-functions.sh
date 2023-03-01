@@ -1302,11 +1302,25 @@ choose()
   return "${_last_status:?}"
 }
 
+write_separator_line()
+{
+  if test "${#2}" -ne 1; then ui_warning 'Invalid separator character'; return 1; fi
+  printf '%*s' "${1:?}" '' | tr -- ' ' "${2:?}"
+}
+
 _live_setup_choice_msg()
 {
-  ui_msg '---------------------------------------------------'
-  ui_msg 'INFO: Select the VOLUME + key to enable live setup.'
-  ui_msg '---------------------------------------------------'
+  local _msg _sep
+  if test "${INPUT_FROM_TERMINAL:?}" = 'true'; then
+    _msg='INFO: Press the + sign button on your keyboard to enable live setup.'
+  else
+    _msg='INFO: Press the VOLUME + key to enable live setup.'
+  fi
+  _sep="$(write_separator_line "${#_msg}" '-')" || _sep='---'
+
+  ui_msg "${_sep:?}"
+  ui_msg "${_msg:?}"
+  ui_msg "${_sep:?}"
 
   if test -n "${1:-}"; then
     ui_msg "Waiting input for ${1:?} seconds..."
