@@ -67,11 +67,11 @@ else
 fi
 
 # Info
-ui_msg "$(write_separator_line "${#install_name}" '-')"
+ui_msg "$(write_separator_line "${#install_name}" '-' || true)"
 ui_msg "${install_name:?}"
 ui_msg "${install_version:?}"
 ui_msg "(by ${install_author:?})"
-ui_msg "$(write_separator_line "${#install_name}" '-')"
+ui_msg "$(write_separator_line "${#install_name}" '-' || true)"
 
 ui_msg "Boot mode: ${BOOTMODE:?}"
 ui_msg "Sideload: ${SIDELOAD:?}"
@@ -89,7 +89,7 @@ ui_msg "System path: ${SYS_PATH:?}"
 ui_msg "Priv-app path: ${PRIVAPP_PATH:?}"
 ui_msg_empty_line
 ui_msg "Android root ENV: ${ANDROID_ROOT:-}"
-ui_msg "$(write_separator_line "${#install_name}" '-')"
+ui_msg "$(write_separator_line "${#install_name}" '-' || true)"
 ui_msg_empty_line
 
 # Extracting
