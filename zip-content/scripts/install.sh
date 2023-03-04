@@ -34,14 +34,7 @@ TMP_PATH="$2"
 
 initialize
 
-package_extract_file 'module.prop' "${TMP_PATH}/module.prop"
-install_id="$(simple_get_prop 'id' "${TMP_PATH}/module.prop")" || ui_error 'Failed to parse id'
-install_name="$(simple_get_prop 'name' "${TMP_PATH}/module.prop")" || ui_error 'Failed to parse name'
-install_version="$(simple_get_prop 'version' "${TMP_PATH}/module.prop")" || ui_error 'Failed to parse version'
-install_version_code="$(simple_get_prop 'versionCode' "${TMP_PATH}/module.prop")" || ui_error 'Failed to parse version code'
-install_author="$(simple_get_prop 'author' "${TMP_PATH}/module.prop")" || ui_error 'Failed to parse author'
-
-INSTALLATION_SETTINGS_FILE="${install_id}.prop"
+INSTALLATION_SETTINGS_FILE="${MODULE_ID:?}.prop"
 API="$(build_getprop 'build\.version\.sdk')"
 readonly API
 
@@ -67,11 +60,11 @@ else
 fi
 
 # Info
-ui_msg "$(write_separator_line "${#install_name}" '-' || true)"
-ui_msg "${install_name:?}"
-ui_msg "${install_version:?}"
-ui_msg "(by ${install_author:?})"
-ui_msg "$(write_separator_line "${#install_name}" '-' || true)"
+ui_msg "$(write_separator_line "${#MODULE_NAME}" '-' || true)"
+ui_msg "${MODULE_NAME:?}"
+ui_msg "${MODULE_VERSION:?}"
+ui_msg "(by ${MODULE_AUTHOR:?})"
+ui_msg "$(write_separator_line "${#MODULE_NAME}" '-' || true)"
 
 ui_msg "Boot mode: ${BOOTMODE:?}"
 ui_msg "Sideload: ${SIDELOAD:?}"
@@ -89,7 +82,7 @@ ui_msg "System path: ${SYS_PATH:?}"
 ui_msg "Priv-app path: ${PRIVAPP_PATH:?}"
 ui_msg_empty_line
 ui_msg "Android root ENV: ${ANDROID_ROOT:-}"
-ui_msg "$(write_separator_line "${#install_name}" '-' || true)"
+ui_msg "$(write_separator_line "${#MODULE_NAME}" '-' || true)"
 ui_msg_empty_line
 
 # Extracting
@@ -135,7 +128,7 @@ fi
 mount_extra_partitions_silent
 
 # Clean previous installations
-delete "${SYS_PATH:?}/etc/zips/${install_id:?}.prop"
+delete "${SYS_PATH:?}/etc/zips/${MODULE_ID:?}.prop"
 
 readonly INSTALLER='true'
 export INSTALLER
@@ -202,8 +195,8 @@ create_dir "${USED_SETTINGS_PATH:?}"
   echo '# SPDX-FileType: OTHER'
   echo ''
   echo 'install.type=flashable-zip'
-  echo "install.version.code=${install_version_code}"
-  echo "install.version=${install_version}"
+  echo "install.version.code=${MODULE_VERCODE:?}"
+  echo "install.version=${MODULE_VERSION:?}"
 } > "${USED_SETTINGS_PATH:?}/${INSTALLATION_SETTINGS_FILE:?}"
 set_perm 0 0 0640 "${USED_SETTINGS_PATH:?}/${INSTALLATION_SETTINGS_FILE:?}"
 
