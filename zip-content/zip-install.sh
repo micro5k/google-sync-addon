@@ -3,39 +3,57 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # SPDX-FileType: SOURCE
 
+readonly ZIPINSTALL_VERSION='0.1'
+
 umask 022 || exit 6
 
 ui_show_error()
 {
-  printf 1>&2 '\033[1;31mERROR: %s\033[0m\n' "${1:?}"
+  printf 1>&2 '\033[1;31mERROR: %s\033[0m\n' "${1:-}"
 }
 
-for _param in "${@}"; do
-  shift
-  if test -z "${_param:-}" || test "${_param:?}" = '--'; then continue; fi # Skip empty parameters
+if test -n "${*:-}"; then
+  for _param in "${@}"; do
+    shift || {
+      ui_show_error 'shift failed'
+      exit 6
+    }
+    # Skip empty parameters or parameters that may get passed due to buggy su implementation
+    if test -z "${_param:-}" || test "${_param:?}" = '--' || test "${_param:?}" = '[su] zip-install.sh'; then continue; fi
 
-  test -e "${_param:?}" || {
-    ui_show_error "ZIP file doesn't exist => '${_param:-}'"
-    exit 7
-  }
+    test -e "${_param:?}" || {
+      ui_show_error "ZIP file doesn't exist => '${_param:-}'"
+      exit 7
+    }
 
-  _param_copy="${_param:?}"
-  _param="$(readlink -f "${_param_copy:?}")" || _param="$(realpath "${_param_copy:?}")" || {
-    ui_show_error "Canonicalization failed => '${_param_copy:-}'"
-    exit 8
-  }
+    _param_copy="${_param:?}"
+    _param="$(readlink -f "${_param_copy:?}")" || _param="$(realpath "${_param_copy:?}")" || {
+      ui_show_error "Canonicalization failed => '${_param_copy:-}'"
+      exit 8
+    }
 
-  set -- "${@}" "${_param:?}"
-done
-unset _param _param_copy
+    set -- "${@}" "${_param:?}" || {
+      ui_show_error 'set failed'
+      exit 6
+    }
+  done
+  unset _param _param_copy
+fi
+
+if test -z "${*:-}"; then
+  ui_show_error 'You must specify the ZIP file to install'
+  exit 5
+fi
 
 if test "$(whoami || id -un || true)" != 'root'; then
   if test "${AUTO_ELEVATED:-false}" = 'false' && {
     test "${FORCE_ROOT:-0}" != '0' || command -v su 1> /dev/null
   }; then
 
+    printf '%s\n' 'Auto-rooting attempt...'
+
     # First check if root is working (0 => root)
-    su -c 'command' -- 0 -- || {
+    su -c 'command' -- 0 -- _ || {
       _status="${?}" # Usually it return 1 or 255 when fail
       ui_show_error 'Auto-rooting failed, you must execute this as root!!!'
       exit "${_status:-2}"
@@ -45,18 +63,13 @@ if test "$(whoami || id -un || true)" != 'root'; then
       ui_show_error 'Unable to find myself'
       exit 3
     }
-    exec su -c "AUTO_ELEVATED=true DEBUG_LOG='${DEBUG_LOG:-0}' FORCE_HW_BUTTONS='${FORCE_HW_BUTTONS:-0}' sh -- '${ZIP_INSTALL_SCRIPT:?}' \"\${@}\"" -- 0 -- _ "${@}" || ui_show_error 'failed: exec'
+    exec su -c "AUTO_ELEVATED=true DEBUG_LOG='${DEBUG_LOG:-0}' FORCE_HW_BUTTONS='${FORCE_HW_BUTTONS:-0}' sh -- '${ZIP_INSTALL_SCRIPT:?}' \"\${@}\"" -- 0 -- '[su] zip-install.sh' "${@}" || ui_show_error 'failed: exec'
     exit 127
 
   fi
 
   ui_show_error 'You must execute this as root!!!'
   exit 4
-fi
-
-if test -z "${1:-}"; then
-  ui_show_error 'You must specify the ZIP file to install'
-  exit 5
 fi
 
 unset SCRIPT_NAME
@@ -112,7 +125,7 @@ test -e "${SCRIPT_NAME:?}" || {
 
 # Use STDERR (2) for recovery messages to avoid possible problems with subshells intercepting output
 STATUS=0
-sh -- "${SCRIPT_NAME:?}" 3 2 "${ZIPFILE:?}" 'zip-install' || STATUS="${?}"
+sh -- "${SCRIPT_NAME:?}" 3 2 "${ZIPFILE:?}" 'zip-install' "${ZIPINSTALL_VERSION:?}" || STATUS="${?}"
 
 _clean_at_exit
 trap - 0 2 3 6 15 || true # Already cleaned, so unset traps

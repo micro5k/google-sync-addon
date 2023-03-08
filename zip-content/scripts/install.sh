@@ -68,7 +68,7 @@ ui_msg "$(write_separator_line "${#MODULE_NAME}" '-' || true)"
 
 ui_msg "Boot mode: ${BOOTMODE:?}"
 ui_msg "Sideload: ${SIDELOAD:?}"
-ui_msg "Zip install: ${ZIP_INSTALL:?}"
+ui_msg "Zip install: ${ZIP_INSTALL:?} (${ZIPINSTALL_VERSION:-})"
 ui_msg "Recovery API ver: ${RECOVERY_API_VER:-}"
 ui_msg_empty_line
 ui_msg "Android API: ${API:?}"
@@ -85,27 +85,35 @@ ui_msg "Android root ENV: ${ANDROID_ROOT:-}"
 ui_msg "$(write_separator_line "${#MODULE_NAME}" '-' || true)"
 ui_msg_empty_line
 
-# Extracting
-ui_msg 'Extracting...'
-custom_package_extract_dir 'origin' "${TMP_PATH:?}"
-custom_package_extract_dir 'files' "${TMP_PATH:?}"
-custom_package_extract_dir 'addon.d' "${TMP_PATH:?}"
+if test "${IS_INSTALLATION:?}" = 'true'; then
+  ui_msg 'Starting installation...'
+  ui_msg_empty_line
 
-# Setting up permissions
-ui_debug 'Setting up permissions...'
-set_std_perm_recursive "${TMP_PATH:?}/origin"
-set_std_perm_recursive "${TMP_PATH:?}/files"
-if test -e "${TMP_PATH:?}/addon.d"; then set_std_perm_recursive "${TMP_PATH:?}/addon.d"; fi
-set_perm 0 0 0755 "${TMP_PATH:?}/addon.d/00-1-google-sync.sh"
+  # Extracting
+  ui_msg 'Extracting...'
+  custom_package_extract_dir 'origin' "${TMP_PATH:?}"
+  custom_package_extract_dir 'files' "${TMP_PATH:?}"
+  custom_package_extract_dir 'addon.d' "${TMP_PATH:?}"
 
-setup_app 1 'Google Backup Transport 4.4' 'GoogleBackupTransport44' 'priv-app' false false
+  # Setting up permissions
+  ui_debug 'Setting up permissions...'
+  set_std_perm_recursive "${TMP_PATH:?}/origin"
+  set_std_perm_recursive "${TMP_PATH:?}/files"
+  if test -e "${TMP_PATH:?}/addon.d"; then set_std_perm_recursive "${TMP_PATH:?}/addon.d"; fi
+  set_perm 0 0 0755 "${TMP_PATH:?}/addon.d/00-1-google-sync.sh"
 
-setup_app 1 'Google Contacts Sync 4.4' 'GoogleContactsSyncAdapter44' 'app'
-setup_app 1 'Google Contacts Sync 8.1' 'GoogleContactsSyncAdapter8' 'priv-app'
-setup_app 1 'Google Calendar Sync 5.2' 'GoogleCalendarSyncAdapter5' 'app'
-setup_app 1 'Google Calendar Sync 6.0' 'GoogleCalendarSyncAdapter6' 'app'
+  setup_app 1 'Google Backup Transport 4.4' 'GoogleBackupTransport44' 'priv-app' false false
 
-delete "${TMP_PATH:?}/origin"
+  setup_app 1 'Google Contacts Sync 4.4' 'GoogleContactsSyncAdapter44' 'app'
+  setup_app 1 'Google Contacts Sync 8.1' 'GoogleContactsSyncAdapter8' 'priv-app'
+  setup_app 1 'Google Calendar Sync 5.2' 'GoogleCalendarSyncAdapter5' 'app'
+  setup_app 1 'Google Calendar Sync 6.0' 'GoogleCalendarSyncAdapter6' 'app'
+
+  delete "${TMP_PATH:?}/origin"
+else
+  ui_msg 'Starting uninstallation...'
+  ui_msg_empty_line
+fi
 
 # Resetting Android runtime permissions
 if test "${API}" -ge 23; then
@@ -136,6 +144,15 @@ export INSTALLER
 . "${TMP_PATH:?}/uninstall.sh"
 
 unmount_extra_partitions
+
+if test "${IS_INSTALLATION:?}" != 'true'; then
+  deinitialize
+
+  touch "${TMP_PATH:?}/installed"
+  ui_msg 'Uninstallation finished.'
+
+  exit 0
+fi
 
 # Configuring default Android permissions
 if test "${API}" -ge 23; then
