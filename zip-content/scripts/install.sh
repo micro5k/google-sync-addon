@@ -23,12 +23,12 @@ unset CDPATH
 
 ### GLOBAL VARIABLES ###
 
-TMP_PATH="$2"
+TMP_PATH="${2:?}"
 
 ### FUNCTIONS ###
 
 # shellcheck source=SCRIPTDIR/../inc/common-functions.sh
-. "${TMP_PATH}/inc/common-functions.sh" || exit "${?}"
+. "${TMP_PATH:?}/inc/common-functions.sh" || exit "${?}"
 
 ### CODE ###
 
@@ -68,7 +68,11 @@ ui_msg "$(write_separator_line "${#MODULE_NAME}" '-' || true)"
 
 ui_msg "Boot mode: ${BOOTMODE:?}"
 ui_msg "Sideload: ${SIDELOAD:?}"
-ui_msg "Zip install: ${ZIP_INSTALL:?} (${ZIPINSTALL_VERSION:-})"
+if test "${ZIP_INSTALL:?}" = 'true'; then
+  ui_msg "Zip install: ${ZIP_INSTALL:?} (${ZIPINSTALL_VERSION?})"
+else
+  ui_msg "Zip install: ${ZIP_INSTALL:?}"
+fi
 ui_msg "Recovery API ver: ${RECOVERY_API_VER:-}"
 ui_msg_empty_line
 ui_msg "Android API: ${API:?}"
