@@ -60,6 +60,63 @@ compare_start_uname()
   return 1 # NOT found
 }
 
+detect_os()
+{
+  local _os
+  _os="$(uname | LC_ALL=C tr '[:upper:]' '[:lower:]' || true)"
+
+  case "${_os?}" in
+    'linux')
+      _os='linux'
+      ;;
+    'windows'*) # BusyBox-w32 on Windows => Windows_NT (other Windows cases will be detected in the default case)
+      _os='win'
+      ;;
+    'darwin')
+      _os='macos'
+      ;;
+    'freebsd')
+      _os='freebsd'
+      ;;
+    '')
+      _os='unknown'
+      ;;
+
+    *)
+      case "$(uname -o 2> /dev/null | LC_ALL=C tr '[:upper:]' '[:lower:]' || true)" in
+        # Output of uname -o:
+        # - MinGW => Msys
+        # - MSYS => Msys
+        # - Cygwin => Cygwin
+        # - BusyBox-w32 => MS/Windows
+        'msys' | 'cygwin' | 'ms/windows')
+          _os='win'
+          ;;
+        *)
+          printf '%s\n' "${_os:?}" | LC_ALL=C tr -d '/' || ui_error 'Failed to get uname'
+          return 0
+          ;;
+      esac
+      ;;
+  esac
+
+  # Android identify itself as Linux
+  if test "${_os?}" = 'linux'; then
+    case "$(uname -r 2> /dev/null | LC_ALL=C tr '[:upper:]' '[:lower:]' || true)" in # adb shell on Android
+      *'-lineage-'* | *'-leapdroid-'*)
+        _os='android'
+        ;;
+      *)
+        if test "$(uname -o 2> /dev/null | LC_ALL=C tr '[:upper:]' '[:lower:]' || true)" = 'android'; then # Termux on Android
+          _os='android'
+        fi
+        ;;
+    esac
+  fi
+
+  printf '%s\n' "${_os?}"
+}
+
 change_title()
 {
   if test "${CI:-false}" = 'false'; then printf '\033]0;%s\007\r' "${1:?}" && printf '%*s     \r' "${#1}" ''; fi
@@ -140,7 +197,9 @@ dl_generic_with_cookie()
 # 1 => URL
 get_location_header_from_http_request()
 {
-  { "${WGET_CMD:?}" 2>&1 --spider -qSO '-' -U "${DL_UA:?}" --header "${DL_ACCEPT_HEADER:?}" --header "${DL_ACCEPT_LANG_HEADER:?}" -- "${1:?}" || true; } | grep -aom 1 -e 'Location:[[:space:]]*[^[:cntrl:]]*$' | head -n '1' || return "${?}"
+  {
+    "${WGET_CMD:?}" 2>&1 --spider -qSO '-' -U "${DL_UA:?}" --header "${DL_ACCEPT_HEADER:?}" --header "${DL_ACCEPT_LANG_HEADER:?}" -- "${1:?}" || true
+  } | grep -aom 1 -e 'Location:[[:space:]]*[^[:cntrl:]]*$' | head -n '1' || return "${?}"
 }
 
 # 1 => URL; # 2 => Origin header
@@ -167,13 +226,22 @@ dl_type_one()
   }
 
   _referrer="${2:?}"; _url="${1:?}"
-  _result="$(get_link_from_html "${_url:?}" "${_referrer:?}" 'downloadButton.*\"\shref=\"[^"]+\"')" || { report_failure_one "${?}" 'get link 1'; return "${?}"; }
+  _result="$(get_link_from_html "${_url:?}" "${_referrer:?}" 'downloadButton.*\"\shref=\"[^"]+\"')" || {
+    report_failure_one "${?}" 'get link 1'
+    return "${?}"
+  }
   sleep 0.2
   _referrer="${_url:?}"; _url="${_base_url:?}${_result:?}"
-  _result="$(get_link_from_html "${_url:?}" "${_referrer:?}" 'Your\sdownload\swill\sstart\s.+href=\"[^"]+\"')" || { report_failure_one "${?}" 'get link 2'; return "${?}"; }
+  _result="$(get_link_from_html "${_url:?}" "${_referrer:?}" 'Your\sdownload\swill\sstart\s.+href=\"[^"]+\"')" || {
+    report_failure_one "${?}" 'get link 2'
+    return "${?}"
+  }
   sleep 0.2
   _referrer="${_url:?}"; _url="${_base_url:?}${_result:?}"
-  dl_generic "${_url:?}" "${_referrer:?}" "${3:?}" || { report_failure_one "${?}" 'dl'; return "${?}"; }
+  dl_generic "${_url:?}" "${_referrer:?}" "${3:?}" || {
+    report_failure_one "${?}" 'dl'
+    return "${?}"
+  }
 }
 
 report_failure_two()
@@ -188,17 +256,38 @@ dl_type_two()
   if test "${DL_TYPE_2_FAILED:-false}" != 'false'; then return 128; fi
   local _url _domain
 
-  _url="${1:?}" || { report_failure_two "${?}"; return "${?}"; }
-  _domain="$(get_domain_from_url "${_url:?}")" || { report_failure_two "${?}"; return "${?}"; }
-  _base_dm="$(printf '%s' "${_domain:?}" | cut -sd '.' -f '2-3')" || { report_failure_two "${?}"; return "${?}"; }
+  _url="${1:?}" || {
+    report_failure_two "${?}"
+    return "${?}"
+  }
+  _domain="$(get_domain_from_url "${_url:?}")" || {
+    report_failure_two "${?}"
+    return "${?}"
+  }
+  _base_dm="$(printf '%s' "${_domain:?}" | cut -sd '.' -f '2-3')" || {
+    report_failure_two "${?}"
+    return "${?}"
+  }
 
-  _loc_code="$(get_location_header_from_http_request "${_url:?}" | cut -sd '/' -f '5')" || { report_failure_two "${?}" 'get location'; return "${?}"; }
+  _loc_code="$(get_location_header_from_http_request "${_url:?}" | cut -sd '/' -f '5')" || {
+    report_failure_two "${?}" 'get location'
+    return "${?}"
+  }
   sleep 0.2
-  _other_code="$(get_JSON_value_from_ajax_request "${DL_PROT:?}api.${_base_dm:?}/createAccount" "${DL_PROT:?}${_base_dm:?}" 'token')" || { report_failure_two "${?}" 'get JSON'; return "${?}"; }
+  _other_code="$(get_JSON_value_from_ajax_request "${DL_PROT:?}api.${_base_dm:?}/createAccount" "${DL_PROT:?}${_base_dm:?}" 'token')" || {
+    report_failure_two "${?}" 'get JSON'
+    return "${?}"
+  }
   sleep 0.2
-  send_empty_ajax_request "${DL_PROT:?}api.${_base_dm:?}/getContent?contentId=${_loc_code:?}&token=${_other_code:?}&websiteToken=12345" "${DL_PROT:?}${_base_dm:?}" || { report_failure_two "${?}" 'get content'; return "${?}"; }
+  send_empty_ajax_request "${DL_PROT:?}api.${_base_dm:?}/getContent?contentId=${_loc_code:?}&token=${_other_code:?}&websiteToken=12345" "${DL_PROT:?}${_base_dm:?}" || {
+    report_failure_two "${?}" 'get content'
+    return "${?}"
+  }
   sleep 0.3
-  dl_generic_with_cookie "${_url:?}" 'account''Token='"${_other_code:?}" "${3:?}" || { report_failure_two "${?}" 'dl'; return "${?}"; }
+  dl_generic_with_cookie "${_url:?}" 'account''Token='"${_other_code:?}" "${3:?}" || {
+    report_failure_two "${?}" 'dl'
+    return "${?}"
+  }
 }
 
 dl_file()
@@ -257,30 +346,24 @@ dl_list()
 }
 
 # Detect OS and set OS specific info
+PLATFORM="$(detect_os)"
 SEP='/'
 PATHSEP=':'
-_uname_o_saved="$(uname -o)" || ui_error 'Failed to get uname -o'
-if compare_start_uname 'Linux'; then
-  PLATFORM='linux'
-elif compare_start_uname 'Windows_NT' || compare_start_uname 'MINGW32_NT-' || compare_start_uname 'MINGW64_NT-'; then
-  PLATFORM='win'
-  if test "${_uname_o_saved}" = 'Msys'; then
-    :           # MSYS under Windows
-  else
-    PATHSEP=';' # BusyBox under Windows
-  fi
-elif compare_start_uname 'Darwin'; then
-  PLATFORM='macos'
-#elif compare_start_uname 'FreeBSD'; then
-  #PLATFORM='freebsd'
-else
-  ui_error 'Unsupported OS'
+if test "${PLATFORM?}" = 'win' && test "$(uname -o 2> /dev/null | LC_ALL=C tr '[:upper:]' '[:lower:]' || true)" = 'ms/windows'; then
+  PATHSEP=';' # BusyBox-w32
+fi
+readonly PLATFORM SEP PATHSEP
+
+# Set the path of Android SDK if not already set
+if test -z "${ANDROID_SDK_ROOT:-}" && test -n "${LOCALAPPDATA:-}" && test -e "${LOCALAPPDATA:?}/Android/Sdk"; then
+  export ANDROID_SDK_ROOT="${LOCALAPPDATA:?}/Android/Sdk"
 fi
 
 # Set some environment variables
 PS1='\[\033[1;32m\]\u\[\033[0m\]:\[\033[1;34m\]\w\[\033[0m\]\$' # Escape the colors with \[ \] => https://mywiki.wooledge.org/BashFAQ/053
 PROMPT_COMMAND=
 
-TOOLS_DIR="${SCRIPT_DIR:?}${SEP}tools${SEP}${PLATFORM}"
-PATH="${TOOLS_DIR}${PATHSEP}${PATH}"
+UTILS_DIR="${SCRIPT_DIR:?}${SEP:?}utils"
+TOOLS_DIR="${SCRIPT_DIR:?}${SEP:?}tools${SEP:?}${PLATFORM:?}"
+PATH="${UTILS_DIR:?}${PATHSEP:?}${TOOLS_DIR:?}${PATHSEP:?}${PATH}"
 export PATH

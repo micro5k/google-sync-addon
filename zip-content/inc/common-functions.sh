@@ -187,7 +187,7 @@ is_mounted_read_only()
 remount_read_write()
 {
   local _retry='false'
-  if ! mount -o 'remount,rw' "${1:?}" && ! mount -o 'remount,rw' "${1:?}" "${1:?}"; then
+  if ! mount -o 'remount,rw' "${1:?}"; then
     _retry='true'
   fi
 
@@ -331,6 +331,38 @@ _find_and_mount_system()
   readonly SYS_MOUNTPOINT SYS_PATH
 }
 
+_get_local_settings()
+{
+  if test "${LOCAL_SETTINGS_READ:-false}" = 'true'; then return; fi
+
+  LOCAL_SETTINGS=''
+  if test -n "${DEVICE_GETPROP?}"; then
+    ui_debug 'Parsing local settings...'
+    LOCAL_SETTINGS="$("${DEVICE_GETPROP:?}" | grep -e "^\[zip\.${MODULE_ID:?}\.")" || LOCAL_SETTINGS=''
+  fi
+  LOCAL_SETTINGS_READ='true'
+
+  readonly LOCAL_SETTINGS LOCAL_SETTINGS_READ
+  export LOCAL_SETTINGS LOCAL_SETTINGS_READ
+}
+
+parse_setting()
+{
+  local _var
+
+  _get_local_settings
+
+  _var="$(printf '%s\n' "${LOCAL_SETTINGS?}" | grep -m 1 -F -e "[zip.${MODULE_ID:?}.${1:?}]" | cut -d ':' -f '2-' -s)" || _var=''
+  _var="${_var# }"
+  if test "${#_var}" -gt 2; then
+    printf '%s\n' "${_var?}" | cut -c "2-$((${#_var} - 1))"
+    return
+  fi
+
+  # Fallback to the default value
+  printf '%s\n' "${2?}"
+}
+
 initialize()
 {
   SYS_INIT_STATUS=0
@@ -341,6 +373,18 @@ initialize()
     # shellcheck source=SCRIPTDIR/../../recovery-simulator/inc/configure-overrides.sh
     . "${RS_OVERRIDE_SCRIPT:?}" || exit "${?}"
   fi
+
+  package_extract_file 'module.prop' "${TMP_PATH:?}/module.prop"
+  MODULE_ID="$(simple_get_prop 'id' "${TMP_PATH:?}/module.prop")" || ui_error 'Failed to parse id'
+  readonly MODULE_ID
+  export MODULE_ID
+
+  if test "${INPUT_FROM_TERMINAL:?}" = 'true' && test "${LIVE_SETUP_TIMEOUT:?}" -gt 0; then LIVE_SETUP_TIMEOUT="$((LIVE_SETUP_TIMEOUT + 3))"; fi
+  _get_local_settings
+  LIVE_SETUP_DEFAULT="$(parse_setting 'LIVE_SETUP_DEFAULT' "${LIVE_SETUP_DEFAULT:?}")"
+  LIVE_SETUP_TIMEOUT="$(parse_setting 'LIVE_SETUP_TIMEOUT' "${LIVE_SETUP_TIMEOUT:?}")"
+
+  ui_debug ''
 
   live_setup_choice
 
@@ -365,14 +409,12 @@ initialize()
 
   _find_and_mount_system
 
-  package_extract_file 'module.prop' "${TMP_PATH:?}/module.prop"
-  MODULE_ID="$(simple_get_prop 'id' "${TMP_PATH:?}/module.prop")" || ui_error 'Failed to parse id'
   MODULE_NAME="$(simple_get_prop 'name' "${TMP_PATH:?}/module.prop")" || ui_error 'Failed to parse name'
   MODULE_VERSION="$(simple_get_prop 'version' "${TMP_PATH:?}/module.prop")" || ui_error 'Failed to parse version'
   MODULE_VERCODE="$(simple_get_prop 'versionCode' "${TMP_PATH:?}/module.prop")" || ui_error 'Failed to parse version code'
   MODULE_AUTHOR="$(simple_get_prop 'author' "${TMP_PATH:?}/module.prop")" || ui_error 'Failed to parse author'
-  readonly MODULE_ID MODULE_NAME MODULE_VERSION MODULE_VERCODE MODULE_AUTHOR
-  export MODULE_ID MODULE_NAME MODULE_VERSION MODULE_VERCODE MODULE_AUTHOR
+  readonly MODULE_NAME MODULE_VERSION MODULE_VERCODE MODULE_AUTHOR
+  export MODULE_NAME MODULE_VERSION MODULE_VERCODE MODULE_AUTHOR
 
   # Previously installed module version code (0 if wasn't installed)
   PREV_MODULE_VERCODE="$(simple_get_prop 'install.version.code' "${SYS_PATH:?}/etc/zips/${MODULE_ID:?}.prop")" || PREV_MODULE_VERCODE=''
@@ -381,6 +423,7 @@ initialize()
     *) ;;                                     # OK
   esac
   readonly PREV_MODULE_VERCODE
+  export PREV_MODULE_VERCODE
 
   IS_INSTALLATION='true'
   if test "${LIVE_SETUP_ENABLED:?}" = 'true' && test "${PREV_MODULE_VERCODE:?}" -ge 3; then
@@ -516,7 +559,7 @@ ui_msg_sameline_end()
 
 ui_debug()
 {
-  printf '%s\n' "${1?}"
+  printf 1>&2 '%s\n' "${1?}"
 }
 
 # Error checking functions
@@ -1018,12 +1061,28 @@ _find_hardware_keys()
 
 _parse_input_event()
 {
-  # shellcheck disable=SC2002
-  cat "${INPUT_DEVICE_PATH:?}" | hexdump -d -n 14 | while IFS=' ' read -r _ _ _ _ _ _ cur_button key_down _; do
+  local _var _status
+
+  _status=0
+  if test -n "${1:-}"; then
+    _var="$(_timeout_compat "${1:?}" cat -u "${INPUT_DEVICE_PATH:?}" | hexdump -d -n 14)" || _status="${?}"
+  else
+    _var="$(cat -u "${INPUT_DEVICE_PATH:?}" | hexdump -d -n 14)" || _status="${?}"
+  fi
+
+  case "${_status:?}" in
+    0) ;;              # OK
+    141) ;;            # OK. Only the necessary part is read, so the "Broken pipe" is supposed to happen, ignore it
+    124) return 124 ;; # Timed out
+    *) return 2 ;;     # Failure
+  esac
+
+  printf "%s\n" "${_var?}" | while IFS=' ' read -r _ _ _ _ _ _ cur_button key_down _; do
     if test "${key_down:-0}" -ne 1; then return 85; fi
     if test -n "${cur_button:-}" && printf '%.0f' "${cur_button:?}"; then return 4; fi
-  done
-  return "${?}"
+  done || return "${?}"
+
+  return 1
 }
 
 _timeout_exit_code_remapper()
@@ -1051,6 +1110,9 @@ _timeout_exit_code_remapper()
       ui_warning 'timeout returned SIGKILL (128+9)'
       return 1
       ;;
+    141) # SIGPIPE signal (128+13) - Broken pipe
+      return 141
+      ;;
     143) # SIGTERM signal (128+15) - Timed out
       return 124
       ;;
@@ -1060,6 +1122,7 @@ _timeout_exit_code_remapper()
       fi
       ;;
   esac
+  # https://en.wikipedia.org/wiki/Signal_(IPC)#Default_action
 
   ui_msg_empty_line
   ui_warning "timeout returned: ${1:?}"
@@ -1138,10 +1201,11 @@ choose_keycheck_with_timeout()
     ui_msg_empty_line
     return 0
   elif test "${_status:?}" -eq 127 || test "${_status:?}" -eq 132; then
-    true # This is just to waste some time otherwise the warning about "timeout" failure may appear earlier than the message
-    ui_msg 'Fallbacking to manual input parsing, waiting input...'
     export KEYCHECK_ENABLED='false'
-    choose_inputevent
+    true # This is just to waste some time, otherwise the warning about the "timeout" failure may appear after the following message
+
+    ui_msg 'Fallbacking to manual input parsing, waiting input...'
+    choose_inputevent "${@}"
     return "${?}"
   fi
   _key="$(_keycheck_map_keycode_to_key "${_status:?}")" || {
@@ -1264,12 +1328,18 @@ choose_inputevent()
   while true; do
     _key=''
     _status=0
-    _key="$(_parse_input_event)" || _status="${?}"
+    _key="$(_parse_input_event "${1:-}")" || _status="${?}"
 
     case "${_status:?}" in
       4) ;;           # Key down event read (allowed)
       85) continue ;; # Key up event read (ignored)
-      *)              # Event read failed
+      124)
+        ui_msg_empty_line
+        ui_msg 'Key: No key pressed'
+        ui_msg_empty_line
+        return 0
+        ;;
+      *) # Event read failed
         ui_warning 'Key detection failed (2)'
         return 1
         ;;
@@ -1314,6 +1384,7 @@ choose()
   ui_msg "QUESTION: ${1:?}"
   ui_msg "${2:?}"
   ui_msg "${3:?}"
+  shift 3
 
   if test "${INPUT_FROM_TERMINAL:?}" = 'true'; then
     choose_read "${@}"
@@ -1375,14 +1446,14 @@ live_setup_choice()
     elif test "${LIVE_SETUP_TIMEOUT:?}" -gt 0; then
 
       if test "${INPUT_FROM_TERMINAL:?}" = 'true'; then
-        _live_setup_choice_msg "$((LIVE_SETUP_TIMEOUT + 3))"
-        choose_read_with_timeout "$((LIVE_SETUP_TIMEOUT + 3))"
+        _live_setup_choice_msg "${LIVE_SETUP_TIMEOUT}"
+        choose_read_with_timeout "${LIVE_SETUP_TIMEOUT}"
       elif "${KEYCHECK_ENABLED:?}"; then
         _live_setup_choice_msg "${LIVE_SETUP_TIMEOUT}"
         choose_keycheck_with_timeout "${LIVE_SETUP_TIMEOUT}"
       else
-        _live_setup_choice_msg
-        choose_inputevent
+        _live_setup_choice_msg "${LIVE_SETUP_TIMEOUT}"
+        choose_inputevent "${LIVE_SETUP_TIMEOUT}"
       fi
       if test "${?}" = '3'; then LIVE_SETUP_ENABLED='true'; fi
 
