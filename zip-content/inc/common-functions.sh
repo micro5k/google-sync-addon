@@ -186,19 +186,13 @@ is_mounted_read_only()
 
 remount_read_write()
 {
-  local _retry='false'
-  if ! mount -o 'remount,rw' "${1:?}"; then
-    _retry='true'
+  if test -n "${DEVICE_MOUNT:-}"; then
+    "${DEVICE_MOUNT:?}" -o 'remount,rw' "${1:?}" || "${DEVICE_MOUNT:?}" 2> /dev/null -o 'remount,rw' "${1:?}" "${1:?}" || return 1
+  else
+    mount -o 'remount,rw' "${1:?}" || return 1
   fi
 
-  if test "${_retry:?}" = 'true' || is_mounted_read_only "${1:?}"; then
-    if test -n "${DEVICE_MOUNT:-}"; then
-      "${DEVICE_MOUNT:?}" -o 'remount,rw' "${1:?}" || "${DEVICE_MOUNT:?}" -o 'remount,rw' "${1:?}" "${1:?}" || return 1
-      if is_mounted_read_only "${1:?}"; then return 1; fi
-    else
-      return 1
-    fi
-  fi
+  if is_mounted_read_only "${1:?}"; then return 1; fi
 
   return 0
 }
@@ -339,6 +333,9 @@ _get_local_settings()
   if test -n "${DEVICE_GETPROP?}"; then
     ui_debug 'Parsing local settings...'
     LOCAL_SETTINGS="$("${DEVICE_GETPROP:?}" | grep -e "^\[zip\.${MODULE_ID:?}\.")" || LOCAL_SETTINGS=''
+  # elif command -v getprop 1> /dev/null; then # ToDO: Merge all getprop functions and change the name before enabling it
+  #   ui_debug 'Parsing local settings (2)...'
+  #   LOCAL_SETTINGS="$(getprop | grep -e "^\[zip\.${MODULE_ID:?}\.")" || LOCAL_SETTINGS=''
   fi
   LOCAL_SETTINGS_READ='true'
 
@@ -361,6 +358,18 @@ parse_setting()
 
   # Fallback to the default value
   printf '%s\n' "${2?}"
+}
+
+remount_read_write_if_needed()
+{
+  local _mountpoint
+  _mountpoint="$(_canonicalize "${1:?}")"
+
+  if is_mounted "${_mountpoint:?}" && is_mounted_read_only "${_mountpoint:?}"; then
+    ui_msg "INFO: The '${_mountpoint:-}' mount point is read-only, it will be remounted"
+    ui_msg_empty_line
+    remount_read_write "${_mountpoint:?}" || ui_error "Remounting of '${_mountpoint:-}' failed"
+  fi
 }
 
 initialize()
@@ -464,6 +473,11 @@ initialize()
     fi
   fi
   readonly DATA_PATH
+
+  mount_extra_partitions_silent
+  if test -e '/system_ext'; then remount_read_write_if_needed '/system_ext'; fi
+  if test -e '/product'; then remount_read_write_if_needed '/product'; fi
+  if test -e '/vendor'; then remount_read_write_if_needed '/vendor'; fi
 
   unset LAST_MOUNTPOINT
 }
@@ -836,7 +850,7 @@ move_dir_content()
 
 delete()
 {
-  for filename in "${@?}"; do
+  for filename in "${@}"; do
     if test -e "${filename?}"; then
       ui_debug "Deleting '${filename?}'...."
       rm -rf -- "${filename:?}" || ui_error 'Failed to delete files/folders' 103
@@ -846,7 +860,7 @@ delete()
 
 delete_recursive()
 {
-  for filename in "${@?}"; do
+  for filename in "${@}"; do
     if test -e "${filename?}"; then
       ui_debug "Deleting '${filename?}'...."
       rm -rf -- "${filename:?}" || ui_error 'Failed to delete files/folders' 103
@@ -856,7 +870,7 @@ delete_recursive()
 
 delete_recursive_wildcard()
 {
-  for filename in "${@?}"; do
+  for filename in "${@}"; do
     if test -e "${filename?}"; then
       ui_debug "Deleting '${filename?}'...."
       rm -rf -- "${filename:?}" || ui_error 'Failed to delete files/folders' 103
@@ -1141,11 +1155,11 @@ _timeout_compat()
   shift
 
   if test -z "${_timeout_ver:-}" || test "$(numerically_comparable_version "${_timeout_ver:?}" || true)" -ge "$(numerically_comparable_version '1.30.0' || true)"; then
-    timeout -- "${_timeout_secs:?}" "${@:?}"
+    timeout -- "${_timeout_secs:?}" "${@}"
     _status="${?}"
   else
     {
-      timeout -t "${_timeout_secs:?}" -- "${@:?}"
+      timeout -t "${_timeout_secs:?}" -- "${@}"
       _status="${?}"
     } 2> /dev/null
   fi
@@ -1513,7 +1527,7 @@ parse_busybox_version()
 
 numerically_comparable_version()
 {
-  echo "${@:?}" | awk -F. '{ printf("%d%03d%03d%03d\n", $1, $2, $3, $4); }'
+  echo "${@}" | awk -F. '{ printf("%d%03d%03d%03d\n", $1, $2, $3, $4); }'
 }
 
 remove_ext()

@@ -7,10 +7,11 @@
 # REALLY IMPORTANT: A misbehaving flashable zip can damage your real system.
 
 set -e
-# shellcheck disable=SC3040,SC2015
+# shellcheck disable=SC3040,SC3041,SC2015
 {
-  # Unsupported set -o options may cause the shell to exit (even without set -e), so first try them in a subshell to avoid this issue and also handle the set -e case
+  # Unsupported set options may cause the shell to exit (even without set -e), so first try them in a subshell to avoid this issue
   (set -o posix 2> /dev/null) && set -o posix || true
+  (set +H 2> /dev/null) && set +H || true
   (set -o pipefail) && set -o pipefail || true
 }
 
@@ -125,14 +126,14 @@ uname_o_saved="$(uname -o)" || fail_with_msg 'Failed to get uname -o'
 # Check dependencies
 _our_busybox="$(env -- which -- busybox)" || fail_with_msg 'BusyBox is missing'
 if test "${COVERAGE:-false}" != 'false'; then
-  COVERAGE="$(command -v -- bashcov)" || fail_with_msg 'Bashcov is missing'
+  COVERAGE="$(command -v bashcov)" || fail_with_msg 'Bashcov is missing'
 fi
 
 # Get dir of this script
 THIS_SCRIPT_DIR="$(dirname "${THIS_SCRIPT:?}")" || fail_with_msg 'Failed to get script dir'
 unset THIS_SCRIPT
 
-case "${*?}" in
+case "${*}" in
   *'*.zip') fail_with_msg 'The flashable ZIP is missing, you have to build it before being able to test it' ;;
   *) ;;
 esac
@@ -293,7 +294,7 @@ exec 99> >(tee -a "${recovery_logs_dir:?}/recovery-raw.log" "${recovery_logs_dir
 
 flash_zips()
 {
-  for _current_zip_fullpath in "${@?}"; do
+  for _current_zip_fullpath in "${@}"; do
     FLASHABLE_ZIP_NAME="$(basename "${_current_zip_fullpath:?}")" || fail_with_msg 'Failed to get the filename of the flashable ZIP'
     cp -f -- "${_current_zip_fullpath:?}" "${_android_sec_stor:?}/${FLASHABLE_ZIP_NAME:?}" || fail_with_msg 'Failed to copy the flashable ZIP'
 
