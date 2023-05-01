@@ -66,6 +66,9 @@ ui_msg "${MODULE_VERSION:?}"
 ui_msg "(by ${MODULE_AUTHOR:?})"
 ui_msg "$(write_separator_line "${#MODULE_NAME}" '-' || true)"
 
+ui_msg "Device: ${BUILD_DEVICE?}"
+ui_msg "Emulator: ${IS_EMU:?}"
+ui_msg_empty_line
 ui_msg "Boot mode: ${BOOTMODE:?}"
 ui_msg "Sideload: ${SIDELOAD:?}"
 if test "${ZIP_INSTALL:?}" = 'true'; then
@@ -77,6 +80,7 @@ ui_msg "Recovery API ver: ${RECOVERY_API_VER:-}"
 ui_msg_empty_line
 ui_msg "Android API: ${API:?}"
 ui_msg_empty_line
+ui_msg "Verity mode: ${VERITY_MODE:-disabled}"
 ui_msg "Dynamic partitions: ${DYNAMIC_PARTITIONS:?}"
 ui_msg "Current slot: ${SLOT:-no slot}"
 ui_msg "Recov. fake system: ${RECOVERY_FAKE_SYSTEM:?}"

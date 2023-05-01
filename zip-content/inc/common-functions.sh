@@ -312,12 +312,16 @@ _find_and_mount_system()
       deinitialize
 
       ui_msg_empty_line
+      ui_msg "Device: ${BUILD_DEVICE?}"
+      ui_msg_empty_line
+      ui_msg "Verity mode: ${VERITY_MODE:-disabled}"
       ui_msg "Dynamic partitions: ${DYNAMIC_PARTITIONS:?}"
       ui_msg "Current slot: ${SLOT:-no slot}"
       ui_msg "Recov. fake system: ${RECOVERY_FAKE_SYSTEM:?}"
       ui_msg_empty_line
       ui_msg "Android root ENV: ${ANDROID_ROOT:-}"
       ui_msg_empty_line
+
       ui_error "The ROM cannot be found!"
     fi
   fi
@@ -333,9 +337,9 @@ _get_local_settings()
   if test -n "${DEVICE_GETPROP?}"; then
     ui_debug 'Parsing local settings...'
     LOCAL_SETTINGS="$("${DEVICE_GETPROP:?}" | grep -e "^\[zip\.${MODULE_ID:?}\.")" || LOCAL_SETTINGS=''
-  # elif command -v getprop 1> /dev/null; then # ToDO: Merge all getprop functions and change the name before enabling it
-  #   ui_debug 'Parsing local settings (2)...'
-  #   LOCAL_SETTINGS="$(getprop | grep -e "^\[zip\.${MODULE_ID:?}\.")" || LOCAL_SETTINGS=''
+  elif command -v getprop 1> /dev/null; then
+    ui_debug 'Parsing local settings (2)...'
+    LOCAL_SETTINGS="$(getprop | grep -e "^\[zip\.${MODULE_ID:?}\.")" || LOCAL_SETTINGS=''
   fi
   LOCAL_SETTINGS_READ='true'
 
@@ -362,13 +366,22 @@ parse_setting()
 
 remount_read_write_if_needed()
 {
-  local _mountpoint
+  local _mountpoint _required
   _mountpoint="$(_canonicalize "${1:?}")"
+  _required="${2:-true}"
 
   if is_mounted "${_mountpoint:?}" && is_mounted_read_only "${_mountpoint:?}"; then
     ui_msg "INFO: The '${_mountpoint:-}' mount point is read-only, it will be remounted"
     ui_msg_empty_line
-    remount_read_write "${_mountpoint:?}" || ui_error "Remounting of '${_mountpoint:-}' failed"
+    remount_read_write "${_mountpoint:?}" || {
+      if test "${_required:?}" = 'true'; then
+        ui_error "Remounting of '${_mountpoint:-}' failed"
+      else
+        ui_warning "Remounting of '${_mountpoint:-}' failed"
+        ui_msg_empty_line
+        return 1
+      fi
+    }
   fi
 }
 
@@ -384,7 +397,7 @@ initialize()
   fi
 
   package_extract_file 'module.prop' "${TMP_PATH:?}/module.prop"
-  MODULE_ID="$(simple_get_prop 'id' "${TMP_PATH:?}/module.prop")" || ui_error 'Failed to parse id'
+  MODULE_ID="$(simple_file_getprop 'id' "${TMP_PATH:?}/module.prop")" || ui_error 'Failed to parse id'
   readonly MODULE_ID
   export MODULE_ID
 
@@ -416,17 +429,43 @@ initialize()
   readonly SLOT
   export SLOT
 
+  VERITY_MODE="$(simple_getprop 'ro.boot.veritymode')" || VERITY_MODE=''
+  readonly VERITY_MODE
+  export VERITY_MODE
+
+  if BUILD_DEVICE="$(simple_getprop 'ro.product.device')" && is_valid_prop "${BUILD_DEVICE?}"; then
+    :
+  elif BUILD_DEVICE="$(simple_getprop 'ro.build.product')" && is_valid_prop "${BUILD_DEVICE?}"; then
+    :
+  else
+    BUILD_DEVICE=''
+  fi
+  readonly BUILD_DEVICE
+  export BUILD_DEVICE
+
+  IS_EMU='false'
+  case "${BUILD_DEVICE?}" in
+    'windows_x86_64' | 'emu64x')
+      IS_EMU='true'
+      ;;
+    *)
+      if is_valid_prop "$(simple_getprop 'ro.leapdroid.version' || true)"; then IS_EMU='true'; fi
+      ;;
+  esac
+  readonly IS_EMU
+  export IS_EMU
+
   _find_and_mount_system
 
-  MODULE_NAME="$(simple_get_prop 'name' "${TMP_PATH:?}/module.prop")" || ui_error 'Failed to parse name'
-  MODULE_VERSION="$(simple_get_prop 'version' "${TMP_PATH:?}/module.prop")" || ui_error 'Failed to parse version'
-  MODULE_VERCODE="$(simple_get_prop 'versionCode' "${TMP_PATH:?}/module.prop")" || ui_error 'Failed to parse version code'
-  MODULE_AUTHOR="$(simple_get_prop 'author' "${TMP_PATH:?}/module.prop")" || ui_error 'Failed to parse author'
+  MODULE_NAME="$(simple_file_getprop 'name' "${TMP_PATH:?}/module.prop")" || ui_error 'Failed to parse name'
+  MODULE_VERSION="$(simple_file_getprop 'version' "${TMP_PATH:?}/module.prop")" || ui_error 'Failed to parse version'
+  MODULE_VERCODE="$(simple_file_getprop 'versionCode' "${TMP_PATH:?}/module.prop")" || ui_error 'Failed to parse version code'
+  MODULE_AUTHOR="$(simple_file_getprop 'author' "${TMP_PATH:?}/module.prop")" || ui_error 'Failed to parse author'
   readonly MODULE_NAME MODULE_VERSION MODULE_VERCODE MODULE_AUTHOR
   export MODULE_NAME MODULE_VERSION MODULE_VERCODE MODULE_AUTHOR
 
   # Previously installed module version code (0 if wasn't installed)
-  PREV_MODULE_VERCODE="$(simple_get_prop 'install.version.code' "${SYS_PATH:?}/etc/zips/${MODULE_ID:?}.prop")" || PREV_MODULE_VERCODE=''
+  PREV_MODULE_VERCODE="$(simple_file_getprop 'install.version.code' "${SYS_PATH:?}/etc/zips/${MODULE_ID:?}.prop")" || PREV_MODULE_VERCODE=''
   case "${PREV_MODULE_VERCODE:-}" in
     '' | *[!0-9]*) PREV_MODULE_VERCODE='0' ;; # Not installed (empty) or invalid data
     *) ;;                                     # OK
@@ -449,7 +488,26 @@ initialize()
   if is_mounted_read_only "${SYS_MOUNTPOINT:?}"; then
     ui_msg "INFO: The '${SYS_MOUNTPOINT:-}' mount point is read-only, it will be remounted"
     ui_msg_empty_line
-    remount_read_write "${SYS_MOUNTPOINT:?}" || ui_error "Remounting of '${SYS_MOUNTPOINT:-}' failed"
+    remount_read_write "${SYS_MOUNTPOINT:?}" || {
+      deinitialize
+
+      ui_msg_empty_line
+      ui_msg "Device: ${BUILD_DEVICE?}"
+      ui_msg_empty_line
+      ui_msg "Verity mode: ${VERITY_MODE:-disabled}"
+      ui_msg "Dynamic partitions: ${DYNAMIC_PARTITIONS:?}"
+      ui_msg "Current slot: ${SLOT:-no slot}"
+      ui_msg "Recov. fake system: ${RECOVERY_FAKE_SYSTEM:?}"
+      ui_msg_empty_line
+      ui_msg "Android root ENV: ${ANDROID_ROOT:-}"
+      ui_msg_empty_line
+
+      if test "${VERITY_MODE?}" = 'enforcing'; then
+        ui_error "Remounting of '${SYS_MOUNTPOINT:-}' failed, you should DISABLE dm-verity!!!"
+      else
+        ui_error "Remounting of '${SYS_MOUNTPOINT:-}' failed!!!"
+      fi
+    }
   fi
 
   if test ! -w "${SYS_PATH:?}"; then
@@ -475,9 +533,9 @@ initialize()
   readonly DATA_PATH
 
   mount_extra_partitions_silent
-  if test -e '/system_ext'; then remount_read_write_if_needed '/system_ext'; fi
-  if test -e '/product'; then remount_read_write_if_needed '/product'; fi
-  if test -e '/vendor'; then remount_read_write_if_needed '/vendor'; fi
+  if test -e '/product'; then remount_read_write_if_needed '/product' false; fi
+  if test -e '/vendor'; then remount_read_write_if_needed '/vendor' false; fi
+  if test -e '/system_ext'; then remount_read_write_if_needed '/system_ext' false; fi
 
   unset LAST_MOUNTPOINT
 }
@@ -646,20 +704,32 @@ unmount_extra_partitions()
 }
 
 # Getprop related functions
-getprop()
-{
-  (test -e '/sbin/getprop' && /sbin/getprop "ro.$1") || (grep "^ro\.$1=" '/default.prop' | head -n1 | cut -d '=' -f 2)
-}
-
 build_getprop()
 {
   grep "^ro\.$1=" "${TMP_PATH}/build.prop" | head -n1 | cut -d '=' -f 2
 }
 
-simple_get_prop()
+simple_getprop()
+{
+  if test -n "${DEVICE_GETPROP?}"; then
+    "${DEVICE_GETPROP:?}" "${1:?}" || return "${?}"
+  elif command -v getprop 1> /dev/null; then
+    getprop "${1:?}" || return "${?}"
+  else
+    return 1
+  fi
+}
+
+simple_file_getprop()
 {
   if test ! -e "${2:?}"; then return 1; fi
-  grep -m 1 -F -e "${1:?}=" "${2:?}" | cut -d '=' -f 2 -s
+  grep -m 1 -F -e "${1:?}=" -- "${2:?}" | cut -d '=' -f '2-' -s
+}
+
+is_valid_prop()
+{
+  if test -z "${1?}" || test "${1?}" = 'unknown'; then return 1; fi
+  return 0 # Valid
 }
 
 # String related functions

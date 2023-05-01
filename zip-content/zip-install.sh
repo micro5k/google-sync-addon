@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # SPDX-FileType: SOURCE
 
-readonly ZIPINSTALL_VERSION='0.3'
+readonly ZIPINSTALL_VERSION='0.4'
 
 umask 022 || exit 6
 
@@ -61,7 +61,7 @@ if test "$(whoami || id -un || true)" != 'root'; then
       exit 3
     }
     exec su root sh -c "AUTO_ELEVATED=true DEBUG_LOG='${DEBUG_LOG:-0}' FORCE_HW_BUTTONS='${FORCE_HW_BUTTONS:-0}' CI='${CI:-false}' TMPDIR='${TMPDIR:-}' sh -- '${ZIP_INSTALL_SCRIPT:?}' \"\${@}\"" '[su]zip-install.sh' "${@}" || ui_show_error 'failed: exec'
-    exit 127
+    exit "${?}"
   fi
 
   ui_show_error 'You must execute this as root!!!'
