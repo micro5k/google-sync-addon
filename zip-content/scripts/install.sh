@@ -34,6 +34,9 @@ TMP_PATH="${2:?}"
 
 initialize
 
+INSTALL_CONTACTSSYNC="$(parse_setting 'INSTALL_CONTACTSSYNC' "${INSTALL_CONTACTSSYNC:?}")"
+INSTALL_CALENDARSYNC="$(parse_setting 'INSTALL_CALENDARSYNC' "${INSTALL_CALENDARSYNC:?}")"
+
 INSTALLATION_SETTINGS_FILE="${MODULE_ID:?}.prop"
 API="$(build_getprop 'build\.version\.sdk')"
 readonly API
@@ -112,10 +115,10 @@ if test "${IS_INSTALLATION:?}" = 'true'; then
 
   setup_app 1 'Google Backup Transport 4.4' 'GoogleBackupTransport44' 'priv-app' false false
 
-  setup_app 1 'Google Contacts Sync 4.4' 'GoogleContactsSyncAdapter44' 'app'
-  setup_app 1 'Google Contacts Sync 8.1' 'GoogleContactsSyncAdapter8' 'priv-app'
-  setup_app 1 'Google Calendar Sync 5.2' 'GoogleCalendarSyncAdapter5' 'app'
-  setup_app 1 'Google Calendar Sync 6.0' 'GoogleCalendarSyncAdapter6' 'app'
+  setup_app "${INSTALL_CONTACTSSYNC:?}" 'Google Contacts Sync 4.4' 'GoogleContactsSyncAdapter44' 'app'
+  setup_app "${INSTALL_CONTACTSSYNC:?}" 'Google Contacts Sync 8.1' 'GoogleContactsSyncAdapter8' 'priv-app'
+  setup_app "${INSTALL_CALENDARSYNC:?}" 'Google Calendar Sync 5.2' 'GoogleCalendarSyncAdapter5' 'app'
+  setup_app "${INSTALL_CALENDARSYNC:?}" 'Google Calendar Sync 6.0' 'GoogleCalendarSyncAdapter6' 'app'
 
   delete "${TMP_PATH:?}/origin"
 else
