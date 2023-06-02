@@ -68,6 +68,7 @@ _verify_system_partition()
   IFS="${NL:?}"
 
   for _path in ${1?}; do
+    if test -z "${_path:-}"; then continue; fi
     _path="$(_canonicalize "${_path:?}")"
 
     if test -e "${_path:?}/system/build.prop"; then
@@ -105,6 +106,7 @@ _mount_and_verify_system_partition()
   IFS="${NL:?}"
 
   for _path in ${1?}; do
+    if test -z "${_path:-}" || test "${_path:?}" = '/mnt/system'; then continue; fi # Note: '/mnt/system' can only be manually mounted
     _path="$(_canonicalize "${_path:?}")"
     _mount_helper '-o' 'rw' "${_path:?}" || true
 
@@ -399,14 +401,13 @@ initialize()
   readonly MODULE_ID
   export MODULE_ID
 
-  if test "${INPUT_FROM_TERMINAL:?}" = 'true' && test "${LIVE_SETUP_TIMEOUT:?}" -gt 0; then LIVE_SETUP_TIMEOUT="$((LIVE_SETUP_TIMEOUT + 3))"; fi
   _get_local_settings
+
+  if test "${INPUT_FROM_TERMINAL:?}" = 'true' && test "${LIVE_SETUP_TIMEOUT:?}" -gt 0; then LIVE_SETUP_TIMEOUT="$((LIVE_SETUP_TIMEOUT + 3))"; fi
   LIVE_SETUP_DEFAULT="$(parse_setting 'LIVE_SETUP_DEFAULT' "${LIVE_SETUP_DEFAULT:?}")"
   LIVE_SETUP_TIMEOUT="$(parse_setting 'LIVE_SETUP_TIMEOUT' "${LIVE_SETUP_TIMEOUT:?}")"
 
   ui_debug ''
-
-  live_setup_choice
 
   # Some recoveries have a fake system folder when nothing is mounted with just bin, etc and lib / lib64.
   # Usable binaries are under the fake /system/bin so the /system mountpoint mustn't be used while in this recovery.
@@ -432,6 +433,8 @@ initialize()
   export VERITY_MODE
 
   _find_and_mount_system
+
+  live_setup_choice
 
   cp -pf "${SYS_PATH:?}/build.prop" "${TMP_PATH:?}/build.prop" # Cache the file for faster access
 
@@ -1116,7 +1119,7 @@ _find_hardware_keys()
     INPUT_CODE_POWER='116'
     #INPUT_CODE_HOME='102'
 
-    if test -e "/system/usr/keylayout/${INPUT_DEVICE_NAME:?}.kl"; then
+    if test -e "${SYS_PATH:?}/usr/keylayout/${INPUT_DEVICE_NAME:?}.kl"; then
       while IFS=' ' read -r key_type key_code key_name _; do
         if test "${key_type:-}" != 'key'; then continue; fi
 
@@ -1132,9 +1135,9 @@ _find_hardware_keys()
           'HOME') ;; #INPUT_CODE_HOME="${key_code:?}" ;;
           *) ui_debug "Unknown key: ${key_name:-}" ;;
         esac
-      done 0< "/system/usr/keylayout/${INPUT_DEVICE_NAME:?}.kl" || ui_warning "Failed parsing '/system/usr/keylayout/${INPUT_DEVICE_NAME:-}.kl'"
+      done 0< "${SYS_PATH:?}/usr/keylayout/${INPUT_DEVICE_NAME:?}.kl" || ui_warning "Failed parsing '${SYS_PATH:-}/usr/keylayout/${INPUT_DEVICE_NAME:-}.kl'"
     else
-      ui_debug "Missing keylayout: '/system/usr/keylayout/${INPUT_DEVICE_NAME:-}.kl'"
+      ui_debug "Missing keylayout: '${SYS_PATH:-}/usr/keylayout/${INPUT_DEVICE_NAME:-}.kl'"
     fi
 
     return 0
@@ -1548,13 +1551,6 @@ live_setup_choice()
   if test "${LIVE_SETUP_ENABLED:?}" = 'true'; then
     ui_msg 'LIVE SETUP ENABLED!'
     ui_msg_empty_line
-
-    if test "${DEBUG_LOG_ENABLED:?}" -ne 1 && test "${RECOVERY_OUTPUT:?}" = 'true'; then
-      choose 'Do you want to enable the debug log?' '+) Yes' '-) No'
-      if test "${?}" = '3'; then
-        enable_debug_log
-      fi
-    fi
   fi
 }
 
