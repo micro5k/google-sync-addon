@@ -433,10 +433,15 @@ initialize()
   export VERITY_MODE
 
   _find_and_mount_system
-
-  live_setup_choice
-
   cp -pf "${SYS_PATH:?}/build.prop" "${TMP_PATH:?}/build.prop" # Cache the file for faster access
+
+  if BUILD_MANUFACTURER="$(simple_getprop 'ro.product.manufacturer')" && is_valid_prop "${BUILD_MANUFACTURER?}"; then
+    :
+  else
+    BUILD_MANUFACTURER=''
+  fi
+  readonly BUILD_MANUFACTURER
+  export BUILD_MANUFACTURER
 
   if BUILD_DEVICE="$(simple_getprop 'ro.product.device')" && is_valid_prop "${BUILD_DEVICE?}"; then
     :
@@ -449,6 +454,13 @@ initialize()
   fi
   readonly BUILD_DEVICE
   export BUILD_DEVICE
+
+  if test "${BUILD_MANUFACTURER?}" = 'OnePlus' && test "${BUILD_DEVICE?}" = 'OnePlus6'; then
+    export KEYCHECK_ENABLED='false' # It doesn't work properly on this device
+  fi
+
+  _timeout_check
+  live_setup_choice
 
   IS_EMU='false'
   case "${BUILD_DEVICE?}" in
@@ -951,6 +963,16 @@ delete_recursive_wildcard()
   done
 }
 
+delete_temp()
+{
+  for filename in "${@}"; do
+    if test -e "${TMP_PATH:?}/${filename?}"; then
+      #ui_debug "Deleting '${TMP_PATH:?}/${filename?}'...."
+      rm -rf -- "${TMP_PATH:?}/${filename?}" || ui_error 'Failed to delete temp files/folders' 103
+    fi
+  done
+}
+
 delete_dir_if_empty()
 {
   if test -d "$1"; then
@@ -1074,7 +1096,7 @@ _find_input_device()
 {
   local _last_device_name=''
 
-  if test ! -e '/proc/bus/input/devices'; then return 1; fi # NOT found
+  if test ! -r '/proc/bus/input/devices'; then return 1; fi # NOT found
 
   # shellcheck disable=SC2002
   cat '/proc/bus/input/devices' | while IFS=': ' read -r line_type full_line; do
@@ -1103,27 +1125,28 @@ _find_input_device()
 
 _find_hardware_keys()
 {
-  if test "${1:?}" = "${INPUT_DEVICE_NAME:-}" && test -n "${INPUT_DEVICE_PATH:-}"; then return 0; fi
+  if test -n "${INPUT_DEVICE_NAME:-}" && test -n "${INPUT_DEVICE_PATH:-}"; then return 0; fi
 
+  INPUT_DEVICE_NAME=''
   INPUT_DEVICE_PATH=''
-  INPUT_DEVICE_NAME="${1:?}"
 
   local _input_device_event
-  if _input_device_event="$(_find_input_device "${INPUT_DEVICE_NAME:?}")" && test -e "/dev/input/${_input_device_event:?}"; then
+  if _input_device_event="$(_find_input_device "${1:?}")" && test -r "/dev/input/${_input_device_event:?}"; then
+    INPUT_DEVICE_NAME="${1:?}"
     INPUT_DEVICE_PATH="/dev/input/${_input_device_event:?}"
-    if test "${DEBUG_LOG_ENABLED:?}" -eq 1; then ui_debug "Found ${INPUT_DEVICE_NAME:-} device at: ${INPUT_DEVICE_PATH:-}"; fi
+    if test "${DEBUG_LOG_ENABLED:?}" -eq 1 || test "${RECOVERY_OUTPUT:?}" = 'true'; then ui_debug "Found ${INPUT_DEVICE_NAME:-} device at: ${INPUT_DEVICE_PATH:-}"; fi
 
-    # Set the default values, useful when the parsing fails
+    # Set the default values, useful when the parsing of keylayout fails
     INPUT_CODE_VOLUME_UP='115'
     INPUT_CODE_VOLUME_DOWN='114'
     INPUT_CODE_POWER='116'
-    #INPUT_CODE_HOME='102'
+    INPUT_CODE_HOME='102'
 
     if test -e "${SYS_PATH:?}/usr/keylayout/${INPUT_DEVICE_NAME:?}.kl"; then
       while IFS=' ' read -r key_type key_code key_name _; do
-        if test "${key_type:-}" != 'key'; then continue; fi
+        if test "${key_type?}" != 'key'; then continue; fi
 
-        if test -z "${key_name:-}" || test -z "${key_code:-}"; then
+        if test -z "${key_name?}" || test -z "${key_code?}"; then
           ui_warning "Missing key code, debug info: '${key_type:-}' '${key_code:-}' '${key_name:-}'"
           continue
         fi
@@ -1132,7 +1155,7 @@ _find_hardware_keys()
           'VOLUME_UP') INPUT_CODE_VOLUME_UP="${key_code:?}" ;;
           'VOLUME_DOWN') INPUT_CODE_VOLUME_DOWN="${key_code:?}" ;;
           'POWER') INPUT_CODE_POWER="${key_code:?}" ;;
-          'HOME') ;; #INPUT_CODE_HOME="${key_code:?}" ;;
+          'HOME') INPUT_CODE_HOME="${key_code:?}" ;;
           *) ui_debug "Unknown key: ${key_name:-}" ;;
         esac
       done 0< "${SYS_PATH:?}/usr/keylayout/${INPUT_DEVICE_NAME:?}.kl" || ui_warning "Failed parsing '${SYS_PATH:-}/usr/keylayout/${INPUT_DEVICE_NAME:-}.kl'"
@@ -1143,33 +1166,95 @@ _find_hardware_keys()
     return 0
   fi
 
-  return 1
+  return 2
+}
+
+kill_pid_from_file()
+{
+  local _pid
+
+  if test -e "${TMP_PATH:?}/${1:?}" && _pid="$(cat "${TMP_PATH:?}/${1:?}")" && test -n "${_pid?}"; then
+    if test "${DEBUG_LOG_ENABLED:?}" -eq 1; then ui_debug "Killing: ${_pid:-}"; fi
+    kill -s 'KILL' "${_pid:?}" || true
+    kill 2> /dev/null "${_pid:?}" & # Since the above command may not work in some cases, keep this as fallback
+  fi
+
+  delete_temp "${1:?}"
+}
+
+hex_to_dec()
+{
+  printf '%d' "0x${1:-0}"
+}
+
+_prepare_hexdump_output()
+{
+  cut -d ' ' -f '2-' -s | LC_ALL=C tr '[:cntrl:]' ' ' || return "${?}"
+  printf '\n'
+}
+
+_get_input_event()
+{
+  local _var _status
+
+  INPUT_EVENT_CURRENT=''
+
+  _status=0
+  if test -n "${1:-}"; then
+    _var="$({
+      cat -u "${INPUT_DEVICE_PATH:?}" &
+      printf '%s' "${!}" > "${TMP_PATH:?}/pid-to-kill.dat"
+    } | _timeout_compat "${1:?}" hexdump -x -v -n 24)" || _status="${?}"
+  else
+    _var="$({
+      cat -u "${INPUT_DEVICE_PATH:?}" &
+      printf '%s' "${!}" > "${TMP_PATH:?}/pid-to-kill.dat"
+    } | hexdump -x -v -n 24)" || _status="${?}"
+  fi
+  kill_pid_from_file 'pid-to-kill.dat'
+
+  case "${_status:?}" in
+    0) ;;                       # OK
+    124) return 124 ;;          # Timed out
+    *) return "${_status:?}" ;; # Failure
+  esac
+  if test -z "${_var?}"; then return 1; fi
+
+  INPUT_EVENT_CURRENT="${_var?}"
+  return 0
 }
 
 _parse_input_event()
 {
-  local _var _status
+  printf "%s\n" "${1}" | _prepare_hexdump_output | while IFS=' ' read -r _ _ _ _ ev_type32 key_code32 key_down32 zero32 ev_type64 key_code64 key_down64 zero64 _; do
+    if test "$(hex_to_dec "${ev_type64:-9}" || true)" -eq 1 && test "$(hex_to_dec "${zero64:-9}" || printf '9' || true)" -eq 0; then
+      key_code="${key_code64?}"
+      key_down="$(hex_to_dec "${key_down64:-9}")"
+    elif test "$(hex_to_dec "${ev_type32:-9}" || true)" -eq 1 && test "$(hex_to_dec "${zero32:-9}" || printf '9' || true)" -eq 0; then
+      key_code="${key_code32?}"
+      key_down="$(hex_to_dec "${key_down32:-9}")"
+    else
+      ui_warning "Invalid event type: ${ev_type32:-''} ${ev_type64:-''}"
+      continue
+    fi
 
-  _status=0
-  if test -n "${1:-}"; then
-    _var="$(_timeout_compat "${1:?}" cat -u "${INPUT_DEVICE_PATH:?}" | hexdump -d -n 14)" || _status="${?}"
-  else
-    _var="$(cat -u "${INPUT_DEVICE_PATH:?}" | hexdump -d -n 14)" || _status="${?}"
-  fi
+    if test "${key_down?}" -ne 1 && test "${key_down?}" -ne 0; then
+      return 125
+    fi
+    if test -z "${key_code?}"; then
+      return 126
+    fi
 
-  case "${_status:?}" in
-    0) ;;              # OK
-    141) ;;            # OK. Only the necessary part is read, so the "Broken pipe" is supposed to happen, ignore it
-    124) return 124 ;; # Timed out
-    *) return 2 ;;     # Failure
-  esac
+    hex_to_dec "${key_code:?}" || return 126
 
-  printf "%s\n" "${_var?}" | while IFS=' ' read -r _ _ _ _ _ _ cur_button key_down _; do
-    if test "${key_down:-0}" -ne 1; then return 85; fi
-    if test -n "${cur_button:-}" && printf '%.0f' "${cur_button:?}"; then return 4; fi
+    if test "${key_down:?}" -eq 1; then
+      return 3
+    else
+      return 4
+    fi
   done || return "${?}"
 
-  return 1
+  return 127
 }
 
 _timeout_exit_code_remapper()
@@ -1204,7 +1289,7 @@ _timeout_exit_code_remapper()
       return 124
       ;;
     *) ### All other keys
-      if test "${1:?}" -lt 128; then
+      if test "${1:?}" -lt 124; then
         return "${1:?}" # Return code of the COMMAND
       fi
       ;;
@@ -1216,26 +1301,46 @@ _timeout_exit_code_remapper()
   return 1
 }
 
-_timeout_compat()
+_timeout_check()
 {
-  local _status _timeout_ver _timeout_secs
+  if test "${TIMEOUT_CMD_IS_LEGACY_BUSYBOX:-empty}" != 'empty'; then return; fi
+
+  local _timeout_ver
+  TIMEOUT_CMD_IS_LEGACY_BUSYBOX='false'
 
   # timeout may return failure when displaying "--help" so be sure to ignore it
   _timeout_ver="$({
-    timeout --help 2>&1 || true
+    timeout 2>&1 --help || true
   } | parse_busybox_version)" || _timeout_ver=''
+  shift
+
+  if test -n "${_timeout_ver?}" && test "$(numerically_comparable_version "${_timeout_ver:?}" || true)" -lt "$(numerically_comparable_version '1.30.0' || true)"; then
+    TIMEOUT_CMD_IS_LEGACY_BUSYBOX='true'
+  fi
+  readonly TIMEOUT_CMD_IS_LEGACY_BUSYBOX
+  export TIMEOUT_CMD_IS_LEGACY_BUSYBOX
+
+  if test "${DEBUG_LOG_ENABLED:?}" -eq 1 || test "${RECOVERY_OUTPUT:?}" = 'true'; then ui_debug "Timeout is legacy BusyBox: ${TIMEOUT_CMD_IS_LEGACY_BUSYBOX:-}"; fi
+}
+
+_timeout_compat()
+{
+  local _status _timeout_secs
+
+  _timeout_check
   _timeout_secs="${1:?}" || ui_error 'Missing "secs" parameter for _timeout_compat'
   shift
 
-  if test -z "${_timeout_ver:-}" || test "$(numerically_comparable_version "${_timeout_ver:?}" || true)" -ge "$(numerically_comparable_version '1.30.0' || true)"; then
-    timeout -- "${_timeout_secs:?}" "${@}"
-    _status="${?}"
-  else
+  if test "${TIMEOUT_CMD_IS_LEGACY_BUSYBOX:?}" = 'true'; then
     {
       timeout -t "${_timeout_secs:?}" -- "${@}"
       _status="${?}"
     } 2> /dev/null
+  else
+    timeout -- "${_timeout_secs:?}" "${@}"
+    _status="${?}"
   fi
+
   _timeout_exit_code_remapper "${_status:?}"
   return "${?}"
 }
@@ -1271,9 +1376,12 @@ _keycheck_map_keycode_to_key()
       printf '-'
       ;;
     *)
+      if test "${1:?}" -ne 0; then return "${1:?}"; fi
       return 1
       ;;
   esac
+
+  return 0
 }
 
 choose_keycheck_with_timeout()
@@ -1289,14 +1397,16 @@ choose_keycheck_with_timeout()
     return 0
   elif test "${_status:?}" -eq 127 || test "${_status:?}" -eq 132; then
     export KEYCHECK_ENABLED='false'
+
     true # This is just to waste some time, otherwise the warning about the "timeout" failure may appear after the following message
 
     ui_msg 'Fallbacking to manual input parsing, waiting input...'
     choose_inputevent "${@}"
     return "${?}"
   fi
+
   _key="$(_keycheck_map_keycode_to_key "${_status:?}")" || {
-    ui_warning 'Key detection failed'
+    ui_warning "Key detection failed (keycheck), status code: ${?}"
     return 1
   }
 
@@ -1403,47 +1513,93 @@ choose_read()
 
 choose_inputevent()
 {
-  local _key _status
+  local _key _status _last_key_pressed
 
   _find_hardware_keys 'gpio-keys' || {
+    _status="${?}"
     ui_msg_empty_line
-    ui_warning 'Key detection failed'
+    ui_warning "Key detection failed (input event), status code: ${_status:-}"
     ui_msg_empty_line
     return 1
   }
 
+  _last_key_pressed=''
   while true; do
-    _key=''
-    _status=0
-    _key="$(_parse_input_event "${1:-}")" || _status="${?}"
+    _get_input_event "${1:-}" || {
+      _status="${?}"
 
-    case "${_status:?}" in
-      4) ;;           # Key down event read (allowed)
-      85) continue ;; # Key up event read (ignored)
-      124)
+      if test "${_status:?}" -eq 124; then
         ui_msg_empty_line
         ui_msg 'Key: No key pressed'
         ui_msg_empty_line
         return 0
-        ;;
-      *) # Event read failed
-        ui_warning 'Key detection failed (2)'
+      fi
+
+      ui_warning "Key detection failed 2 (input event), status code: ${_status:-}"
+      return 1
+    }
+
+    if test "${DEBUG_LOG_ENABLED:?}" -eq 1; then
+      ui_debug ''
+      ui_debug "EVENT DEBUG:$(printf '%s\n' "${INPUT_EVENT_CURRENT?}" | _prepare_hexdump_output | LC_ALL=C tr -d -s '\n' '[:blank:]' || true)"
+    fi
+
+    _status=0
+    _key="$(_parse_input_event "${INPUT_EVENT_CURRENT?}")" || _status="${?}"
+
+    case "${_status:?}" in
+      3) ;; # Key down event read (allowed)
+      4) ;; # Key up event read (allowed)
+      *)    # Event read failed
+        ui_warning "Key detection failed 3 (input event), status code: ${_status:-}"
         return 1
         ;;
     esac
 
+    if test "${DEBUG_LOG_ENABLED:?}" -eq 1 || test "${RECOVERY_OUTPUT:?}" = 'true'; then
+      ui_debug ''
+      ui_debug "Key code: ${_key:-}, Action: ${_status:-}"
+    fi
+
+    if true; then
+      if test "${_status:?}" -eq 3; then
+        # Key down
+        if test "${_last_key_pressed?}" = ''; then
+          _last_key_pressed="${_key?}"
+        else
+          _last_key_pressed='' # Two buttons pressed simultaneously (ignored)
+        fi
+        continue
+      else
+        # Key up
+        if test -n "${_key?}" && test "${_key:?}" = "${_last_key_pressed?}"; then
+          : # OK
+        else
+          _last_key_pressed=''
+          ui_msg 'Key mismatch, ignored!!!' # Key mismatch (ignored)
+          continue
+        fi
+      fi
+
+      _last_key_pressed=''
+    fi
+
     case "${_key?}" in
-      "${INPUT_CODE_VOLUME_UP:?}") ;;      # Vol + key (allowed)
-      "${INPUT_CODE_VOLUME_DOWN:?}") ;;    # Vol - key (allowed)
-      "${INPUT_CODE_POWER:?}") continue ;; # Power key (ignored)
+      "${INPUT_CODE_VOLUME_UP:?}") ;;   # Vol + key (allowed)
+      "${INPUT_CODE_VOLUME_DOWN:?}") ;; # Vol - key (allowed)
+      "${INPUT_CODE_POWER:?}")
+        continue # Power key (ignored)
+        ;;
       *)
         ui_msg "Invalid choice!!! Key code: ${_key:-}"
         continue
-        ;; # NOT allowed
+        ;;
     esac
 
     break
   done
+
+  : "UNUSED ${INPUT_CODE_HOME:?}"
 
   if test "${_key?}" = "${INPUT_CODE_VOLUME_UP:?}"; then
     ui_msg_empty_line
@@ -1533,12 +1689,15 @@ live_setup_choice()
     elif test "${LIVE_SETUP_TIMEOUT:?}" -gt 0; then
 
       if test "${INPUT_FROM_TERMINAL:?}" = 'true'; then
+        if test "${DEBUG_LOG_ENABLED:?}" -eq 1 || test "${RECOVERY_OUTPUT:?}" = 'true'; then ui_debug 'Using: read'; fi
         _live_setup_choice_msg "${LIVE_SETUP_TIMEOUT}"
         choose_read_with_timeout "${LIVE_SETUP_TIMEOUT}"
       elif "${KEYCHECK_ENABLED:?}"; then
+        if test "${DEBUG_LOG_ENABLED:?}" -eq 1 || test "${RECOVERY_OUTPUT:?}" = 'true'; then ui_debug 'Using: keycheck'; fi
         _live_setup_choice_msg "${LIVE_SETUP_TIMEOUT}"
         choose_keycheck_with_timeout "${LIVE_SETUP_TIMEOUT}"
       else
+        if test "${DEBUG_LOG_ENABLED:?}" -eq 1 || test "${RECOVERY_OUTPUT:?}" = 'true'; then ui_debug 'Using: input event'; fi
         _live_setup_choice_msg "${LIVE_SETUP_TIMEOUT}"
         choose_inputevent "${LIVE_SETUP_TIMEOUT}"
       fi
@@ -1588,7 +1747,7 @@ enable_app()
 
 parse_busybox_version()
 {
-  grep -m 1 -o -e 'BusyBox v[0-9]*\.[0-9]*\.[0-9]*' | cut -d 'v' -f 2
+  grep -m 1 -o -e 'BusyBox v[0-9]*\.[0-9]*\.[0-9]*' | cut -d 'v' -f '2-' -s
 }
 
 numerically_comparable_version()

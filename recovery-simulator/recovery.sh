@@ -110,9 +110,9 @@ if ! "${ENV_RESETTED:-false}"; then
   fi
 
   if test "${COVERAGE:-false}" = 'false'; then
-    exec env -i -- ENV_RESETTED=true BB_GLOBBING='0' THIS_SCRIPT="${THIS_SCRIPT:?}" OUR_TEMP_DIR="${OUR_TEMP_DIR:?}" DEBUG_LOG="${DEBUG_LOG:-}" FORCE_HW_BUTTONS="${FORCE_HW_BUTTONS:-}" CI="${CI:-}" APP_NAME="${APP_NAME:-}" SHELLOPTS="${SHELLOPTS:-}" PATH="${PATH:?}" bash -- "${THIS_SCRIPT:?}" "${@}" || fail_with_msg 'failed: exec'
+    exec env -i -- ENV_RESETTED=true BB_GLOBBING='0' THIS_SCRIPT="${THIS_SCRIPT:?}" OUR_TEMP_DIR="${OUR_TEMP_DIR:?}" DEBUG_LOG="${DEBUG_LOG:-}" FORCE_HW_BUTTONS="${FORCE_HW_BUTTONS:-}" CI="${CI:-}" APP_NAME="${APP_NAME:-}" SHELLOPTS="${SHELLOPTS:-}" SHELL="${SHELL:-}" PATH="${PATH:?}" bash -- "${THIS_SCRIPT:?}" "${@}" || fail_with_msg 'failed: exec'
   else
-    exec env -i -- ENV_RESETTED=true BB_GLOBBING='0' THIS_SCRIPT="${THIS_SCRIPT:?}" OUR_TEMP_DIR="${OUR_TEMP_DIR:?}" DEBUG_LOG="${DEBUG_LOG:-}" FORCE_HW_BUTTONS="${FORCE_HW_BUTTONS:-}" CI="${CI:-}" APP_NAME="${APP_NAME:-}" SHELLOPTS="${SHELLOPTS:-}" PATH="${PATH:?}" COVERAGE="true" bashcov -- "${THIS_SCRIPT:?}" "${@}" || fail_with_msg 'failed: exec'
+    exec env -i -- ENV_RESETTED=true BB_GLOBBING='0' THIS_SCRIPT="${THIS_SCRIPT:?}" OUR_TEMP_DIR="${OUR_TEMP_DIR:?}" DEBUG_LOG="${DEBUG_LOG:-}" FORCE_HW_BUTTONS="${FORCE_HW_BUTTONS:-}" CI="${CI:-}" APP_NAME="${APP_NAME:-}" SHELLOPTS="${SHELLOPTS:-}" SHELL="${SHELL:-}" PATH="${PATH:?}" COVERAGE="true" bashcov -- "${THIS_SCRIPT:?}" "${@}" || fail_with_msg 'failed: exec'
   fi
   exit 127
 fi
@@ -188,12 +188,14 @@ link_folder "${BASE_SIMULATION_PATH:?}/sdcard" "${_android_ext_stor:?}"
 {
   echo 'ro.build.characteristics=phone,emulator'
   echo 'ro.build.version.sdk=26'
+  echo 'ro.product.brand=google'
   echo 'ro.product.cpu.abi2=x86'
   echo 'ro.product.cpu.abi=x86_64'
   echo 'ro.product.cpu.abilist32=x86,armeabi-v7a,armeabi'
   echo 'ro.product.cpu.abilist64=x86_64,arm64-v8a'
   echo 'ro.product.cpu.abilist=x86_64,x86,arm64-v8a,armeabi-v7a,armeabi'
   echo 'ro.product.device=emu64x'
+  echo 'ro.product.manufacturer=Google'
 } 1> "${_android_sys:?}/build.prop"
 
 touch "${BASE_SIMULATION_PATH:?}/AndroidManifest.xml"
@@ -288,12 +290,14 @@ recovery_logs_dir="${THIS_SCRIPT_DIR:?}/output"
 if test -e "/proc/self/fd/${recovery_fd:?}"; then fail_with_msg 'Recovery FD already exist'; fi
 mkdir -p "${recovery_logs_dir:?}"
 touch "${recovery_logs_dir:?}/recovery-raw.log" "${recovery_logs_dir:?}/recovery-output-raw.log" "${recovery_logs_dir:?}/recovery-stdout.log" "${recovery_logs_dir:?}/recovery-stderr.log"
-if test "${uname_o_saved:?}" != 'MS/Windows'; then
+
+if test "${uname_o_saved:?}" != 'MS/Windows' && test "${uname_o_saved:?}" != 'Msys'; then # ToDO: Rewrite this code
   sudo chattr +aAd "${recovery_logs_dir:?}/recovery-raw.log" || fail_with_msg "chattr failed on 'recovery-raw.log'"
   sudo chattr +aAd "${recovery_logs_dir:?}/recovery-output-raw.log" || fail_with_msg "chattr failed on 'recovery-output-raw.log'"
   sudo chattr +aAd "${recovery_logs_dir:?}/recovery-stdout.log" || fail_with_msg "chattr failed on 'recovery-stdout.log'"
   sudo chattr +aAd "${recovery_logs_dir:?}/recovery-stderr.log" || fail_with_msg "chattr failed on 'recovery-stderr.log'"
 fi
+
 # shellcheck disable=SC3023
 exec 99> >(tee -a "${recovery_logs_dir:?}/recovery-raw.log" "${recovery_logs_dir:?}/recovery-output-raw.log" || true)
 
@@ -334,7 +338,8 @@ flash_zips "${@}" || STATUS="${?}"
 # Close recovery output
 # shellcheck disable=SC3023
 exec 99>&-
-if test "${uname_o_saved:?}" != 'MS/Windows'; then
+
+if test "${uname_o_saved:?}" != 'MS/Windows' && test "${uname_o_saved:?}" != 'Msys'; then # ToDO: Rewrite this code
   sudo chattr -a "${recovery_logs_dir:?}/recovery-raw.log" || fail_with_msg "chattr failed on 'recovery-raw.log'"
   sudo chattr -a "${recovery_logs_dir:?}/recovery-output-raw.log" || fail_with_msg "chattr failed on 'recovery-output-raw.log'"
   sudo chattr -a "${recovery_logs_dir:?}/recovery-stdout.log" || fail_with_msg "chattr failed on 'recovery-stdout.log'"
