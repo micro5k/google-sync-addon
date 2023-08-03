@@ -32,14 +32,10 @@ TMP_PATH="${2:?}"
 
 ### CODE ###
 
-initialize
-
 INSTALL_CONTACTSSYNC="$(parse_setting 'INSTALL_CONTACTSSYNC' "${INSTALL_CONTACTSSYNC:?}")"
 INSTALL_CALENDARSYNC="$(parse_setting 'INSTALL_CALENDARSYNC' "${INSTALL_CALENDARSYNC:?}")"
 
 INSTALLATION_SETTINGS_FILE="${MODULE_ID:?}.prop"
-API="$(build_getprop 'build\.version\.sdk')"
-readonly API
 
 if test "${API:?}" -ge 19; then # KitKat or higher
   PRIVAPP_FOLDER='priv-app'
@@ -62,27 +58,8 @@ else
   ui_error 'Invalid API level'
 fi
 
-# Info
-ui_msg "$(write_separator_line "${#MODULE_NAME}" '-' || true)"
-ui_msg "${MODULE_NAME:?}"
-ui_msg "${MODULE_VERSION:?}"
-ui_msg "(by ${MODULE_AUTHOR:?})"
-ui_msg "$(write_separator_line "${#MODULE_NAME}" '-' || true)"
-
-ui_msg "Manufacturer: ${BUILD_MANUFACTURER?}"
-ui_msg "Device: ${BUILD_DEVICE?}"
-ui_msg "Emulator: ${IS_EMU:?}"
-ui_msg_empty_line
-ui_msg "Boot mode: ${BOOTMODE:?}"
-ui_msg "Sideload: ${SIDELOAD:?}"
-if test "${ZIP_INSTALL:?}" = 'true'; then
-  ui_msg "Zip install: ${ZIP_INSTALL:?} (${ZIPINSTALL_VERSION?})"
-else
-  ui_msg "Zip install: ${ZIP_INSTALL:?}"
-fi
-ui_msg "Recovery API ver: ${RECOVERY_API_VER:-}"
-ui_msg_empty_line
-ui_msg "Android API: ${API:?}"
+# Display info
+display_info
 ui_msg_empty_line
 ui_msg "Verity mode: ${VERITY_MODE:-disabled}"
 ui_msg "Dynamic partitions: ${DYNAMIC_PARTITIONS:?}"

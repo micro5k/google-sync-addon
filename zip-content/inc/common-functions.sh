@@ -385,6 +385,24 @@ remount_read_write_if_needed()
   fi
 }
 
+display_info()
+{
+  ui_msg "Manufacturer: ${BUILD_MANUFACTURER?}"
+  ui_msg "Device: ${BUILD_DEVICE?}"
+  ui_msg "Emulator: ${IS_EMU:?}"
+  ui_msg_empty_line
+  ui_msg "Boot mode: ${BOOTMODE:?}"
+  ui_msg "Sideload: ${SIDELOAD:?}"
+  if test "${ZIP_INSTALL:?}" = 'true'; then
+    ui_msg "Zip install: ${ZIP_INSTALL:?} (${ZIPINSTALL_VERSION?})"
+  else
+    ui_msg "Zip install: ${ZIP_INSTALL:?}"
+  fi
+  ui_msg "Recovery API ver: ${RECOVERY_API_VER:-}"
+  ui_msg_empty_line
+  ui_msg "Android API: ${API:?}"
+}
+
 initialize()
 {
   SYS_INIT_STATUS=0
@@ -461,6 +479,10 @@ initialize()
 
   _timeout_check
   live_setup_choice
+
+  API="$(sys_getprop 'ro.build.version.sdk')" || API=0
+  readonly API
+  export API
 
   IS_EMU='false'
   case "${BUILD_DEVICE?}" in
@@ -551,6 +573,18 @@ initialize()
   if test -e '/product'; then remount_read_write_if_needed '/product' false; fi
   if test -e '/vendor'; then remount_read_write_if_needed '/vendor' false; fi
   if test -e '/system_ext'; then remount_read_write_if_needed '/system_ext' false; fi
+
+  # Display header
+  ui_msg "$(write_separator_line "${#MODULE_NAME}" '-' || true)"
+  ui_msg "${MODULE_NAME:?}"
+  ui_msg "${MODULE_VERSION:?}"
+  ui_msg "(by ${MODULE_AUTHOR:?})"
+  ui_msg "$(write_separator_line "${#MODULE_NAME}" '-' || true)"
+
+  # shellcheck disable=SC2312
+  ABI_LIST=','$(sys_getprop 'ro.product.cpu.abi')','$(sys_getprop 'ro.product.cpu.abi2')','$(sys_getprop 'ro.product.cpu.upgradeabi')','$(sys_getprop 'ro.product.cpu.abilist')','
+  readonly ABI_LIST
+  export ABI_LIST
 
   unset LAST_MOUNTPOINT
 }
@@ -745,6 +779,21 @@ is_valid_prop()
 {
   if test -z "${1?}" || test "${1?}" = 'unknown'; then return 1; fi
   return 0 # Valid
+}
+
+sys_getprop()
+{
+  local _val
+
+  if _val="$(simple_file_getprop "${1:?}" "${TMP_PATH:?}/build.prop")" && is_valid_prop "${_val?}"; then
+    :
+  elif _val="$(simple_getprop "${1:?}")" && is_valid_prop "${_val?}"; then
+    :
+  else
+    return 1
+  fi
+
+  printf '%s\n' "${_val:?}"
 }
 
 # String related functions
@@ -1761,48 +1810,12 @@ remove_ext()
   echo "${str%.*}"
 }
 
-enable_debug_log()
-{
-  if test "${DEBUG_LOG_ENABLED}" -eq 1; then return; fi
-  export DEBUG_LOG_ENABLED=1
-
-  ui_debug "Creating log: ${LOG_PATH:?}"
-  touch "${LOG_PATH:?}" || {
-    ui_warning "Unable to write the log file at: ${LOG_PATH:-}"
-    export DEBUG_LOG_ENABLED=0
-    return
-  }
-
-  # If they are already in use, then use alternatives
-  if {
-    command 1>&6 || command 1>&7
-  } 2> /dev/null; then
-    export ALTERNATIVE_FDS=1
-    # shellcheck disable=SC3023
-    exec 88>&1 89>&2 # Backup stdout and stderr
-  else
-    export ALTERNATIVE_FDS=0
-    exec 6>&1 7>&2 # Backup stdout and stderr
-  fi
-  exec 1>> "${LOG_PATH:?}" 2>&1
-}
-
-disable_debug_log()
-{
-  if test "${DEBUG_LOG_ENABLED}" -ne 1; then return; fi
-  export DEBUG_LOG_ENABLED=0
-  if test "${ALTERNATIVE_FDS:?}" -eq 0; then
-    exec 1>&6 2>&7 # Restore stdout and stderr
-    exec 6>&- 7>&-
-  else
-    exec 1>&88 2>&89 # Restore stdout and stderr
-    # shellcheck disable=SC3023
-    exec 88>&- 89>&-
-  fi
-}
-
 # Find test: this is useful to test 'find' - if every file/folder, even the ones with spaces, is displayed in a single line then your version is good
 find_test()
 {
   find "$1" -type d -exec echo 'FOLDER:' '{}' ';' -o -type f -exec echo 'FILE:' '{}' ';' | while read -r x; do echo "${x}"; done
 }
+
+### INITIALIZATION ###
+
+initialize
