@@ -393,24 +393,47 @@ _detect_architectures()
   ARCH_ARM='false'
   ARCH_LEGACY_ARM='false'
 
-  if is_substring ',x86_64,' "${ABI_LIST:?}"; then
+  if is_substring ',x86_64,' "${1:?}"; then
     ARCH_X64='true'
   fi
-  if is_substring ',x86,' "${ABI_LIST:?}"; then
+  if is_substring ',x86,' "${1:?}"; then
     ARCH_X86='true'
   fi
-  if is_substring ',arm64-v8a,' "${ABI_LIST:?}"; then
+  if is_substring ',arm64-v8a,' "${1:?}"; then
     ARCH_ARM64='true'
   fi
-  if is_substring ',armeabi-v7a,' "${ABI_LIST:?}"; then
+  if is_substring ',armeabi-v7a,' "${1:?}"; then
     ARCH_ARM='true'
   fi
-  if is_substring ',armeabi,' "${ABI_LIST:?}"; then
+  if is_substring ',armeabi,' "${1:?}"; then
     ARCH_LEGACY_ARM='true'
   fi
 
   readonly ARCH_X64 ARCH_X86 ARCH_ARM64 ARCH_ARM ARCH_LEGACY_ARM
   export ARCH_X64 ARCH_X86 ARCH_ARM64 ARCH_ARM ARCH_LEGACY_ARM
+}
+
+_detect_main_architectures()
+{
+  CPU64='false'
+  CPU='false'
+
+  if test "${ARCH_X64:?}" = 'true'; then
+    CPU64='x86_64'
+  elif test "${ARCH_ARM64:?}" = 'true'; then
+    CPU64='arm64-v8a'
+  fi
+
+  if test "${ARCH_X86:?}" = 'true'; then
+    CPU='x86'
+  elif test "${ARCH_ARM:?}" = 'true'; then
+    CPU='armeabi-v7a'
+  elif test "${ARCH_LEGACY_ARM:?}" = 'true'; then
+    CPU='armeabi'
+  fi
+
+  readonly CPU64 CPU
+  export CPU64 CPU
 }
 
 _generate_architectures_list()
@@ -432,6 +455,7 @@ _generate_architectures_list()
   if test "${ARCH_LEGACY_ARM:?}" = 'true'; then
     ARCH_LIST="${ARCH_LIST?}armeabi,"
   fi
+  ARCH_LIST="${ARCH_LIST%,}"
 
   readonly ARCH_LIST
   export ARCH_LIST
@@ -453,11 +477,14 @@ display_info()
   ui_msg "Recovery API ver: ${RECOVERY_API_VER:-}"
   ui_msg_empty_line
   ui_msg "Android API: ${API:?}"
-  ui_msg "CPU arch list: ${ARCH_LIST?}"
+  ui_msg "64-bit CPU arch: ${CPU64:?}"
+  ui_msg "32-bit CPU arch: ${CPU:?}"
+  ui_msg "ABI list: ${ARCH_LIST?}"
 }
 
 initialize()
 {
+  local _raw_arch_list
   SYS_INIT_STATUS=0
   DATA_INIT_STATUS=0
 
@@ -506,23 +533,11 @@ initialize()
   _find_and_mount_system
   cp -pf "${SYS_PATH:?}/build.prop" "${TMP_PATH:?}/build.prop" # Cache the file for faster access
 
-  if BUILD_MANUFACTURER="$(simple_getprop 'ro.product.manufacturer')" && is_valid_prop "${BUILD_MANUFACTURER?}"; then
-    :
-  else
-    BUILD_MANUFACTURER=''
-  fi
+  BUILD_MANUFACTURER="$(sys_getprop 'ro.product.manufacturer')"
   readonly BUILD_MANUFACTURER
   export BUILD_MANUFACTURER
 
-  if BUILD_DEVICE="$(simple_getprop 'ro.product.device')" && is_valid_prop "${BUILD_DEVICE?}"; then
-    :
-  elif BUILD_DEVICE="$(simple_getprop 'ro.build.product')" && is_valid_prop "${BUILD_DEVICE?}"; then
-    :
-  elif BUILD_DEVICE="$(simple_file_getprop 'ro.product.device' "${TMP_PATH:?}/build.prop")" && is_valid_prop "${BUILD_DEVICE?}"; then
-    :
-  else
-    BUILD_DEVICE=''
-  fi
+  BUILD_DEVICE="$(sys_getprop 'ro.product.device')" || BUILD_DEVICE="$(sys_getprop 'ro.build.product')"
   readonly BUILD_DEVICE
   export BUILD_DEVICE
 
@@ -635,12 +650,19 @@ initialize()
   ui_msg "$(write_separator_line "${#MODULE_NAME}" '-' || true)"
 
   # shellcheck disable=SC2312
-  ABI_LIST=','"$(sys_getprop 'ro.product.cpu.abi')"','"$(sys_getprop 'ro.product.cpu.abi2')"','"$(sys_getprop 'ro.product.cpu.upgradeabi')"','"$(sys_getprop 'ro.product.cpu.abilist')"','
-  readonly ABI_LIST
-  export ABI_LIST
+  _raw_arch_list=','"$(sys_getprop 'ro.product.cpu.abi')"','"$(sys_getprop 'ro.product.cpu.abi2')"','"$(sys_getprop 'ro.product.cpu.upgradeabi')"','"$(sys_getprop 'ro.product.cpu.abilist')"','
 
-  _detect_architectures
+  _detect_architectures "${_raw_arch_list:?}"
+  _detect_main_architectures
   _generate_architectures_list
+
+  if test "${API:?}" -lt 1; then
+    ui_error 'Invalid API level'
+  fi
+
+  if test "${CPU64:?}" = 'false' && test "${CPU:?}" = 'false'; then
+    ui_error "Unsupported CPU, ABI list: ${_raw_arch_list:-}"
+  fi
 
   unset LAST_MOUNTPOINT
 }

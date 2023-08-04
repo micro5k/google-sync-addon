@@ -51,11 +51,9 @@ if test "${API:?}" -ge 24; then
 elif test "${API:?}" -ge 21; then
   ui_error 'ERROR: Unsupported Android version'
 elif test "${API:?}" -ge 19; then
-  :
-elif test "${API:?}" -ge 1; then
-  ui_error 'Your Android version is too old'
+  : ### Supported Android versions
 else
-  ui_error 'Invalid API level'
+  ui_error 'Your Android version is too old'
 fi
 
 # Display info
