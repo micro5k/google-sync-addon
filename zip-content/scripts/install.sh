@@ -3,24 +3,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # SPDX-FileType: SOURCE
 
-### INIT ENV ###
-export TZ=UTC
-export LANG=en_US
-
-unset LANGUAGE
-unset LC_ALL
-unset UNZIP
-unset UNZIPOPT
-unset UNZIP_OPTS
-unset CDPATH
-
-# shellcheck disable=SC3040,SC2015
-{
-  # Unsupported set options may cause the shell to exit (even without set -e), so first try them in a subshell to avoid this issue
-  (set -o posix 2> /dev/null) && set -o posix || true
-  (set -o pipefail) && set -o pipefail || true
-}
-
 ### GLOBAL VARIABLES ###
 
 TMP_PATH="${2:?}"

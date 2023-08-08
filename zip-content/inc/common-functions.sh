@@ -9,6 +9,27 @@
 # shellcheck disable=SC3043
 # SC3043: In POSIX sh, local is undefined
 
+### INIT ENV ###
+
+export TZ=UTC
+export LANG=en_US
+
+unset LANGUAGE
+unset LC_ALL
+unset UNZIP
+unset UNZIPOPT
+unset UNZIP_OPTS
+unset CDPATH
+
+### INIT OPTIONS ###
+
+# shellcheck disable=SC3040,SC2015
+{
+  # Unsupported set options may cause the shell to exit (even without set -e), so first try them in a subshell to avoid this issue
+  (set -o posix 2> /dev/null) && set -o posix || true
+  (set -o pipefail) && set -o pipefail || true
+}
+
 ### PREVENTIVE CHECKS ###
 
 if test -z "${ZIPFILE:-}" || test -z "${TMP_PATH:-}" || test -z "${RECOVERY_PIPE:-}" || test -z "${OUTFD:-}" || test -z "${INPUT_FROM_TERMINAL:-}" || test -z "${DEBUG_LOG_ENABLED:-}"; then
