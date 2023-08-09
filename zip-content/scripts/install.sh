@@ -29,8 +29,6 @@ fi
 
 # Display info
 display_info
-
-ui_msg "$(write_separator_line "${#MODULE_NAME}" '-' || true)"
 ui_msg_empty_line
 
 if test "${IS_INSTALLATION:?}" = 'true'; then
