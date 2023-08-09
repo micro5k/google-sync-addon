@@ -17,25 +17,14 @@ TMP_PATH="${2:?}"
 INSTALL_CONTACTSSYNC="$(parse_setting 'INSTALL_CONTACTSSYNC' "${INSTALL_CONTACTSSYNC:?}")"
 INSTALL_CALENDARSYNC="$(parse_setting 'INSTALL_CALENDARSYNC' "${INSTALL_CALENDARSYNC:?}")"
 
-INSTALLATION_SETTINGS_FILE="${MODULE_ID:?}.prop"
-
-if test "${API:?}" -ge 19; then # KitKat or higher
-  PRIVAPP_FOLDER='priv-app'
-else
-  PRIVAPP_FOLDER='app'
-fi
-PRIVAPP_PATH="${SYS_PATH:?}/${PRIVAPP_FOLDER:?}"
-readonly PRIVAPP_FOLDER PRIVAPP_PATH
-if test ! -e "${PRIVAPP_PATH:?}"; then ui_error 'The priv-app folder does NOT exist'; fi
-
 if test "${API:?}" -ge 24; then
   : ### Supported Android versions
 elif test "${API:?}" -ge 21; then
-  ui_error 'ERROR: Unsupported Android version'
+  ui_error 'Unsupported Android version'
 elif test "${API:?}" -ge 19; then
   : ### Supported Android versions
 else
-  ui_error 'Your Android version is too old'
+  ui_error "Your Android version is too old, API: ${API:-}"
 fi
 
 # Display info
@@ -172,8 +161,8 @@ create_dir "${USED_SETTINGS_PATH:?}"
   echo 'install.type=flashable-zip'
   echo "install.version.code=${MODULE_VERCODE:?}"
   echo "install.version=${MODULE_VERSION:?}"
-} > "${USED_SETTINGS_PATH:?}/${INSTALLATION_SETTINGS_FILE:?}"
-set_perm 0 0 0640 "${USED_SETTINGS_PATH:?}/${INSTALLATION_SETTINGS_FILE:?}"
+} > "${USED_SETTINGS_PATH:?}/${MODULE_ID:?}.prop"
+set_perm 0 0 0640 "${USED_SETTINGS_PATH:?}/${MODULE_ID:?}.prop"
 
 create_dir "${SYS_PATH:?}/etc/zips"
 set_perm 0 0 0750 "${SYS_PATH:?}/etc/zips"
