@@ -41,13 +41,6 @@ if test "${IS_INSTALLATION:?}" = 'true'; then
   custom_package_extract_dir 'files' "${TMP_PATH:?}"
   custom_package_extract_dir 'addon.d' "${TMP_PATH:?}"
 
-  # Setting up permissions
-  ui_debug 'Setting up permissions...'
-  set_std_perm_recursive "${TMP_PATH:?}/origin"
-  set_std_perm_recursive "${TMP_PATH:?}/files"
-  if test -e "${TMP_PATH:?}/addon.d"; then set_std_perm_recursive "${TMP_PATH:?}/addon.d"; fi
-  set_perm 0 0 0755 "${TMP_PATH:?}/addon.d/00-1-google-sync.sh"
-
   setup_app 1 'Google Backup Transport 4.4' 'GoogleBackupTransport44' 'priv-app' false false
 
   setup_app "${INSTALL_CONTACTSSYNC:?}" 'Google Contacts Sync 8.1' 'GoogleContactsSyncAdapter8' 'priv-app' ||
@@ -139,6 +132,11 @@ if test "${API:?}" -ge 21; then
     done
   fi
 fi
+
+# Prepare installation
+set_std_perm_recursive "${TMP_PATH:?}/files"
+if test -e "${TMP_PATH:?}/addon.d"; then set_std_perm_recursive "${TMP_PATH:?}/addon.d"; fi
+set_perm 0 0 0755 "${TMP_PATH:?}/addon.d/00-1-google-sync.sh"
 
 # Installing
 ui_msg 'Installing...'
