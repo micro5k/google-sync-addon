@@ -43,11 +43,11 @@ if test "${IS_INSTALLATION:?}" = 'true'; then
 
   setup_app 1 'Google Backup Transport 4.4' 'GoogleBackupTransport44' 'priv-app' false false
 
-  setup_app "${INSTALL_CONTACTSSYNC:?}" 'Google Contacts Sync 8.1' 'GoogleContactsSyncAdapter8' 'priv-app' ||
+  setup_app "${INSTALL_CONTACTSSYNC:?}" 'Google Contacts Sync 8' 'GoogleContactsSyncAdapter8' 'priv-app' ||
     setup_app "${INSTALL_CONTACTSSYNC:?}" 'Google Contacts Sync 4.4' 'GoogleContactsSyncAdapter44' 'app'
 
-  setup_app "${INSTALL_CALENDARSYNC:?}" 'Google Calendar Sync 6.0' 'GoogleCalendarSyncAdapter6' 'app' ||
-    setup_app "${INSTALL_CALENDARSYNC:?}" 'Google Calendar Sync 5.2' 'GoogleCalendarSyncAdapter5' 'app'
+  setup_app "${INSTALL_CALENDARSYNC:?}" 'Google Calendar Sync 6' 'GoogleCalendarSyncAdapter6' 'app' ||
+    setup_app "${INSTALL_CALENDARSYNC:?}" 'Google Calendar Sync 5' 'GoogleCalendarSyncAdapter5' 'app'
 
   delete "${TMP_PATH:?}/origin"
 else
