@@ -104,36 +104,9 @@ else
   delete_recursive "${TMP_PATH}/files/etc/default-permissions"
 fi
 
-# Preparing
-ui_msg 'Preparing...'
-
-if test -e "${TMP_PATH:?}/files/priv-app" && test "${PRIVAPP_FOLDER:?}" != 'priv-app'; then
-  copy_dir_content "${TMP_PATH:?}/files/priv-app" "${TMP_PATH:?}/files/${PRIVAPP_FOLDER:?}"
-  delete "${TMP_PATH:?}/files/priv-app"
-fi
-delete_dir_if_empty "${TMP_PATH:?}/files/app"
-
-if test "${API:?}" -ge 21; then
-  # Move apps into subdirs
-  if test -e "${TMP_PATH:?}/files/priv-app"; then
-    for entry in "${TMP_PATH:?}/files/priv-app"/*; do
-      path_without_ext=$(remove_ext "${entry}")
-
-      create_dir "${path_without_ext}"
-      mv -f "${entry}" "${path_without_ext}"/
-    done
-  fi
-  if test -e "${TMP_PATH:?}/files/app"; then
-    for entry in "${TMP_PATH:?}/files/app"/*; do
-      path_without_ext=$(remove_ext "${entry}")
-
-      create_dir "${path_without_ext}"
-      mv -f "${entry}" "${path_without_ext}"/
-    done
-  fi
-fi
-
 # Prepare installation
+prepare_installation
+
 set_std_perm_recursive "${TMP_PATH:?}/files"
 if test -e "${TMP_PATH:?}/addon.d"; then set_std_perm_recursive "${TMP_PATH:?}/addon.d"; fi
 set_perm 0 0 0755 "${TMP_PATH:?}/addon.d/00-1-google-sync.sh"
