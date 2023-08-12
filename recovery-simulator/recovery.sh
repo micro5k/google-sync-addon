@@ -241,7 +241,7 @@ override_command()
 
 simulate_env()
 {
-  cp -pf -- "${_our_busybox:?}" "${BASE_SIMULATION_PATH:?}/system/bin/busybox" || fail_with_msg 'Failed to copy BusyBox'
+  cp -pf -- "${_our_busybox:?}" "${_android_sys:?}/bin/busybox" || fail_with_msg 'Failed to copy BusyBox'
   if test "${COVERAGE:-false}" != 'false'; then
     cp -pf -- "${COVERAGE:?}" "${_android_sys:?}/bin/bashcov" || fail_with_msg 'Failed to copy Bashcov'
   fi
@@ -257,12 +257,16 @@ simulate_env()
   export TMPDIR="${_android_tmp:?}"
 
   # Our custom variables
-  export CUSTOM_BUSYBOX="${BASE_SIMULATION_PATH:?}/system/bin/busybox"
+  export CUSTOM_BUSYBOX="${_android_sys:?}/bin/busybox"
   export OVERRIDE_DIR="${_our_overrider_dir:?}"
   export RS_OVERRIDE_SCRIPT="${_our_overrider_script:?}"
   export TEST_INSTALL=true
 
-  "${CUSTOM_BUSYBOX:?}" --install "${_android_sys:?}/bin" || fail_with_msg 'Failed to install BusyBox'
+  if test "${uname_o_saved:?}" != 'MS/Windows' && test "${uname_o_saved:?}" != 'Msys'; then
+    "${CUSTOM_BUSYBOX:?}" --install -s "${_android_sys:?}/bin" || fail_with_msg 'Failed to install BusyBox'
+  else
+    "${CUSTOM_BUSYBOX:?}" --install "${_android_sys:?}/bin" || fail_with_msg 'Failed to install BusyBox'
+  fi
 
   # shellcheck disable=SC2310
   override_command mount || return 123
@@ -278,10 +282,14 @@ simulate_env()
 
 restore_env()
 {
-  "${_our_busybox:?}" --uninstall "${CUSTOM_BUSYBOX:?}" 2> /dev/null || true
   export PATH="${_backup_path}"
   unset BB_OVERRIDE_APPLETS
   unset -f -- mount umount chown su sudo
+
+  "${_our_busybox:?}" 2> /dev/null --uninstall "${CUSTOM_BUSYBOX:?}" || true
+  # Fallback if --uninstall is NOT supported
+  find "${_android_sys:?}/bin" -type l -exec sh -c 'bb_path="${1:?}"; shift; if test "$(realpath "${*}")" = "${bb_path:?}"; then rm -f -- "${*}"; fi' _ "${CUSTOM_BUSYBOX:?}" '{}' ';' || true
+  rm -f "${CUSTOM_BUSYBOX:?}" || true
 }
 
 # Setup recovery output
@@ -374,8 +382,8 @@ parse_recovery_output false "${recovery_logs_dir:?}/recovery-raw.log" "${recover
 
 # List installed files
 rm -f -- "${BASE_SIMULATION_PATH:?}/sbin" || true
+rm -f -- "${_android_sys:?}/build.prop" || true
 rm -f -- "${_android_sys:?}/framework/framework-res.apk" || true
-rm -rf -- "${_android_sys:?}/bin" || true # It contains all symlinks of BusyBox, so remove it for now
 TZ=UTC find "${BASE_SIMULATION_PATH}" -exec touch -c -h -t '202001010000' -- '{}' '+' || true
 cd "${OUR_TEMP_DIR:?}" || fail_with_msg 'Failed to change dir to our temp dir'
 TZ=UTC ls -A -R -F -l -n --color='never' -- 'root' 1> "${recovery_logs_dir:?}/installed-files.log" || true
