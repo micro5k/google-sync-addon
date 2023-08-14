@@ -408,20 +408,36 @@ remount_read_write_if_needed()
 
 _detect_architectures()
 {
+  # Info:
+  # - https://android.googlesource.com/platform/cts/+/main/tests/tests/os/src/android/os/cts/BuildTest.java#68
+  # - https://android.googlesource.com/platform/cts/+/refs/tags/android-13.0.0_r74/tests/tests/os/src/android/os/cts/BuildTest.java#62
+  # - https://android.googlesource.com/toolchain/prebuilts/ndk-darwin/r23/+/refs/heads/main/build/core/setup-app.mk#63
+
   ARCH_X64='false'
-  ARCH_X86='false'
   ARCH_ARM64='false'
+  ARCH_MIPS64='false'
+  ARCH_RISCV64='false'
+
+  ARCH_X86='false'
   ARCH_ARM='false'
   ARCH_LEGACY_ARM='false'
+  ARCH_MIPS='false'
 
   if is_substring ',x86_64,' "${1:?}"; then
     ARCH_X64='true'
   fi
-  if is_substring ',x86,' "${1:?}"; then
-    ARCH_X86='true'
-  fi
   if is_substring ',arm64-v8a,' "${1:?}"; then
     ARCH_ARM64='true'
+  fi
+  if is_substring ',mips64,' "${1:?}"; then
+    ARCH_MIPS64='true'
+  fi
+  if is_substring ',riscv64,' "${1:?}"; then
+    ARCH_RISCV64='true'
+  fi
+
+  if is_substring ',x86,' "${1:?}"; then
+    ARCH_X86='true'
   fi
   if is_substring ',armeabi-v7a,' "${1:?}"; then
     ARCH_ARM='true'
@@ -429,9 +445,12 @@ _detect_architectures()
   if is_substring ',armeabi,' "${1:?}"; then
     ARCH_LEGACY_ARM='true'
   fi
+  if is_substring ',mips,' "${1:?}"; then
+    ARCH_MIPS='true'
+  fi
 
-  readonly ARCH_X64 ARCH_X86 ARCH_ARM64 ARCH_ARM ARCH_LEGACY_ARM
-  export ARCH_X64 ARCH_X86 ARCH_ARM64 ARCH_ARM ARCH_LEGACY_ARM
+  readonly ARCH_X64 ARCH_ARM64 ARCH_MIPS64 ARCH_RISCV64 ARCH_X86 ARCH_ARM ARCH_LEGACY_ARM ARCH_MIPS
+  export ARCH_X64 ARCH_ARM64 ARCH_MIPS64 ARCH_RISCV64 ARCH_X86 ARCH_ARM ARCH_LEGACY_ARM ARCH_MIPS
 }
 
 _detect_main_architectures()
@@ -443,6 +462,8 @@ _detect_main_architectures()
     CPU64='x86_64'
   elif test "${ARCH_ARM64:?}" = 'true'; then
     CPU64='arm64-v8a'
+  elif test "${ARCH_MIPS64:?}" = 'true'; then
+    CPU64='mips64'
   fi
 
   if test "${ARCH_X86:?}" = 'true'; then
@@ -451,6 +472,8 @@ _detect_main_architectures()
     CPU='armeabi-v7a'
   elif test "${ARCH_LEGACY_ARM:?}" = 'true'; then
     CPU='armeabi'
+  elif test "${ARCH_MIPS:?}" = 'true'; then
+    CPU='mips'
   fi
 
   readonly CPU64 CPU
@@ -475,6 +498,15 @@ _generate_architectures_list()
   fi
   if test "${ARCH_LEGACY_ARM:?}" = 'true'; then
     ARCH_LIST="${ARCH_LIST?}armeabi,"
+  fi
+  if test "${ARCH_MIPS64:?}" = 'true'; then
+    ARCH_LIST="${ARCH_LIST?}mips64,"
+  fi
+  if test "${ARCH_MIPS:?}" = 'true'; then
+    ARCH_LIST="${ARCH_LIST?}mips,"
+  fi
+  if test "${ARCH_RISCV64:?}" = 'true'; then
+    ARCH_LIST="${ARCH_LIST?}riscv64,"
   fi
   ARCH_LIST="${ARCH_LIST%,}"
 
@@ -691,7 +723,7 @@ initialize()
   _generate_architectures_list
 
   if test "${CPU64:?}" = 'false' && test "${CPU:?}" = 'false'; then
-    ui_error "Unsupported CPU, ABI list: ${_raw_arch_list:-}"
+    ui_error "Unsupported CPU, ABI list => $(printf '%s\n' "${_raw_arch_list?}" | LC_ALL=C tr -s -- ',' || true)"
   fi
 
   if test "${API:?}" -lt 1; then
@@ -705,9 +737,10 @@ initialize()
   fi
   PRIVAPP_PATH="${SYS_PATH:?}/${PRIVAPP_FOLDER:?}"
   readonly PRIVAPP_FOLDER PRIVAPP_PATH
+  export PRIVAPP_FOLDER PRIVAPP_PATH
 
   if test ! -e "${PRIVAPP_PATH:?}"; then
-    ui_error 'The priv-app folder does NOT exist'
+    ui_error "The ${PRIVAPP_FOLDER?} folder does NOT exist"
   fi
 
   FAKE_SIGN=false
@@ -1214,7 +1247,7 @@ select_lib()
       'arm64-v8a')
         _dest_arch_name='arm64'
         ;;
-      'armeabi-v7a' | 'armeabi')
+      'armeabi-v7a' | 'armeabi' | 'armeabi-v7a-hard')
         _dest_arch_name='arm'
         ;;
       *)
