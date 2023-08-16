@@ -41,8 +41,8 @@ if test "${IS_INSTALLATION:?}" = 'true'; then
   custom_package_extract_dir 'files' "${TMP_PATH:?}"
   custom_package_extract_dir 'addon.d' "${TMP_PATH:?}"
 
-  # Preparing
-  ui_msg 'Preparing...'
+  # Configuring
+  ui_msg 'Configuring...'
 
   setup_app 1 'Google Backup Transport 4.4' 'GoogleBackupTransport44' 'priv-app' false false
 
