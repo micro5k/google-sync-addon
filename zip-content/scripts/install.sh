@@ -116,11 +116,11 @@ set_perm 0 0 0755 "${TMP_PATH:?}/addon.d/00-1-google-sync.sh"
 
 # Installing
 ui_msg 'Installing...'
-delete_dir_if_empty "${TMP_PATH:?}/files/etc/permissions"
-delete_dir_if_empty "${TMP_PATH:?}/files/etc"
-if test -e "${TMP_PATH:?}/files/etc/permissions"; then copy_dir_content "${TMP_PATH:?}/files/etc/permissions" "${SYS_PATH:?}/etc/permissions"; fi
-if test -e "${TMP_PATH:?}/files/app"; then copy_dir_content "${TMP_PATH:?}/files/app" "${SYS_PATH:?}/app"; fi
-if test -e "${TMP_PATH:?}/files/priv-app"; then copy_dir_content "${TMP_PATH:?}/files/priv-app" "${PRIVAPP_PATH:?}"; fi
+
+perform_secure_copy_to_device 'etc/permissions'
+perform_secure_copy_to_device 'framework'
+if test "${PRIVAPP_FOLDER:?}" != 'app'; then perform_secure_copy_to_device "${PRIVAPP_FOLDER:?}"; fi
+perform_secure_copy_to_device 'app'
 
 USED_SETTINGS_PATH="${TMP_PATH:?}/files/etc/zips"
 create_dir "${USED_SETTINGS_PATH:?}"
