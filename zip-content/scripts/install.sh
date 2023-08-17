@@ -109,9 +109,6 @@ fi
 
 # Prepare installation
 prepare_installation
-
-set_std_perm_recursive "${TMP_PATH:?}/files"
-if test -e "${TMP_PATH:?}/addon.d"; then set_std_perm_recursive "${TMP_PATH:?}/addon.d"; fi
 set_perm 0 0 0755 "${TMP_PATH:?}/addon.d/00-1-google-sync.sh"
 
 # Installing
