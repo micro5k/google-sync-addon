@@ -761,6 +761,15 @@ deinitialize()
   if test "${DATA_INIT_STATUS:?}" = '1' && test -n "${DATA_PATH:-}"; then unmount "${DATA_PATH:?}"; fi
 }
 
+_move_app_into_subfolder()
+{
+  local _path_without_ext
+  _path_without_ext="$(remove_ext "${1:?}")"
+
+  mkdir -p -- "${_path_without_ext:?}" || ui_error "Failed to create the folder '${_path_without_ext?}'"
+  mv -f -- "${1:?}" "${_path_without_ext:?}/" || ui_error "Failed to move the file '${1?}' to folder '${_path_without_ext?}/'"
+}
+
 prepare_installation()
 {
   local _backup_ifs
@@ -778,24 +787,18 @@ prepare_installation()
     _backup_ifs="${IFS:-}"
     IFS=''
 
-    # Move apps into subdirs
-    ui_debug "Moving apps into subdirs..."
+    # Move apps into subfolders
+    ui_debug "Moving apps into subfolders..."
     if test -e "${TMP_PATH:?}/files/priv-app"; then
       for entry in "${TMP_PATH:?}/files/priv-app"/*; do
         if test ! -f "${entry:?}"; then continue; fi
-        path_without_ext="$(remove_ext "${entry:?}")"
-
-        mkdir -p -- "${path_without_ext:?}" || ui_error "Failed to create the folder '${path_without_ext:-}'"
-        mv -f -- "${entry:?}" "${path_without_ext:?}/" || ui_error "Failed to move the file '${entry:-}' to folder '${path_without_ext:?}/'"
+        _move_app_into_subfolder "${entry:?}"
       done
     fi
     if test -e "${TMP_PATH:?}/files/app"; then
       for entry in "${TMP_PATH:?}/files/app"/*; do
         if test ! -f "${entry:?}"; then continue; fi
-        path_without_ext="$(remove_ext "${entry:?}")"
-
-        mkdir -p -- "${path_without_ext:?}" || ui_error "Failed to create the folder '${path_without_ext:-}'"
-        mv -f -- "${entry:?}" "${path_without_ext:?}/" || ui_error "Failed to move the file '${entry:-}' to folder '${path_without_ext:?}/'"
+        _move_app_into_subfolder "${entry:?}"
       done
     fi
 
@@ -1317,7 +1320,7 @@ extract_libs()
     fi
 
     if test "${_lib_selected:?}" = 'true'; then
-      create_dir "${TMP_PATH:?}/files/${1:?}/${2:?}"
+      _move_app_into_subfolder "${TMP_PATH:?}/files/${1:?}/${2:?}.apk"
       move_rename_dir "${TMP_PATH:?}/selected-libs" "${TMP_PATH:?}/files/${1:?}/${2:?}/lib"
     elif test "${CPU64:?}" = 'mips64' || test "${CPU:?}" = 'mips'; then
       : # Tolerate missing libraries
@@ -1371,8 +1374,9 @@ setup_app()
   _min_api="$(string_split "${_app_conf:?}" 2)" || ui_error "Failed to get min API for '${2}'"
   _max_api="$(string_split "${_app_conf:?}" 3)" || ui_error "Failed to get max API for '${2}'"
   _output_name="$(string_split "${_app_conf:?}" 4)" || ui_error "Failed to get output name for '${2}'"
-  _internal_name="$(string_split "${_app_conf:?}" 5)" || ui_error "Failed to get internal name for '${2}'"
-  _file_hash="$(string_split "${_app_conf:?}" 6)" || ui_error "Failed to get the hash of '${2}'"
+  _extract_libs="$(string_split "${_app_conf:?}" 5)" || ui_error "Failed to get the value of extract libs for '${2}'"
+  _internal_name="$(string_split "${_app_conf:?}" 6)" || ui_error "Failed to get internal name for '${2}'"
+  _file_hash="$(string_split "${_app_conf:?}" 7)" || ui_error "Failed to get the hash of '${2}'"
   _url_handling="${5:-false}"
   _optional="${6:-true}"
 
