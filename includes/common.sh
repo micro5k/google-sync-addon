@@ -33,9 +33,6 @@ unset JAVA_TOOL_OPTIONS
 unset _JAVA_OPTIONS
 unset CDPATH
 
-if test -n "${HOME:-}"; then HOME="$(realpath "${HOME:?}")" || return 1 2>&- || exit 1; fi
-SCRIPT_DIR="$(realpath "${SCRIPT_DIR:?}")" || return 1 2>&- || exit 1
-
 ui_error()
 {
   echo 1>&2 "ERROR: $1"
@@ -118,7 +115,7 @@ detect_os()
 
 change_title()
 {
-  if test "${CI:-false}" = 'false'; then printf '\033]0;%s\007\r' "${1:?}" && printf '%*s     \r' "${#1}" ''; fi
+  if test "${CI:-false}" = 'false'; then printf '\033]0;%s - %s\007\r' "${1:?}" "${MODULE_NAME:?}" && printf '       %*s   %*s    \r' "${#1}" '' "${#MODULE_NAME}" ''; fi
   A5K_LAST_TITLE="${1:?}"
   export A5K_LAST_TITLE
 }
@@ -343,6 +340,31 @@ dl_list()
     dl_file "${LOCAL_PATH:?}" "${LOCAL_FILENAME:?}.apk" "${DL_HASH:?}" "${DL_URL:?}" "${DL_MIRROR?}" || return "${?}"
   done || return "${?}"
 }
+
+init_cmdline()
+{
+  readonly SCRIPT_DIR MODULE_NAME
+  export SCRIPT_DIR MODULE_NAME
+
+  change_title 'Command-line'
+
+  alias dir=ls
+  alias 'cd..'='cd ..'
+  alias 'cd.'='cd .'
+  alias 'cls'='reset'
+  alias 'profgen'='profile-generator.sh'
+  unset JAVA_HOME
+
+  if test -n "${HOME:-}"; then HOME="$(realpath "${HOME:?}")" || ui_error 'Failed to set HOME'; fi
+}
+
+SCRIPT_DIR="$(realpath "${SCRIPT_DIR:?}")" || ui_error 'Failed to set SCRIPT_DIR'
+MODULE_NAME="$(simple_get_prop 'name' "${SCRIPT_DIR:?}/zip-content/module.prop")" || ui_error 'Failed to parse the module name string'
+
+if test "${DO_INIT_CMDLINE:-0}" = '1'; then
+  init_cmdline
+  unset DO_INIT_CMDLINE
+fi
 
 # Detect OS and set OS specific info
 PLATFORM="$(detect_os)"
