@@ -98,6 +98,8 @@ else
   delete_recursive "${TMP_PATH}/files/etc/default-permissions"
 fi
 
+ui_debug ''
+
 # Prepare installation
 prepare_installation
 
