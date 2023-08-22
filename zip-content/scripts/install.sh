@@ -93,12 +93,7 @@ fi
 
 # Configuring default Android permissions
 if test "${API}" -ge 23; then
-  ui_debug 'Configuring default Android permissions...'
-  if ! test -e "${SYS_PATH}/etc/default-permissions"; then
-    ui_msg 'Creating the default permissions folder...'
-    create_dir "${SYS_PATH}/etc/default-permissions"
-  fi
-  copy_dir_content "${TMP_PATH}/files/etc/default-permissions" "${SYS_PATH}/etc/default-permissions"
+  :
 else
   delete_recursive "${TMP_PATH}/files/etc/default-permissions"
 fi
