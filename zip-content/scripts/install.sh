@@ -88,12 +88,7 @@ export INSTALLER
 unmount_extra_partitions
 
 if test "${IS_INSTALLATION:?}" != 'true'; then
-  deinitialize
-
-  touch "${TMP_PATH:?}/installed"
-  ui_msg 'Uninstallation finished.'
-
-  exit 0
+  finalize_and_report_success
 fi
 
 # Configuring default Android permissions
@@ -122,7 +117,4 @@ if test -e "${SYS_PATH:?}/addon.d"; then
   copy_file "${TMP_PATH}/addon.d/00-1-google-sync.sh" "${SYS_PATH}/addon.d"
 fi
 
-deinitialize
-
-touch "${TMP_PATH:?}/installed"
-ui_msg 'Installation finished.'
+finalize_and_report_success
