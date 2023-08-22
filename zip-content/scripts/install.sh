@@ -111,26 +111,8 @@ fi
 # Prepare installation
 prepare_installation
 
-# Installing
-ui_msg 'Installing...'
-
-set_perm 0 0 0640 "${TMP_PATH:?}/files/etc/zips/${MODULE_ID:?}.prop"
-perform_secure_copy_to_device 'etc/zips'
-set_perm 0 0 0750 "${SYS_PATH:?}/etc/zips"
-
-if test "${API:?}" -lt 21; then
-  if test "${CPU64}" != false; then
-    perform_secure_copy_to_device 'lib64'
-  fi
-  if test "${CPU}" != false; then
-    perform_secure_copy_to_device 'lib'
-  fi
-fi
-
-perform_secure_copy_to_device 'etc/permissions'
-perform_secure_copy_to_device 'framework'
-if test "${PRIVAPP_FOLDER:?}" != 'app'; then perform_secure_copy_to_device "${PRIVAPP_FOLDER:?}"; fi
-perform_secure_copy_to_device 'app'
+# Install
+perform_installation
 
 # Install survival script
 if test -e "${SYS_PATH:?}/addon.d"; then

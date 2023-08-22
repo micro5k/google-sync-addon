@@ -807,6 +807,7 @@ prepare_installation()
     IFS="${_backup_ifs:-}"
   fi
 
+  delete_temp "files/etc/zips"
   create_dir "${TMP_PATH:?}/files/etc/zips"
   {
     echo '# SPDX-FileCopyrightText: none'
@@ -816,7 +817,7 @@ prepare_installation()
     echo 'install.type=flashable-zip'
     echo "install.version.code=${MODULE_VERCODE:?}"
     echo "install.version=${MODULE_VERSION:?}"
-  } 1> "${TMP_PATH:?}/files/etc/zips/${MODULE_ID:?}.prop"
+  } 1> "${TMP_PATH:?}/files/etc/zips/${MODULE_ID:?}.prop" || ui_error 'Failed to generate the prop file of this zip'
 
   set_std_perm_recursive "${TMP_PATH:?}/files"
   if test -e "${TMP_PATH:?}/addon.d"; then
@@ -835,6 +836,31 @@ perform_secure_copy_to_device()
   cp 2> /dev/null -rpf -- "${TMP_PATH:?}/files/${1:?}"/* "${SYS_PATH:?}/${1:?}"/ ||
     _error="$(cp 2>&1 -rpf -- "${TMP_PATH:?}/files/${1:?}"/* "${SYS_PATH:?}/${1:?}"/)" ||
     ui_error "Failed to copy '${1?}' to the device due to => $(printf '%s\n' "${_error?}" | head -n 1 || true)"
+}
+
+perform_installation()
+{
+  ui_msg 'Installing...'
+
+  set_perm 0 0 0640 "${TMP_PATH:?}/files/etc/zips/${MODULE_ID:?}.prop"
+  perform_secure_copy_to_device 'etc/zips'
+  set_perm 0 0 0750 "${SYS_PATH:?}/etc/zips"
+
+  if test "${API:?}" -lt 21; then
+    if test "${CPU64}" != false; then
+      perform_secure_copy_to_device 'lib64'
+    fi
+    if test "${CPU}" != false; then
+      perform_secure_copy_to_device 'lib'
+    fi
+  fi
+
+  perform_secure_copy_to_device 'etc/permissions'
+  perform_secure_copy_to_device 'framework'
+  perform_secure_copy_to_device 'etc/org.fdroid.fdroid'
+  if test "${PRIVAPP_FOLDER:?}" != 'app'; then perform_secure_copy_to_device "${PRIVAPP_FOLDER:?}"; fi
+  perform_secure_copy_to_device 'app'
+  perform_secure_copy_to_device 'etc/sysconfig'
 }
 
 # Message related functions
