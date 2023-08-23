@@ -775,7 +775,7 @@ replace_permission_placeholders()
 {
   if test -e "${TMP_PATH:?}/files/etc/${1:?}"; then
     { grep -l -r -F -e "${2:?}" -- "${TMP_PATH:?}/files/etc/${1:?}" || true; } | while IFS='' read -r file_name; do
-      ui_debug "Processing ${file_name#"${TMP_PATH}/files/"}..."
+      ui_debug " ${file_name#"${TMP_PATH}/files/"}"
       replace_line_in_file "${file_name:?}" "${2:?}" "${3:?}"
     done || ui_warning "Failed to replace '${2?}' in 'files/etc/${1?}'"
   fi
@@ -789,6 +789,23 @@ prepare_installation()
 
   # Waste some time otherwise ui_debug may appear before the previous ui_msg
   true
+
+  ui_debug ''
+
+  if test "${API:?}" -ge 29; then # Android 10+
+    ui_debug 'Processing ACCESS_BACKGROUND_LOCATION...'
+    replace_permission_placeholders 'default-permissions' '%ACCESS_BACKGROUND_LOCATION%' '        <permission name="android.permission.ACCESS_BACKGROUND_LOCATION" fixed="false" whitelisted="true" />'
+    ui_debug 'Done'
+  fi
+
+  if test "${FAKE_SIGN:?}" = 'true'; then
+    ui_debug 'Processing FAKE_PACKAGE_SIGNATURE...'
+    replace_permission_placeholders 'permissions' '%FAKE_PACKAGE_SIGNATURE%' '        <permission name="android.permission.FAKE_PACKAGE_SIGNATURE" />'
+    replace_permission_placeholders 'default-permissions' '%FAKE_PACKAGE_SIGNATURE%' '        <permission name="android.permission.FAKE_PACKAGE_SIGNATURE" fixed="false" />'
+    ui_debug 'Done'
+  fi
+
+  ui_debug ''
 
   if test "${PRIVAPP_FOLDER:?}" != 'priv-app' && test -e "${TMP_PATH:?}/files/priv-app"; then
     ui_debug "Merging priv-app folder with ${PRIVAPP_FOLDER:?} folder..."
