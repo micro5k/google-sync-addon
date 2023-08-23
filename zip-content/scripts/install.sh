@@ -85,16 +85,15 @@ export INSTALLER
 # shellcheck source=SCRIPTDIR/uninstall.sh
 . "${TMP_PATH:?}/uninstall.sh"
 
-unmount_extra_partitions
-
 if test "${IS_INSTALLATION:?}" != 'true'; then
+  unmount_extra_partitions
   finalize_and_report_success
 fi
 
-# Configuring default Android permissions
-if test "${API}" -ge 23; then
-  :
-else
+unmount_extra_partitions
+
+# Preparing remaining files
+if test "${API}" -lt 23; then
   delete_recursive "${TMP_PATH}/files/etc/default-permissions"
 fi
 
