@@ -59,24 +59,6 @@ else
   ui_msg_empty_line
 fi
 
-# Resetting Android runtime permissions
-if test "${API}" -ge 23; then
-  if test -e "${DATA_PATH:?}/system/users/0/runtime-permissions.xml"; then
-    if ! grep -q 'com.google.android.syncadapters.contacts' "${DATA_PATH:?}"/system/users/*/runtime-permissions.xml; then
-      # Purge the runtime permissions to prevent issues when the user flash this on a dirty install
-      ui_msg "Resetting legacy Android runtime permissions..."
-      delete "${DATA_PATH:?}"/system/users/*/runtime-permissions.xml
-    fi
-  fi
-  if test -e "${DATA_PATH:?}/misc_de/0/apexdata/com.android.permission/runtime-permissions.xml"; then
-    if ! grep -q 'com.google.android.syncadapters.contacts' "${DATA_PATH:?}"/misc_de/*/apexdata/com.android.permission/runtime-permissions.xml; then
-      # Purge the runtime permissions to prevent issues when the user flash this on a dirty install
-      ui_msg "Resetting Android runtime permissions..."
-      delete "${DATA_PATH:?}"/misc_de/*/apexdata/com.android.permission/runtime-permissions.xml
-    fi
-  fi
-fi
-
 # Clean previous installations
 delete "${SYS_PATH:?}/etc/zips/${MODULE_ID:?}.prop"
 
@@ -104,6 +86,24 @@ prepare_installation
 
 # Install
 perform_installation
+
+# Resetting Android runtime permissions
+if test "${API:?}" -ge 23; then
+  if test -e "${DATA_PATH:?}/system/users/0/runtime-permissions.xml"; then
+    if ! grep -q 'com.google.android.syncadapters.contacts' "${DATA_PATH:?}"/system/users/*/runtime-permissions.xml; then
+      # Purge the runtime permissions to prevent issues when the user flash this on a dirty install
+      ui_msg "Resetting legacy Android runtime permissions..."
+      delete "${DATA_PATH:?}"/system/users/*/runtime-permissions.xml
+    fi
+  fi
+  if test -e "${DATA_PATH:?}/misc_de/0/apexdata/com.android.permission/runtime-permissions.xml"; then
+    if ! grep -q 'com.google.android.syncadapters.contacts' "${DATA_PATH:?}"/misc_de/*/apexdata/com.android.permission/runtime-permissions.xml; then
+      # Purge the runtime permissions to prevent issues when the user flash this on a dirty install
+      ui_msg "Resetting Android runtime permissions..."
+      delete "${DATA_PATH:?}"/misc_de/*/apexdata/com.android.permission/runtime-permissions.xml
+    fi
+  fi
+fi
 
 # Install survival script
 if test -e "${SYS_PATH:?}/addon.d"; then
