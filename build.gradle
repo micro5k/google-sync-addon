@@ -13,24 +13,20 @@ plugins {
     //id 'com.github.spotbugs' version '4.7.6'
 }
 
-gradleEnterprise.buildScan {
-    termsOfServiceUrl 'https://gradle.com/terms-of-service'
-    termsOfServiceAgree 'yes'
-    publishAlwaysIf System.getenv('UPLOAD_BUILD_SCAN') != null
-}
+/* ===FUNCTIONS=== */
 
-void configure() {
+private void initialize() {
     println name
 
-    rootProject.buildDir = "${projectDir}/output"
+    project.buildDir = "${project.projectDir}/output"
     defaultTasks 'tasks'
 
     Properties props = new Properties()
-    file("${projectDir}/zip-content/module.prop").withInputStream { props.load(it) }
+    file("${project.projectDir}/zip-content/module.prop").withInputStream { props.load(it) }
 
     description = String.valueOf(props.getProperty('description'))
     version = String.valueOf(props.getProperty('version')).toLowerCase(Locale.ENGLISH).trim()
-    archivesBaseName = String.valueOf(props.getProperty('id')).trim()
+    ext.ourArchivesBaseName = String.valueOf(props.getProperty('id')).trim()
 
     //ext.isBeta = version.endsWith('-beta')
     //ext.isAlpha = version.endsWith('-alpha')
@@ -43,7 +39,31 @@ void configure() {
         throw new GradleException('This require Java 11 or later')
     }
 }
-configure()
+
+private String getOurArchivesBaseName()
+{
+    String val = String.valueOf("${ext.ourArchivesBaseName}")
+    if(val.isEmpty() || val == 'null')
+        throw new InvalidUserDataException('String is empty.')
+
+    return "${val}"
+}
+
+initialize()
+
+/* ===BLOCKS=== */
+
+gradleEnterprise.buildScan {
+    termsOfServiceUrl 'https://gradle.com/terms-of-service'
+    termsOfServiceAgree 'yes'
+    publishAlwaysIf System.getenv('UPLOAD_BUILD_SCAN') != null
+}
+
+base {
+    archivesName = getOurArchivesBaseName()
+}
+
+/* ==TASKS=== */
 
 tasks.register('cleanCache', Delete) {
     delete "${projectDir}/cache"
