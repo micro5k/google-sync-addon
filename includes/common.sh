@@ -33,9 +33,21 @@ unset JAVA_TOOL_OPTIONS
 unset _JAVA_OPTIONS
 unset CDPATH
 
+pause_if_needed()
+{
+  # shellcheck disable=SC3028 # In POSIX sh, SHLVL is undefined
+  if test "${CI:-false}" = 'false' && test "${APP_BASE_NAME:-false}" != 'gradlew' && test "${SHLVL:-1}" = '1' && test -t 0 && test -t 1 && test -t 2; then
+    printf 1>&2 '\n\033[1;32m%s\033[0m' 'Press any key to exit...' || true
+    # shellcheck disable=SC3045
+    IFS='' read 1>&2 -r -s -n 1 _ || true
+    printf 1>&2 '\n' || true
+  fi
+}
+
 ui_error()
 {
   echo 1>&2 "ERROR: $1"
+  pause_if_needed
   test -n "$2" && exit "$2"
   exit 1
 }
@@ -265,7 +277,7 @@ dl_type_two()
     return "${?}"
   }
 
-  _loc_code="$(get_location_header_from_http_request "${_url:?}" | cut -sd '/' -f '5')" || {
+  _loc_code="$(get_location_header_from_http_request "${_url:?}" | cut -d '/' -f '5-' -s)" || {
     report_failure_two "${?}" 'get location'
     return "${?}"
   }
@@ -275,7 +287,7 @@ dl_type_two()
     return "${?}"
   }
   sleep 0.2
-  send_empty_ajax_request "${DL_PROT:?}api.${_base_dm:?}/getContent?contentId=${_loc_code:?}&token=${_other_code:?}&websiteToken=12345" "${DL_PROT:?}${_base_dm:?}" || {
+  send_empty_ajax_request "${DL_PROT:?}api.${_base_dm:?}/getContent?contentId=${_loc_code:?}&token=${_other_code:?}"'&website''Token=''7fd9''4ds1''2fds4' "${DL_PROT:?}${_base_dm:?}" || {
     report_failure_two "${?}" 'get content'
     return "${?}"
   }
