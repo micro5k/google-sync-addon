@@ -14,19 +14,35 @@ CONTENTS
 .. |red-no| replace:: ❌
 .. |no-upd| replace:: 🙈
 
-Android 7+
-----------
-- **files/system-apps/priv-app/GoogleContactsSyncAdapter8.apk** => Google Contacts Sync 8.1.0 (27)
 
-Android 5+
-----------
-- **files/system-apps/app/GoogleCalendarSyncAdapter6.apk** => Google Calendar Sync 6.0.44-267540251 (2016267990)
+Apps
+----
 
-Android 4.4 - 4.4.4
--------------------
-- **files/system-apps/priv-app/GoogleBackupTransport44.apk** => Google Backup Transport 4.4.4-1227136 (19)
-- **files/system-apps/app/GoogleContactsSyncAdapter44.apk** => Google Contacts Sync 4.4.4-1227136 (19)
-- **files/system-apps/app/GoogleCalendarSyncAdapter5.apk** => Google Calendar Sync 5.2.3-99827563 (2015080710)
++----------------------------------------------------------------------------------------+---------------+-----------------------+------------------------------+
+|                                                                                        |  Android ver. |    Updatable with     |            Signer            |
+|                                      Application                                       +-------+-------+----------+------------+----------+--------+----------+
+|                                                                                        |  Min  |  Max  | F-Droid  | Play Store | F-Droid  | Author | ale5000  |
++========================================================================================+=======+=======+==========+============+==========+========+==========+
+| [#]_ Google Contacts Sync 8.1.0 (27)                                                   |  7.0  |       |          |            |          | |fire| |          |
++----------------------------------------------------------------------------------------+-------+-------+----------+------------+----------+--------+----------+
+| [#]_ Google Contacts Sync 4.4.4-1227136 (19)                                           |  4.4  | 4.4.4 |          |            |          | |fire| |          |
++----------------------------------------------------------------------------------------+-------+-------+----------+------------+----------+--------+----------+
+| [#]_ Google Calendar Sync 6.0.44-267540251 (2016267990)                                |  5.0  |       |          |            |          | |fire| |          |
++----------------------------------------------------------------------------------------+-------+-------+----------+------------+----------+--------+----------+
+| [#]_ Google Calendar Sync 5.2.3-99827563 (2015080710)                                  |  4.4  | 4.4.4 |          |            |          | |fire| |          |
++----------------------------------------------------------------------------------------+-------+-------+----------+------------+----------+--------+----------+
+| [#]_ Google Backup Transport 4.4.4-1227136 (19)                                        |  4.4  | 4.4.4 |          |            |          | |fire| |          |
++----------------------------------------------------------------------------------------+-------+-------+----------+------------+----------+--------+----------+
+
+
+Notes
+-----
+.. [#] <origin/priv-app/GoogleContactsSyncAdapter8.apk>
+.. [#] <origin/app/GoogleContactsSyncAdapter44.apk>
+.. [#] <origin/app/GoogleCalendarSyncAdapter6.apk>
+.. [#] <origin/app/GoogleCalendarSyncAdapter5.apk>
+.. [#] <origin/priv-app/GoogleBackupTransport44.apk>
+
 
 Components used only during setup (not installed)
 -------------------------------------------------
