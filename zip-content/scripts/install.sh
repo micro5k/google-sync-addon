@@ -19,7 +19,7 @@ INSTALL_CALENDARSYNC="$(parse_setting 'INSTALL_CALENDARSYNC' "${INSTALL_CALENDAR
 
 if test "${API:?}" -ge 24; then
   : ### Supported Android versions
-elif test "${API:?}" -ge 21; then
+elif test "${API:?}" -ge 23; then
   ui_error 'Unsupported Android version'
 elif test "${API:?}" -ge 19; then
   : ### Supported Android versions
