@@ -4,10 +4,8 @@
 
 # SPDX-FileCopyrightText: (c) 2016 ale5000
 # SPDX-License-Identifier: GPL-3.0-or-later
-# SPDX-FileType: SOURCE
 
-# shellcheck disable=SC3043
-# SC3043: In POSIX sh, local is undefined
+# shellcheck disable=SC3043 # SC3043: In POSIX sh, local is undefined #
 
 ### INIT ENV ###
 
@@ -406,6 +404,15 @@ remount_read_write_if_needed()
   fi
 }
 
+is_string_starting_with()
+{
+  case "${2?}" in
+    "${1:?}"*) return 0 ;; # Found
+    *) ;;
+  esac
+  return 1 # NOT found
+}
+
 _detect_architectures()
 {
   # Info:
@@ -599,13 +606,11 @@ initialize()
   _find_and_mount_system
   cp -pf "${SYS_PATH:?}/build.prop" "${TMP_PATH:?}/build.prop" # Cache the file for faster access
 
-  BUILD_MANUFACTURER="$(sys_getprop 'ro.product.manufacturer')"
-  readonly BUILD_MANUFACTURER
-  export BUILD_MANUFACTURER
-
+  BUILD_MANUFACTURER="$(sys_getprop 'ro.product.manufacturer')" || BUILD_MANUFACTURER="$(sys_getprop 'ro.product.brand')"
   BUILD_DEVICE="$(sys_getprop 'ro.product.device')" || BUILD_DEVICE="$(sys_getprop 'ro.build.product')"
-  readonly BUILD_DEVICE
-  export BUILD_DEVICE
+  BUILD_PRODUCT="$(sys_getprop 'ro.product.name')"
+  readonly BUILD_MANUFACTURER BUILD_DEVICE BUILD_PRODUCT
+  export UILD_MANUFACTURER BUILD_DEVICE BUILD_PRODUCT
 
   if test "${BUILD_MANUFACTURER?}" = 'OnePlus' && test "${BUILD_DEVICE?}" = 'OnePlus6'; then
     export KEYCHECK_ENABLED='false' # It doesn't work properly on this device
@@ -620,13 +625,14 @@ initialize()
 
   IS_EMU='false'
   case "${BUILD_DEVICE?}" in
-    'windows_x86_64' | 'emu64x')
-      IS_EMU='true'
-      ;;
-    *)
-      if is_valid_prop "$(simple_getprop 'ro.leapdroid.version' || true)"; then IS_EMU='true'; fi
-      ;;
+    'windows_x86_64' | 'emu64x') IS_EMU='true' ;;
+    *) ;;
   esac
+
+  if is_string_starting_with 'sdk_google_phone_' "${BUILD_PRODUCT?}" || is_valid_prop "$(simple_getprop 'ro.leapdroid.version' || true)"; then
+    IS_EMU='true'
+  fi
+
   readonly IS_EMU
   export IS_EMU
 
@@ -790,19 +796,18 @@ replace_permission_placeholders()
 
 prepare_installation()
 {
-  local _backup_ifs
+  local _backup_ifs _need_newline
 
   ui_msg 'Preparing installation...'
 
-  # Waste some time otherwise ui_debug may appear before the previous ui_msg
-  true
-
-  ui_debug ''
+  true && true && true # Waste some time otherwise ui_debug may appear before the previous ui_msg
+  _need_newline='false'
 
   if test "${API:?}" -ge 29; then # Android 10+
     ui_debug '  Processing ACCESS_BACKGROUND_LOCATION...'
     replace_permission_placeholders 'default-permissions' '%ACCESS_BACKGROUND_LOCATION%' '        <permission name="android.permission.ACCESS_BACKGROUND_LOCATION" fixed="false" whitelisted="true" />'
     ui_debug '  Done'
+    _need_newline='true'
   fi
 
   if test "${FAKE_SIGN_PERMISSION:?}" = 'true'; then
@@ -810,12 +815,13 @@ prepare_installation()
     replace_permission_placeholders 'permissions' '%FAKE_PACKAGE_SIGNATURE%' '        <permission name="android.permission.FAKE_PACKAGE_SIGNATURE" />'
     replace_permission_placeholders 'default-permissions' '%FAKE_PACKAGE_SIGNATURE%' '        <permission name="android.permission.FAKE_PACKAGE_SIGNATURE" fixed="false" />'
     ui_debug '  Done'
+    _need_newline='true'
   fi
 
-  ui_debug ''
+  test "${_need_newline:?}" = 'false' || ui_debug ''
 
   if test "${PRIVAPP_FOLDERNAME:?}" != 'priv-app' && test -e "${TMP_PATH:?}/files/priv-app"; then
-    ui_debug "Merging priv-app folder with ${PRIVAPP_FOLDERNAME?} folder..."
+    ui_debug "  Merging priv-app folder with ${PRIVAPP_FOLDERNAME?} folder..."
     mkdir -p -- "${TMP_PATH:?}/files/${PRIVAPP_FOLDERNAME:?}" || ui_error "Failed to create the dir '${TMP_PATH?}/files/${PRIVAPP_FOLDERNAME?}'"
     copy_dir_content "${TMP_PATH:?}/files/priv-app" "${TMP_PATH:?}/files/${PRIVAPP_FOLDERNAME:?}"
     delete_temp "files/priv-app"
@@ -826,7 +832,7 @@ prepare_installation()
     IFS=''
 
     # Move apps into subfolders
-    ui_debug 'Moving apps into subfolders...'
+    ui_debug '  Moving apps into subfolders...'
     if test -e "${TMP_PATH:?}/files/priv-app"; then
       for entry in "${TMP_PATH:?}/files/priv-app"/*; do
         if test ! -f "${entry:?}"; then continue; fi
@@ -956,22 +962,30 @@ _rolling_back_last_app()
   return 1
 }
 
+_is_free_space_error()
+{
+  case "${1?}" in
+    *'space left'*) return 0 ;; # Found
+    *) ;;                       # NOT found
+  esac
+  return 1 # NOT found
+}
+
 perform_secure_copy_to_device()
 {
   if test ! -e "${TMP_PATH:?}/files/${1:?}"; then return 0; fi
-  local _first_error_text=''
   local _error_text=''
 
   ui_debug "  Copying the '${1?}' folder to the device..."
   create_dir "${SYS_PATH:?}/${1:?}"
 
-  if cp 2> /dev/null -r -p -f -- "${TMP_PATH:?}/files/${1:?}"/* "${SYS_PATH:?}/${1:?}"/ || _first_error_text="$(cp 2>&1 -r -p -f -- "${TMP_PATH:?}/files/${1:?}"/* "${SYS_PATH:?}/${1:?}"/)"; then
+  if cp 2> /dev/null -r -p -f -- "${TMP_PATH:?}/files/${1:?}"/* "${SYS_PATH:?}/${1:?}"/ || _error_text="$(cp 2>&1 -r -p -f -- "${TMP_PATH:?}/files/${1:?}"/* "${SYS_PATH:?}/${1:?}"/)"; then
     return 0
-  else
+  elif _is_free_space_error "${_error_text?}"; then
     while _rolling_back_last_app "${1:?}"; do
-      if ! _something_exists "${TMP_PATH:?}/files/${1:?}"/* || _error_text="$(cp 2>&1 -r -p -f -- "${TMP_PATH:?}/files/${1:?}"/* "${SYS_PATH:?}/${1:?}"/)"; then
-        if test -n "${_first_error_text?}"; then
-          ui_recovered_error "$(printf '%s\n' "${_first_error_text:?}" | head -n 1 || true)"
+      if ! _something_exists "${TMP_PATH:?}/files/${1:?}"/* || cp 2> /dev/null -r -p -f -- "${TMP_PATH:?}/files/${1:?}"/* "${SYS_PATH:?}/${1:?}"/; then
+        if test -n "${_error_text?}"; then
+          ui_recovered_error "$(printf '%s\n' "${_error_text:?}" | head -n 1 || true)"
         else
           ui_recovered_error 'Unknown'
         fi
@@ -980,7 +994,7 @@ perform_secure_copy_to_device()
     done
   fi
 
-  touch "${SYS_PATH:?}/etc/zips/${MODULE_ID:?}.failed" || true
+  touch 2> /dev/null "${SYS_PATH:?}/etc/zips/${MODULE_ID:?}.failed" || true
 
   ui_debug ''
   df -h -T -- "${SYS_MOUNTPOINT:?}" || true
