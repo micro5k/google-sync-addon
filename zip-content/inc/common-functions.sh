@@ -483,8 +483,14 @@ _detect_main_architectures()
     CPU='mips'
   fi
 
-  readonly CPU64 CPU
-  export CPU64 CPU
+  if test "${CPU64:?}" != 'false'; then
+    MAIN_ABI="${CPU64:?}"
+  else
+    MAIN_ABI="${CPU:?}"
+  fi
+
+  readonly CPU64 CPU MAIN_ABI
+  export CPU64 CPU MAIN_ABI
 }
 
 _generate_architectures_list()
@@ -733,6 +739,9 @@ initialize()
   _detect_main_architectures
   _generate_architectures_list
 
+  MAIN_64BIT_ABI="${CPU64:?}" # ToDO: fully rename
+  MAIN_32BIT_ABI="${CPU:?}" # ToDO: fully rename
+
   if test "${CPU64:?}" = 'false' && test "${CPU:?}" = 'false'; then
     ui_error "Unsupported CPU, ABI list => $(printf '%s\n' "${_raw_arch_list?}" | LC_ALL=C tr -s -- ',' || true)"
   fi
@@ -886,7 +895,7 @@ _get_free_space()
       continue
     fi
 
-    if test -n "${available_space?}" && printf '%s\n' "${available_space:?}"; then
+    if test -n "${available_space?}" && test "${available_space:?}" -ge 0 && printf '%s\n' "${available_space:?}"; then
       return 4
     fi
   done
@@ -1556,7 +1565,7 @@ extract_libs()
     if test "${_lib_selected:?}" = 'true'; then
       _move_app_into_subfolder "${TMP_PATH:?}/files/${1:?}/${2:?}.apk"
       move_rename_dir "${TMP_PATH:?}/selected-libs" "${TMP_PATH:?}/files/${1:?}/${2:?}/lib"
-    elif test "${CPU64:?}" = 'mips64' || test "${CPU:?}" = 'mips'; then
+    elif test "${MAIN_ABI:?}" = 'mips64' || test "${MAIN_ABI:?}" = 'mips'; then
       : # Tolerate missing libraries
     else
       ui_error "Failed to select library"
