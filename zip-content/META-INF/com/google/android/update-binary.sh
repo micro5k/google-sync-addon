@@ -25,32 +25,42 @@ export ZIPFILE="${3:?}"
 ### PREVENTIVE CHECKS ###
 
 command 1> /dev/null -v printf || {
-  printf()
-  {
-    if test "${1:-}" = '%s\n\n'; then _printf_newline='true'; fi
-    if test "${#}" -gt 1; then shift; fi
-    echo "${@}"
+  if command 1> /dev/null -v busybox; then
+    alias printf='busybox printf'
+  else
+    {
+      printf()
+      {
+        if test "${1:-}" = '%s\n\n'; then _printf_newline='true'; fi
+        if test "${#}" -gt 1; then shift; fi
+        echo "${@}"
 
-    test "${_printf_newline:-false}" = 'false' || echo ''
-    unset _printf_newline
-  }
+        test "${_printf_newline:-false}" = 'false' || echo ''
+        unset _printf_newline
+      }
+    }
+  fi
 }
 
 command 1> /dev/null -v uname || {
-  if command 1> /dev/null -v getprop; then
-    uname()
+  if command 1> /dev/null -v busybox; then
+    alias uname='busybox uname'
+  elif command 1> /dev/null -v getprop; then
     {
-      if test "${1:-}" != '-m'; then ui_error 'Unsupported parameters for uname'; fi
+      uname()
+      {
+        if test "${1:-}" != '-m'; then ui_error 'Unsupported parameters for uname'; fi
 
-      _uname_val="$(getprop 'ro.product.cpu.abi')"
-      case "${_uname_val?}" in
-        'armeabi-v7a') _uname_val='armv7l' ;;
-        'armeabi') _uname_val='armv6l' ;;
-        *) ;;
-      esac
+        _uname_val="$(getprop 'ro.product.cpu.abi')"
+        case "${_uname_val?}" in
+          'armeabi-v7a') _uname_val='armv7l' ;;
+          'armeabi') _uname_val='armv6l' ;;
+          *) ;;
+        esac
 
-      printf '%s\n' "${_uname_val?}"
-      unset _uname_val
+        printf '%s\n' "${_uname_val?}"
+        unset _uname_val
+      }
     }
   fi
 }
@@ -63,7 +73,12 @@ command 1> /dev/null -v dirname || {
 }
 
 command 1> /dev/null -v unzip || {
-  if command 1> /dev/null -v busybox; then alias unzip='busybox unzip'; fi
+  if command 1> /dev/null -v busybox; then
+    alias unzip='busybox unzip'
+  else
+    printf 1>&2 '\033[1;31m%s\033[0m\n' "ERROR: Missing => unzip"
+    exit 100
+  fi
 }
 
 ### FUNCTIONS AND CODE ###

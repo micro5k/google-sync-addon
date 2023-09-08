@@ -2,21 +2,27 @@
 # SPDX-FileCopyrightText: (c) 2022 ale5000
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-readonly ZIPINSTALL_VERSION='0.9'
+readonly ZIPINSTALL_VERSION='1.0'
 
 umask 022 || true
 PATH="${PATH:-}:."
 
 command 1> /dev/null -v printf || {
-  printf()
-  {
-    if test "${1:-}" = '%s\n\n'; then _printf_newline='true'; fi
-    if test "${#}" -gt 1; then shift; fi
-    echo "${@}"
+  if command 1> /dev/null -v busybox; then
+    alias printf='busybox printf'
+  else
+    {
+      printf()
+      {
+        if test "${1:-}" = '%s\n\n'; then _printf_newline='true'; fi
+        if test "${#}" -gt 1; then shift; fi
+        echo "${@}"
 
-    test "${_printf_newline:-false}" = 'false' || echo ''
-    unset _printf_newline
-  }
+        test "${_printf_newline:-false}" = 'false' || echo ''
+        unset _printf_newline
+      }
+    }
+  fi
 }
 
 command 1> /dev/null -v whoami || {
@@ -31,7 +37,16 @@ command 1> /dev/null -v whoami || {
 }
 
 command 1> /dev/null -v unzip || {
-  if command 1> /dev/null -v busybox; then alias unzip='busybox unzip'; fi
+  if command 1> /dev/null -v busybox; then
+    alias unzip='busybox unzip'
+  else
+    printf 1>&2 '\033[1;31m%s\033[0m\n' "ERROR: Missing => unzip"
+    exit 100
+  fi
+}
+
+command 1> /dev/null -v head || {
+  if command 1> /dev/null -v busybox; then alias head='busybox head'; fi
 }
 
 ui_show_error()
