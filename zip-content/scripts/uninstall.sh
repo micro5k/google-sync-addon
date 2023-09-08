@@ -30,7 +30,7 @@ framework_uninstall_list()
 EOF
 }
 
-if test "${INSTALLER:-false}" = 'false'; then
+if test "${IS_INCLUDED:-false}" = 'false'; then
   ui_error()
   {
     printf 1>&2 '\033[1;31m%s\033[0m\n' "ERROR: ${1?}"
@@ -197,6 +197,6 @@ delete "${SYS_PATH:?}/etc/zips/google-sync.prop"
 
 if test -e "${SYS_PATH:?}/etc/zips"; then rmdir --ignore-fail-on-non-empty -- "${SYS_PATH:?}/etc/zips" || true; fi
 
-if [[ -z "${INSTALLER}" ]]; then
+if test -z "${IS_INCLUDED}"; then
   ui_debug 'Done.'
 fi
