@@ -38,7 +38,6 @@ if test "${IS_INSTALLATION:?}" = 'true'; then
   # Extracting
   ui_msg 'Extracting...'
   custom_package_extract_dir 'origin' "${TMP_PATH:?}"
-  custom_package_extract_dir 'files' "${TMP_PATH:?}"
   custom_package_extract_dir 'addon.d' "${TMP_PATH:?}"
   create_dir "${TMP_PATH:?}/files/etc"
 
@@ -81,13 +80,6 @@ if test "${IS_INSTALLATION:?}" != 'true'; then
 fi
 
 unmount_extra_partitions
-
-# Preparing remaining files
-if test "${API}" -lt 23; then
-  delete_recursive "${TMP_PATH}/files/etc/default-permissions"
-fi
-
-ui_debug ''
 
 # Prepare installation
 prepare_installation
