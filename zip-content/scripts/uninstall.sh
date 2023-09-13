@@ -105,8 +105,9 @@ uninstall_list | while IFS='|' read -r FILENAME INTERNAL_NAME DEL_SYS_APPS_ONLY 
     # Legacy xml paths
     delete "${SYS_PATH}/etc/default-permissions/${INTERNAL_NAME:?}-permissions.xml"
     # Other installers
-    delete "${SYS_PATH}/etc/permissions/${INTERNAL_NAME:?}.xml"
     delete "${SYS_PATH}/etc/permissions/privapp-permissions-${INTERNAL_NAME:?}.xml"
+    delete "${SYS_PATH}/etc/permissions/permissions_${INTERNAL_NAME:?}.xml"
+    delete "${SYS_PATH}/etc/permissions/${INTERNAL_NAME:?}.xml"
     delete "${SYS_PATH}/etc/default-permissions/default-permissions-${INTERNAL_NAME:?}.xml"
 
     # App libs
@@ -115,6 +116,7 @@ uninstall_list | while IFS='|' read -r FILENAME INTERNAL_NAME DEL_SYS_APPS_ONLY 
     # Dalvik cache
     delete "${DATA_PATH:?}"/dalvik-cache/*/data@app@"${INTERNAL_NAME:?}"-*@classes*
     delete "${DATA_PATH:?}"/dalvik-cache/data@app@"${INTERNAL_NAME:?}"-*@classes*
+    delete "${DATA_PATH:?}"/dalvik-cache/profiles/"${INTERNAL_NAME:?}"
   fi
 
   if test -n "${FILENAME}"; then
@@ -139,6 +141,14 @@ uninstall_list | while IFS='|' read -r FILENAME INTERNAL_NAME DEL_SYS_APPS_ONLY 
     delete_tracked "${SYS_PATH}/vendor/app/${FILENAME}"
     delete_tracked "/vendor/priv-app/${FILENAME}"
     delete_tracked "/vendor/app/${FILENAME}"
+
+    # Delete legacy libs (very unlikely to be present but possible)
+    delete "${SYS_PATH:?}/lib64/${FILENAME:?}"
+    delete "${SYS_PATH:?}/lib/${FILENAME:?}"
+    delete "/vendor/lib64/${FILENAME:?}"
+    delete "/vendor/lib/${FILENAME:?}"
+    delete "${SYS_PATH:?}/vendor/lib64/${FILENAME:?}"
+    delete "${SYS_PATH:?}/vendor/lib/${FILENAME:?}"
 
     # Current xml paths
     delete "${SYS_PATH}/etc/permissions/privapp-permissions-${FILENAME:?}.xml"
@@ -198,8 +208,6 @@ delete "${SYS_PATH}"/etc/default-permissions/contacts-calendar-sync.xml
 
 # Legacy file
 delete "${SYS_PATH:?}/etc/zips/google-sync.prop"
-
-if test -e "${SYS_PATH:?}/etc/zips"; then rmdir --ignore-fail-on-non-empty -- "${SYS_PATH:?}/etc/zips" || true; fi
 
 if test -z "${IS_INCLUDED}"; then
   ui_debug 'Done.'
