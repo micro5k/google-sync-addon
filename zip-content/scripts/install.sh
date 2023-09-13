@@ -58,8 +58,19 @@ else
   ui_msg_empty_line
 fi
 
+if test "${IS_INSTALLATION:?}" = 'true'; then
+  # Kill the apps if they were active and disable them
+  kill_and_disable_app com.google.android.syncadapters.contacts
+  kill_and_disable_app com.google.android.syncadapters.calendar
+  kill_and_disable_app com.google.android.backuptransport
+fi
+
 # Clean previous installations
 clean_previous_installations
+
+clear_app com.google.android.syncadapters.contacts
+clear_app com.google.android.syncadapters.calendar
+clear_app com.google.android.backuptransport
 
 if test "${IS_INSTALLATION:?}" != 'true'; then
   unmount_extra_partitions
@@ -73,6 +84,10 @@ prepare_installation
 
 # Install
 perform_installation
+
+enable_app com.google.android.syncadapters.contacts
+enable_app com.google.android.syncadapters.calendar
+enable_app com.google.android.backuptransport
 
 # Resetting Android runtime permissions
 if test "${API:?}" -ge 23; then
