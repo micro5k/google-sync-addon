@@ -3,8 +3,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # SPDX-FileType: SOURCE
 
-# shellcheck disable=SC3010 # In POSIX sh, [[ ]] is undefined
-
 list_app_data_to_remove()
 {
   cat << 'EOF'
@@ -91,7 +89,7 @@ delete_tracked()
 }
 
 INTERNAL_MEMORY_PATH='/sdcard0'
-if [[ -e '/mnt/sdcard' ]]; then INTERNAL_MEMORY_PATH='/mnt/sdcard'; fi
+if test -e '/mnt/sdcard'; then INTERNAL_MEMORY_PATH='/mnt/sdcard'; fi
 
 uninstall_list | while IFS='|' read -r FILENAME INTERNAL_NAME DEL_SYS_APPS_ONLY _; do
   track_init
@@ -188,7 +186,7 @@ STATUS="$?"
 if test "${STATUS}" -ne 0; then exit "${STATUS}"; fi
 
 list_app_data_to_remove | while IFS='|' read -r FILENAME; do
-  if [[ -z "${FILENAME}" ]]; then continue; fi
+  if test -z "${FILENAME}"; then continue; fi
   delete "${DATA_PATH:?}/data/${FILENAME}"
   delete "${DATA_PATH:?}"/user/*/"${FILENAME}"
   delete "${DATA_PATH:?}"/user_de/*/"${FILENAME}"
