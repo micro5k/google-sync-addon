@@ -107,6 +107,13 @@ if test "${API:?}" -ge 23; then
   fi
 fi
 
+# Reset to avoid problems with signature changes
+delete "${DATA_PATH:?}"/system/registered_services/android.accounts.AccountAuthenticator.xml
+delete "${DATA_PATH:?}"/system/registered_services/android.content.SyncAdapter.xml
+delete "${DATA_PATH:?}"/system/users/*/registered_services/android.accounts.AccountAuthenticator.xml
+delete "${DATA_PATH:?}"/system/users/*/registered_services/android.content.SyncAdapter.xml
+delete "${DATA_PATH:?}"/system/uiderrors.txt
+
 # Install survival script
 if test -e "${SYS_PATH:?}/addon.d"; then
   ui_msg 'Installing survival script...'
