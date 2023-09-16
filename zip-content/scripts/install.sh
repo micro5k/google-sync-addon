@@ -51,8 +51,6 @@ if test "${IS_INSTALLATION:?}" = 'true'; then
 
   setup_app "${INSTALL_CALENDARSYNC:?}" 'Google Calendar Sync 6' 'GoogleCalendarSyncAdapter6' 'app' ||
     setup_app "${INSTALL_CALENDARSYNC:?}" 'Google Calendar Sync 5' 'GoogleCalendarSyncAdapter5' 'app'
-
-  delete "${TMP_PATH:?}/origin"
 else
   ui_msg 'Starting uninstallation...'
   ui_msg_empty_line
