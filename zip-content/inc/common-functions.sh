@@ -782,6 +782,7 @@ initialize()
   fi
 
   unset LAST_MOUNTPOINT
+  unset CURRENTLY_ROLLBACKING
 }
 
 deinitialize()
@@ -997,7 +998,9 @@ _rolling_back_last_app_internal()
   sed -ie '$ d' -- "${TMP_PATH:?}/processed-${1:?}s.log" || ui_error "Failed to remove the last line from read processed-${1?}s.log"
 
   if command 1> /dev/null -v 'rollback_complete_callback'; then
+    export CURRENTLY_ROLLBACKING='true'
     rollback_complete_callback "${_vanity_name:?}"
+    unset CURRENTLY_ROLLBACKING
   else
     ui_warning "The function 'rollback_complete_callback' is missing"
   fi
@@ -1136,7 +1139,7 @@ ui_recovered_error()
   if test "${RECOVERY_OUTPUT:?}" = 'true'; then
     _show_text_on_recovery "RECOVERED ERROR: ${1:?}"
   else
-    printf 1>&2 '\033[1;31m%s\033[0m\n' "RECOVERED ERROR: ${1:?}"
+    printf 1>&2 '\033[1;31;103m%s\033[0m\n' "RECOVERED ERROR: ${1:?}"
   fi
 }
 
@@ -1563,10 +1566,11 @@ select_lib()
         _dest_arch_name="${1:?}"
         ;;
     esac
+    ui_debug "  Selecting libraries => ${1:?}"
 
     move_rename_dir "${TMP_PATH:?}/libs/lib/${1:?}" "${TMP_PATH:?}/selected-libs/${_dest_arch_name:?}"
   else
-    ui_warning "Missing library => ${1:-}"
+    ui_warning "Missing libraries => ${1:-}"
     return 1
   fi
 }
@@ -1613,7 +1617,7 @@ extract_libs()
     if test "${_lib_selected:?}" = 'true'; then
       _move_app_into_subfolder "${TMP_PATH:?}/files/${1:?}/${2:?}.apk"
       move_rename_dir "${TMP_PATH:?}/selected-libs" "${TMP_PATH:?}/files/${1:?}/${2:?}/lib"
-    elif test "${MAIN_ABI:?}" = 'mips64' || test "${MAIN_ABI:?}" = 'mips'; then
+    elif test "${MAIN_ABI:?}" = 'arm64-v8a' || test "${MAIN_ABI:?}" = 'mips64' || test "${MAIN_ABI:?}" = 'mips'; then
       : # Tolerate missing libraries
     else
       ui_error "Failed to select library"
@@ -1703,16 +1707,17 @@ setup_app()
       create_dir "${TMP_PATH:?}/files/${4:?}" || ui_error "Failed to create the folder for '${2?}'"
       move_rename_file "${TMP_PATH:?}/origin/${4:?}/${3:?}.apk" "${TMP_PATH:?}/files/${4:?}/${_output_name:?}.apk" || ui_error "Failed to setup the app => '${2?}'"
 
+      if test "${CURRENTLY_ROLLBACKING:-false}" != 'true' && test "${_optional:?}" = 'true' && test "$(stat -c '%s' -- "${TMP_PATH:?}/files/${4:?}/${_output_name:?}.apk" || printf '0' || true)" -gt 300000; then
+        _installed_file_list="${_installed_file_list#|}"
+        printf '%s\n' "${2:?}|${4:?}/${_output_name:?}.apk|${_installed_file_list?}" 1>> "${TMP_PATH:?}/processed-${4:?}s.log" || ui_error "Failed to update processed-${4?}s.log"
+      fi
+
+      # IMPORTANT: extract_libs can move the apk file in a subdir
       case "${_extract_libs?}" in
         'libs') extract_libs "${4:?}" "${_output_name:?}" ;;
         '') ;;
         *) ui_error "Invalid value of extract libs => ${_extract_libs?}" ;;
       esac
-
-      if test "${_optional:?}" = 'true' && test "$(stat -c '%s' -- "${TMP_PATH:?}/files/${4:?}/${_output_name:?}.apk" || printf '0' || true)" -gt 300000; then
-        _installed_file_list="${_installed_file_list#|}"
-        printf '%s\n' "${2:?}|${4:?}/${_output_name:?}.apk|${_installed_file_list?}" 1>> "${TMP_PATH:?}/processed-${4:?}s.log" || ui_error "Failed to update processed-${4?}s.log"
-      fi
 
       return 0
     else
