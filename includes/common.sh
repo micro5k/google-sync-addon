@@ -56,12 +56,23 @@ ui_error()
   exit 1
 }
 
+ui_error_msg()
+{
+  printf 1>&2 '\033[1;31m%s\033[0m\n' "ERROR: ${1?}"
+}
+
+ui_debug()
+{
+  printf 1>&2 '%s\n' "${1?}"
+}
+
+readonly DL_DEBUG='false'
 readonly WGET_CMD='wget'
 readonly DL_UA='Mozilla/5.0 (Linux x86_64; rv:115.0) Gecko/20100101 Firefox/115.0'
 readonly DL_ACCEPT_HEADER='Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8'
 readonly DL_ACCEPT_LANG_HEADER='Accept-Language: en-US,en;q=0.5'
+readonly DL_DNT='DNT: 1'
 readonly DL_PROT='https://'
-readonly DL_WEB_PREFIX='www.'
 
 _uname_saved="$(uname)"
 compare_start_uname()
@@ -156,12 +167,67 @@ simple_get_prop()
 
 get_domain_from_url()
 {
-  echo "${1:?}" | cut -sd '/' -f 3 || return "${?}"
+  echo "${1:?}" | cut -d '/' -f '3' -s || return "${?}"
 }
 
 get_base_url()
 {
-  echo "${1:?}" | cut -d '/' -f 1,2,3 || return "${?}"
+  echo "${1:?}" | cut -d '/' -f '1,2,3' || return "${?}"
+}
+
+_clear_cookies()
+{
+  rm -f -r "${SCRIPT_DIR:?}/cache/temp/cookies"
+}
+
+_parse_and_store_cookie()
+{
+  local IFS _line_no _cookie_file _elem
+
+  if test "${DL_DEBUG:?}" = 'true'; then
+    printf '%s\n' "Set-Cookie: ${2:?}" >> "${SCRIPT_DIR:?}/cache/temp/cookies/${1:?}.dat.debug"
+  fi
+
+  _cookie_file="${SCRIPT_DIR:?}/cache/temp/cookies/${1:?}.dat"
+
+  IFS=';'
+  for _elem in ${2:?}; do
+    _elem="${_elem# }"
+    IFS='=' read -r name val 0< <(printf '%s\n' "${_elem?}") || return "${?}"
+    if test -n "${name?}"; then
+      if _line_no="$(grep -n -F -m 1 -e "${name:?}=" -- "${_cookie_file:?}")" && _line_no="$(printf '%s\n' "${_line_no?}" | cut -d ':' -f '1' -s)" && test -n "${_line_no?}"; then
+        sed -i -e "${_line_no:?}d" -- "${_cookie_file:?}" || return "${?}"
+      fi
+      printf '%s\n' "${name:?}=${val?}" >> "${_cookie_file:?}" || return "${?}"
+    fi
+    break
+  done || return "${?}"
+}
+
+_parse_and_store_all_cookies()
+{
+  mkdir -p "${SCRIPT_DIR:?}/cache/temp/cookies" || return "${?}"
+  touch "${SCRIPT_DIR:?}/cache/temp/cookies/${1:?}.dat" || return "${?}"
+
+  grep -e '^\s*Set-Cookie:' | cut -d ':' -f '2-' -s | while IFS='' read -r cookie_line; do
+    if test -z "${cookie_line?}"; then continue; fi
+    _parse_and_store_cookie "${1:?}" "${cookie_line:?}" || return "${?}"
+  done
+
+  if test "${DL_DEBUG:?}" = 'true'; then
+    printf '\n' >> "${SCRIPT_DIR:?}/cache/temp/cookies/${1:?}.dat.debug"
+  fi
+}
+
+_load_cookies()
+{
+  if test ! -e "${SCRIPT_DIR:?}/cache/temp/cookies/${1:?}.dat"; then return 0; fi
+
+  while IFS='=' read -r name val; do
+    if test -z "${name?}"; then continue; fi
+    printf '%s; ' "${name:?}=${val?}"
+    
+  done 0< "${SCRIPT_DIR:?}/cache/temp/cookies/${1:?}.dat" || return "${?}"
 }
 
 verify_sha1()
@@ -188,10 +254,62 @@ dl_generic()
   "${WGET_CMD:?}" -q -O "${3:?}" -U "${DL_UA:?}" --header "${DL_ACCEPT_HEADER:?}" --header "${DL_ACCEPT_LANG_HEADER:?}" --header 'DNT: 1' --header "Referer: ${2:?}" --no-cache -- "${1:?}" || return "${?}"
 }
 
-# 1 => URL; 2 => Referrer; 3 => Pattern
-get_link_from_html()
+_parse_webpage_and_get_url()
 {
-  "${WGET_CMD:?}" -q -O- -U "${DL_UA:?}" --header "${DL_ACCEPT_HEADER:?}" --header "${DL_ACCEPT_LANG_HEADER:?}" --header 'DNT: 1' --header "Referer: ${2:?}" -- "${1:?}" | grep -Eo -e "${3:?}" | grep -Eo -e '\"[^"]+\"$' | tr -d '"' || return "${?}"
+  local _url _referrer _search_pattern
+  local _domain _cookies _parsed_code _parsed_url _status
+
+  _url="${1:?}"
+  _referrer="${2?}"
+  _search_pattern="${3:?}"
+
+  _domain="$(get_domain_from_url "${_url:?}")" || return "${?}"
+  _cookies="$(_load_cookies "${_domain:?}")" || return "${?}"
+  _cookies="${_cookies%; }" || return "${?}"
+  _parsed_code=''
+  _parsed_url=''
+  _status=0
+
+  set -- -U "${DL_UA:?}" --header "${DL_ACCEPT_HEADER:?}" --header "${DL_ACCEPT_LANG_HEADER:?}" --header "${DL_DNT:?}" || return "${?}"
+  if test -n "${_referrer?}"; then
+    set -- "${@}" --header "Referer: ${_referrer:?}" || return "${?}"
+  fi
+  if test -n "${_cookies?}"; then
+    set -- "${@}" --header "Cookie: ${_cookies:?}" || return "${?}"
+  fi
+
+  if test "${DL_DEBUG:?}" = 'true'; then
+    ui_debug ''
+    ui_debug "URL: ${_url?}"
+    ui_debug "User-Agent: ${DL_UA?}"
+    ui_debug "${DL_ACCEPT_HEADER?}"
+    ui_debug "${DL_ACCEPT_LANG_HEADER?}"
+    ui_debug "${DL_DNT?}"
+    ui_debug "Referer: ${_referrer?}"
+    ui_debug "Cookie: ${_cookies?}"
+    ui_debug ''
+  fi
+
+  # shellcheck disable=SC2312
+  {
+    _parsed_code="$(grep -o -m 1 -e "${_search_pattern:?}")" || _status="${?}"
+    if test "${_status:?}" -eq 0; then
+      _parsed_url="$(printf '%s\n' "${_parsed_code?}" | grep -o -m 1 -e 'href=".*' | cut -d '"' -f '2' | sed 's/\&amp;/\&/g')" || _status="${?}"
+      if test "${DL_DEBUG:?}" = 'true'; then
+        ui_debug "Parsed url: ${_parsed_url?}"
+        ui_debug "Status: ${_status?}"
+      fi
+    fi
+
+    if test "${_status:?}" -ne 0 || test -z "${_parsed_url?}"; then
+      if test "${DL_DEBUG:?}" = 'true'; then
+        ui_error_msg "Webpage parsing failed, error code => ${_status?}"
+      fi
+      return 1
+    fi
+  } 0< <("${WGET_CMD:?}" -q -S -O '-' "${@}" -- "${_url:?}" 2> >(_parse_and_store_all_cookies "${_domain:?}" || { ui_error_msg "Header parsing failed, error code => ${?}"; return 2; }))
+
+  printf '%s\n' "${_parsed_url?}"
 }
 
 # 1 => URL; 2 => Origin header; 3 => Name to find
@@ -220,10 +338,50 @@ send_empty_ajax_request()
   "${WGET_CMD:?}" --spider -qO '-' -U "${DL_UA:?}" --header 'Accept: */*' --header "${DL_ACCEPT_LANG_HEADER:?}" --header "Origin: ${2:?}" --header 'DNT: 1' -- "${1:?}" || return "${?}"
 }
 
+_direct_download()
+{
+  local _url _referrer _output
+  local _domain _cookies _status
+
+  _url="${1:?}"
+  _referrer="${2?}"
+  _output="${3:?}"
+
+  _domain="$(get_domain_from_url "${_url:?}")" || return "${?}"
+  _cookies="$(_load_cookies "${_domain:?}")" || return "${?}"
+  _cookies="${_cookies%; }" || return "${?}"
+  _status=0
+
+  set -- -U "${DL_UA:?}" --header "${DL_ACCEPT_HEADER:?}" --header "${DL_ACCEPT_LANG_HEADER:?}" --header "${DL_DNT:?}" || return "${?}"
+  if test -n "${_referrer?}"; then
+    set -- "${@}" --header "Referer: ${_referrer:?}" || return "${?}"
+  fi
+  if test -n "${_cookies?}"; then
+    set -- "${@}" --header "Cookie: ${_cookies:?}" || return "${?}"
+  fi
+
+  if test "${DL_DEBUG:?}" = 'true'; then
+    ui_debug ''
+    ui_debug "URL: ${_url?}"
+    ui_debug "User-Agent: ${DL_UA?}"
+    ui_debug "${DL_ACCEPT_HEADER?}"
+    ui_debug "${DL_ACCEPT_LANG_HEADER?}"
+    ui_debug "${DL_DNT?}"
+    ui_debug "Referer: ${_referrer?}"
+    ui_debug "Cookie: ${_cookies?}"
+    ui_debug ''
+  fi
+
+  "${WGET_CMD:?}" -q -O "${_output:?}" "${@}" -- "${_url:?}" || return "${?}"
+}
+
 report_failure_one()
 {
   readonly DL_TYPE_1_FAILED='true'
+
   #printf '%s - ' "Failed at '${2}' with ret. code ${1:?}"
+  if test -n "${3:-}"; then printf '%s\n' "${3:?}"; fi
+
   return "${1:?}"
 }
 
@@ -232,18 +390,18 @@ dl_type_one()
   if test "${DL_TYPE_1_FAILED:-false}" != 'false'; then return 128; fi
   local _url _base_url _referrer _result
 
+  _clear_cookies
+
   _base_url="$(get_base_url "${2:?}")" || {
-    report_failure_one "${?}"
-    return "${?}"
+    report_failure_one "${?}" || return "${?}"
   }
 
   {
     _referrer="${2:?}"
     _url="${1:?}"
   }
-  _result="$(get_link_from_html "${_url:?}" "${_referrer:?}" 'downloadButton.*\"\shref=\"[^"]+\"')" || {
-    report_failure_one "${?}" 'get link 1'
-    return "${?}"
+  _result="$(_parse_webpage_and_get_url "${_url:?}" "${_referrer:?}" 'downloadButton[^"]*\"\s*href=\"[^"]*\"')" || {
+    report_failure_one "${?}" 'get link 1' "${_result:-}" || return "${?}"
   }
 
   sleep 0.2
@@ -251,9 +409,8 @@ dl_type_one()
     _referrer="${_url:?}"
     _url="${_base_url:?}${_result:?}"
   }
-  _result="$(get_link_from_html "${_url:?}" "${_referrer:?}" 'Your\sdownload\swill\sstart\s.+href=\"[^"]+\"')" || {
-    report_failure_one "${?}" 'get link 2'
-    return "${?}"
+  _result="$(_parse_webpage_and_get_url "${_url:?}" "${_referrer:?}" 'Your\sdownload\swill\sstart\s.*href=\"[^"]*\"')" || {
+    report_failure_one "${?}" 'get link 2' "${_result:-}" || return "${?}"
   }
 
   sleep 0.2
@@ -261,16 +418,20 @@ dl_type_one()
     _referrer="${_url:?}"
     _url="${_base_url:?}${_result:?}"
   }
-  dl_generic "${_url:?}" "${_referrer:?}" "${3:?}" || {
-    report_failure_one "${?}" 'dl'
-    return "${?}"
+  _direct_download "${_url:?}" "${_referrer:?}" "${3:?}" || {
+    report_failure_one "${?}" 'dl' || return "${?}"
   }
+
+  _clear_cookies
 }
 
 report_failure_two()
 {
   readonly DL_TYPE_2_FAILED='true'
+
   printf '%s - ' "Failed at '${2}' with ret. code ${1:?}"
+  if test -n "${3:-}"; then printf '%s\n' "${3:?}"; fi
+
   return "${1:?}"
 }
 
@@ -279,38 +440,36 @@ dl_type_two()
   if test "${DL_TYPE_2_FAILED:-false}" != 'false'; then return 128; fi
   local _url _domain
 
+  _clear_cookies
+
   _url="${1:?}" || {
-    report_failure_two "${?}"
-    return "${?}"
+    report_failure_two "${?}" || return "${?}"
   }
   _domain="$(get_domain_from_url "${_url:?}")" || {
-    report_failure_two "${?}"
-    return "${?}"
+    report_failure_two "${?}" || return "${?}"
   }
   _base_dm="$(printf '%s' "${_domain:?}" | cut -sd '.' -f '2-3')" || {
-    report_failure_two "${?}"
-    return "${?}"
+    report_failure_two "${?}" || return "${?}"
   }
 
   _loc_code="$(get_location_header_from_http_request "${_url:?}" | cut -d '/' -f '5-' -s)" || {
-    report_failure_two "${?}" 'get location'
-    return "${?}"
+    report_failure_two "${?}" 'get location' || return "${?}"
   }
   sleep 0.2
   _other_code="$(get_JSON_value_from_ajax_request "${DL_PROT:?}api.${_base_dm:?}/createAccount" "${DL_PROT:?}${_base_dm:?}" 'token')" || {
-    report_failure_two "${?}" 'get JSON'
-    return "${?}"
+    report_failure_two "${?}" 'get JSON' || return "${?}"
+    
   }
   sleep 0.2
   send_empty_ajax_request "${DL_PROT:?}api.${_base_dm:?}/getContent?contentId=${_loc_code:?}&token=${_other_code:?}"'&website''Token=''7fd9''4ds1''2fds4' "${DL_PROT:?}${_base_dm:?}" || {
-    report_failure_two "${?}" 'get content'
-    return "${?}"
+    report_failure_two "${?}" 'get content' || return "${?}"
   }
   sleep 0.3
   dl_generic_with_cookie "${_url:?}" 'account''Token='"${_other_code:?}" "${3:?}" || {
-    report_failure_two "${?}" 'dl'
-    return "${?}"
+    report_failure_two "${?}" 'dl' || return "${?}"
   }
+
+  _clear_cookies
 }
 
 dl_file()
@@ -332,22 +491,28 @@ dl_file()
         printf '\n %s: ' 'DL type 2'
         dl_type_two "${_url:?}" "${DL_PROT:?}${_domain:?}/" "${SCRIPT_DIR:?}/cache/${1:?}/${2:?}" || _status="${?}"
         ;;
-      "${DL_WEB_PREFIX:?}"'apk''mirror''.com')
+      *\.'apk''mirror''.com')
         printf '\n %s: ' 'DL type 1'
         dl_type_one "${_url:?}" "${DL_PROT:?}${_domain:?}/" "${SCRIPT_DIR:?}/cache/${1:?}/${2:?}" || _status="${?}"
         ;;
       ????*)
         printf '\n %s: ' 'DL type 0'
+        _clear_cookies
         dl_generic "${_url:?}" "${DL_PROT:?}${_domain:?}/" "${SCRIPT_DIR:?}/cache/${1:?}/${2:?}" || _status="${?}"
+        _clear_cookies
         ;;
       *)
         ui_error "Invalid download URL => '${_url?}'"
         ;;
     esac
 
-    if test "${_status:?}" != 0; then
+    if test "${_status:?}" -ne 0; then
       if test -n "${5:-}"; then
-        printf '%s\n' 'Download failed, trying a mirror...'
+        if test "${_status:?}" -eq 128; then
+          printf '%s\n' 'Download skipped, trying a mirror...'
+        else
+          printf '%s\n' 'Download failed, trying a mirror...'
+        fi
         dl_file "${1:?}" "${2:?}" "${3:?}" "${5:?}"
         return "${?}"
       else
@@ -373,7 +538,7 @@ dl_list()
   set 2> /dev/null +o posix || true
 
   for _current_line in ${1?}; do
-    IFS='|' read -r local_filename local_path _ _ _ _ dl_hash dl_url dl_mirror _ < <(printf '%s\n' "${_current_line:?}") || return "${?}"
+    IFS='|' read -r local_filename local_path _ _ _ _ dl_hash dl_url dl_mirror _ 0< <(printf '%s\n' "${_current_line:?}") || return "${?}"
     dl_file "${local_path:?}" "${local_filename:?}.apk" "${dl_hash:?}" "${dl_url:?}" "${dl_mirror?}" || return "${?}"
   done || return "${?}"
 
