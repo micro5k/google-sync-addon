@@ -57,20 +57,19 @@ else
 fi
 
 if test "${IS_INSTALLATION:?}" = 'true'; then
-  # Kill the apps if they were active and disable them
-  kill_and_disable_app com.google.android.syncadapters.calendar
-  kill_and_disable_app com.google.android.syncadapters.contacts
-  kill_and_disable_app com.google.android.backuptransport
+  disable_app 'com.google.android.syncadapters.calendar'
+  disable_app 'com.google.android.syncadapters.contacts'
+  disable_app 'com.google.android.backuptransport'
 fi
 
 # Clean previous installations
 clean_previous_installations
 
-clear_app com.google.android.syncadapters.calendar
-clear_app com.google.android.syncadapters.contacts
-clear_app com.google.android.backuptransport
-
 if test "${IS_INSTALLATION:?}" != 'true'; then
+  clear_app 'com.google.android.syncadapters.calendar'
+  clear_app 'com.google.android.syncadapters.contacts'
+  clear_app 'com.google.android.backuptransport'
+
   unmount_extra_partitions
   finalize_and_report_success
 fi
@@ -83,9 +82,16 @@ prepare_installation
 # Install
 perform_installation
 
-enable_app com.google.android.backuptransport
-enable_app com.google.android.syncadapters.contacts
-enable_app com.google.android.syncadapters.calendar
+clear_and_enable_app 'com.google.android.backuptransport'
+clear_and_enable_app 'com.google.android.syncadapters.contacts'
+clear_and_enable_app 'com.google.android.syncadapters.calendar'
+
+# Reset to avoid problems with signature changes
+delete "${DATA_PATH:?}"/system/registered_services/android.accounts.AccountAuthenticator.xml
+delete "${DATA_PATH:?}"/system/registered_services/android.content.SyncAdapter.xml
+delete "${DATA_PATH:?}"/system/users/*/registered_services/android.accounts.AccountAuthenticator.xml
+delete "${DATA_PATH:?}"/system/users/*/registered_services/android.content.SyncAdapter.xml
+delete "${DATA_PATH:?}"/system/uiderrors.txt
 
 # Resetting Android runtime permissions
 if test "${API:?}" -ge 23; then
@@ -104,13 +110,6 @@ if test "${API:?}" -ge 23; then
     fi
   fi
 fi
-
-# Reset to avoid problems with signature changes
-delete "${DATA_PATH:?}"/system/registered_services/android.accounts.AccountAuthenticator.xml
-delete "${DATA_PATH:?}"/system/registered_services/android.content.SyncAdapter.xml
-delete "${DATA_PATH:?}"/system/users/*/registered_services/android.accounts.AccountAuthenticator.xml
-delete "${DATA_PATH:?}"/system/users/*/registered_services/android.content.SyncAdapter.xml
-delete "${DATA_PATH:?}"/system/uiderrors.txt
 
 # Install survival script
 if test -e "${SYS_PATH:?}/addon.d"; then

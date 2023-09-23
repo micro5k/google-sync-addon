@@ -224,7 +224,7 @@ _load_cookies()
   while IFS='=' read -r name val; do
     if test -z "${name?}"; then continue; fi
     printf '%s; ' "${name:?}=${val?}"
-    
+
   done 0< "${SCRIPT_DIR:?}/cache/temp/cookies/${1:?}.dat" || return "${?}"
 }
 
@@ -244,12 +244,6 @@ corrupted_file()
 {
   rm -f -- "$1" || echo 'Failed to remove the corrupted file.'
   ui_error "The file '$1' is corrupted."
-}
-
-# 1 => URL; 2 => Referrer; 3 => Output
-dl_generic()
-{
-  "${WGET_CMD:?}" -q -O "${3:?}" -U "${DL_UA:?}" --header "${DL_ACCEPT_HEADER:?}" --header "${DL_ACCEPT_LANG_HEADER:?}" --header 'DNT: 1' --header "Referer: ${2:?}" --no-cache -- "${1:?}" || return "${?}"
 }
 
 _parse_webpage_and_get_url()
@@ -305,7 +299,10 @@ _parse_webpage_and_get_url()
       fi
       return 1
     fi
-  } 0< <("${WGET_CMD:?}" -q -S -O '-' "${@}" -- "${_url:?}" 2> >(_parse_and_store_all_cookies "${_domain:?}" || { ui_error_msg "Header parsing failed, error code => ${?}"; return 2; }))
+  } 0< <("${WGET_CMD:?}" -q -S -O '-' "${@}" -- "${_url:?}" 2> >(_parse_and_store_all_cookies "${_domain:?}" || {
+    ui_error_msg "Header parsing failed, error code => ${?}"
+    return 2
+  }))
 
   printf '%s\n' "${_parsed_url?}"
 }
@@ -367,12 +364,12 @@ _direct_download()
   "${WGET_CMD:?}" -q -O "${_output:?}" "${@}" -- "${_url:?}" || return "${?}"
 }
 
-dl_type_zero()
+report_failure()
 {
-  local _url
+  printf 1>&2 '%s - ' "DL type ${1?} failed at '${3:-}' with ret. code ${2?}"
+  if test -n "${4:-}"; then printf 1>&2 '\n%s\n' "${4:?}"; fi
 
-  _url="${1:?}" || return "${?}"
-  dl_generic "${_url:?}" "${2:?}" "${3:?}" || return "${?}"
+  return "${2:?}"
 }
 
 report_failure_one()
@@ -383,6 +380,16 @@ report_failure_one()
   if test -n "${3:-}"; then printf '%s\n' "${3:?}"; fi
 
   return "${1:?}"
+}
+
+dl_type_zero()
+{
+  local _url _referrer _output
+  _url="${1:?}" || return "${?}"
+  _referrer="${2?}" || return "${?}"
+  _output="${3:?}" || return "${?}"
+
+  _direct_download "${_url:?}" "${_referrer?}" "${_output:?}" || report_failure 0 "${?}" 'dl' || return "${?}"
 }
 
 dl_type_one()
@@ -411,7 +418,7 @@ dl_type_one()
     report_failure_one "${?}" 'get link 2' "${_result:-}" || return "${?}"
   }
 
-  sleep 0.2
+  sleep 0.3
   {
     _referrer="${_url:?}"
     _url="${_base_url:?}${_result:?}"
@@ -421,48 +428,34 @@ dl_type_one()
   }
 }
 
-report_failure_two()
-{
-  readonly DL_TYPE_2_FAILED='true'
-
-  printf '%s - ' "Failed at '${2}' with ret. code ${1:?}"
-  if test -n "${3:-}"; then printf '%s\n' "${3:?}"; fi
-
-  return "${1:?}"
-}
-
 dl_type_two()
 {
-  if test "${DL_TYPE_2_FAILED:-false}" != 'false'; then return 128; fi
-  local _url _domain
+  local _url _output
+  local _domain _base_dm
+  local _loc_code _other_code
 
-  _url="${1:?}" || {
-    report_failure_two "${?}" || return "${?}"
-  }
-  _domain="$(get_domain_from_url "${_url:?}")" || {
-    report_failure_two "${?}" || return "${?}"
-  }
-  _base_dm="$(printf '%s' "${_domain:?}" | cut -sd '.' -f '2-3')" || {
-    report_failure_two "${?}" || return "${?}"
-  }
+  _url="${1:?}" || return "${?}"
+  _output="${2:?}" || return "${?}"
 
-  _loc_code="$(get_location_header_from_http_request "${_url:?}" | cut -d '/' -f '5-' -s)" || {
-    report_failure_two "${?}" 'get location' || return "${?}"
-  }
+  _domain="$(get_domain_from_url "${_url:?}")" || report_failure 2 "${?}" || return "${?}"
+  _base_dm="$(printf '%s\n' "${_domain:?}" | cut -d '.' -f '2-' -s)" || report_failure 2 "${?}" || return "${?}"
+
+  _loc_code="$(get_location_header_from_http_request "${_url:?}" | cut -d '/' -f '5-' -s)" ||
+    report_failure 2 "${?}" 'get location' || return "${?}"
+
   sleep 0.2
-  _other_code="$(get_JSON_value_from_ajax_request "${DL_PROT:?}api.${_base_dm:?}/createAccount" "${DL_PROT:?}${_base_dm:?}" 'token')" || {
-    report_failure_two "${?}" 'get JSON' || return "${?}"
-  }
+  _other_code="$(get_JSON_value_from_ajax_request "${DL_PROT:?}api.${_base_dm:?}/createAccount" "${DL_PROT:?}${_base_dm:?}" 'token')" ||
+    report_failure 2 "${?}" 'get JSON' || return "${?}"
+
   sleep 0.2
-  send_empty_ajax_request "${DL_PROT:?}api.${_base_dm:?}/getContent?contentId=${_loc_code:?}&token=${_other_code:?}"'&website''Token=''7fd9''4ds1''2fds4' "${DL_PROT:?}${_base_dm:?}" || {
-    report_failure_two "${?}" 'get content' || return "${?}"
-  }
+  send_empty_ajax_request "${DL_PROT:?}api.${_base_dm:?}/getContent?contentId=${_loc_code:?}&token=${_other_code:?}"'&website''Token=''7fd9''4ds1''2fds4' "${DL_PROT:?}${_base_dm:?}" ||
+    report_failure 2 "${?}" 'get content' || return "${?}"
 
   sleep 0.3
-  _parse_and_store_cookie "${_domain:?}" 'account''Token='"${_other_code:?}" || return "${?}"
-  _direct_download "${_url:?}" '' "${3:?}" || {
-    report_failure_two "${?}" 'dl' || return "${?}"
-  }
+  _parse_and_store_cookie "${_domain:?}" 'account''Token='"${_other_code:?}" ||
+    report_failure 2 "${?}" 'set cookie' || return "${?}"
+  _direct_download "${_url:?}" '' "${_output:?}" ||
+    report_failure 2 "${?}" 'dl' || return "${?}"
 }
 
 dl_file()
@@ -484,7 +477,7 @@ dl_file()
     case "${_domain:?}" in
       *\.'go''file''.io')
         printf '\n %s: ' 'DL type 2'
-        dl_type_two "${_url:?}" "${DL_PROT:?}${_domain:?}/" "${SCRIPT_DIR:?}/cache/${1:?}/${2:?}" || _status="${?}"
+        dl_type_two "${_url:?}" "${SCRIPT_DIR:?}/cache/${1:?}/${2:?}" || _status="${?}"
         ;;
       *\.'apk''mirror''.com')
         printf '\n %s: ' 'DL type 1'
