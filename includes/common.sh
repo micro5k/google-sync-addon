@@ -177,7 +177,8 @@ get_base_url()
 
 _clear_cookies()
 {
-  rm -f -r "${SCRIPT_DIR:?}/cache/temp/cookies"
+  rm -f -r "${SCRIPT_DIR:?}/cache/temp/cookies" || return "${?}"
+  mkdir -p "${SCRIPT_DIR:?}/cache/temp/cookies" || return "${?}"
 }
 
 _parse_and_store_cookie()
@@ -195,7 +196,7 @@ _parse_and_store_cookie()
     _elem="${_elem# }"
     IFS='=' read -r name val 0< <(printf '%s\n' "${_elem?}") || return "${?}"
     if test -n "${name?}"; then
-      if _line_no="$(grep -n -F -m 1 -e "${name:?}=" -- "${_cookie_file:?}")" && _line_no="$(printf '%s\n' "${_line_no?}" | cut -d ':' -f '1' -s)" && test -n "${_line_no?}"; then
+      if test -e "${_cookie_file:?}" && _line_no="$(grep -n -F -m 1 -e "${name:?}=" -- "${_cookie_file:?}")" && _line_no="$(printf '%s\n' "${_line_no?}" | cut -d ':' -f '1' -s)" && test -n "${_line_no?}"; then
         sed -i -e "${_line_no:?}d" -- "${_cookie_file:?}" || return "${?}"
       fi
       printf '%s\n' "${name:?}=${val?}" >> "${_cookie_file:?}" || return "${?}"
@@ -206,9 +207,6 @@ _parse_and_store_cookie()
 
 _parse_and_store_all_cookies()
 {
-  mkdir -p "${SCRIPT_DIR:?}/cache/temp/cookies" || return "${?}"
-  touch "${SCRIPT_DIR:?}/cache/temp/cookies/${1:?}.dat" || return "${?}"
-
   grep -e '^\s*Set-Cookie:' | cut -d ':' -f '2-' -s | while IFS='' read -r cookie_line; do
     if test -z "${cookie_line?}"; then continue; fi
     _parse_and_store_cookie "${1:?}" "${cookie_line:?}" || return "${?}"
@@ -318,12 +316,6 @@ get_JSON_value_from_ajax_request()
   "${WGET_CMD:?}" -qO '-' -U "${DL_UA:?}" --header 'Accept: */*' --header "${DL_ACCEPT_LANG_HEADER:?}" --header "Origin: ${2:?}" --header 'DNT: 1' -- "${1:?}" | grep -Eom 1 -e "\"${3:?}\""'\s*:\s*"([^"]+)' | grep -Eom 1 -e ':\s*"([^"]+)' | grep -Eom 1 -e '"([^"]+)' | cut -c '2-' || return "${?}"
 }
 
-# 1 => URL; 2 => Cookie; 3 => Output
-dl_generic_with_cookie()
-{
-  "${WGET_CMD:?}" -q -O "${3:?}" -U "${DL_UA:?}" --header "${DL_ACCEPT_HEADER:?}" --header "${DL_ACCEPT_LANG_HEADER:?}" --header 'DNT: 1' --header "Cookie: ${2:?}" -- "${1:?}" || return "${?}"
-}
-
 # 1 => URL
 get_location_header_from_http_request()
 {
@@ -375,6 +367,14 @@ _direct_download()
   "${WGET_CMD:?}" -q -O "${_output:?}" "${@}" -- "${_url:?}" || return "${?}"
 }
 
+dl_type_zero()
+{
+  local _url
+
+  _url="${1:?}" || return "${?}"
+  dl_generic "${_url:?}" "${2:?}" "${3:?}" || return "${?}"
+}
+
 report_failure_one()
 {
   readonly DL_TYPE_1_FAILED='true'
@@ -389,8 +389,6 @@ dl_type_one()
 {
   if test "${DL_TYPE_1_FAILED:-false}" != 'false'; then return 128; fi
   local _url _base_url _referrer _result
-
-  _clear_cookies
 
   _base_url="$(get_base_url "${2:?}")" || {
     report_failure_one "${?}" || return "${?}"
@@ -421,8 +419,6 @@ dl_type_one()
   _direct_download "${_url:?}" "${_referrer:?}" "${3:?}" || {
     report_failure_one "${?}" 'dl' || return "${?}"
   }
-
-  _clear_cookies
 }
 
 report_failure_two()
@@ -440,8 +436,6 @@ dl_type_two()
   if test "${DL_TYPE_2_FAILED:-false}" != 'false'; then return 128; fi
   local _url _domain
 
-  _clear_cookies
-
   _url="${1:?}" || {
     report_failure_two "${?}" || return "${?}"
   }
@@ -458,18 +452,17 @@ dl_type_two()
   sleep 0.2
   _other_code="$(get_JSON_value_from_ajax_request "${DL_PROT:?}api.${_base_dm:?}/createAccount" "${DL_PROT:?}${_base_dm:?}" 'token')" || {
     report_failure_two "${?}" 'get JSON' || return "${?}"
-    
   }
   sleep 0.2
   send_empty_ajax_request "${DL_PROT:?}api.${_base_dm:?}/getContent?contentId=${_loc_code:?}&token=${_other_code:?}"'&website''Token=''7fd9''4ds1''2fds4' "${DL_PROT:?}${_base_dm:?}" || {
     report_failure_two "${?}" 'get content' || return "${?}"
   }
+
   sleep 0.3
-  dl_generic_with_cookie "${_url:?}" 'account''Token='"${_other_code:?}" "${3:?}" || {
+  _parse_and_store_cookie "${_domain:?}" 'account''Token='"${_other_code:?}" || return "${?}"
+  _direct_download "${_url:?}" '' "${3:?}" || {
     report_failure_two "${?}" 'dl' || return "${?}"
   }
-
-  _clear_cookies
 }
 
 dl_file()
@@ -481,6 +474,8 @@ dl_file()
   _status=0
   _url="${DL_PROT:?}${4:?}" || return "${?}"
   _domain="$(get_domain_from_url "${_url:?}")" || return "${?}"
+
+  _clear_cookies || return "${?}"
 
   if ! test -e "${SCRIPT_DIR:?}/cache/${1:?}/${2:?}"; then
     mkdir -p "${SCRIPT_DIR:?}/cache/${1:?}"
@@ -497,9 +492,7 @@ dl_file()
         ;;
       ????*)
         printf '\n %s: ' 'DL type 0'
-        _clear_cookies
-        dl_generic "${_url:?}" "${DL_PROT:?}${_domain:?}/" "${SCRIPT_DIR:?}/cache/${1:?}/${2:?}" || _status="${?}"
-        _clear_cookies
+        dl_type_zero "${_url:?}" "${DL_PROT:?}${_domain:?}/" "${SCRIPT_DIR:?}/cache/${1:?}/${2:?}" || _status="${?}"
         ;;
       *)
         ui_error "Invalid download URL => '${_url?}'"
