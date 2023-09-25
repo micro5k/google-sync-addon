@@ -368,14 +368,27 @@ _get_local_settings()
 
 parse_setting()
 {
-  local _var
+  local _var _use_last_choice
 
+  _use_last_choice="${3:-true}"
   _get_local_settings
 
   _var="$(printf '%s\n' "${LOCAL_SETTINGS?}" | grep -m 1 -F -e "[zip.${MODULE_ID:?}.${1:?}]" | cut -d ':' -f '2-' -s)" || _var=''
   _var="${_var# }"
   if test "${#_var}" -gt 2; then
     printf '%s\n' "${_var?}" | cut -c "2-$((${#_var} - 1))"
+    return
+  fi
+
+  # Fallback to the last choice
+  if test "${_use_last_choice:?}" = 'true' && _var="$(simple_file_getprop "${1:?}" "${SYS_PATH:?}/etc/zips/${MODULE_ID:?}.prop")" && test -n "${_var?}"; then
+    printf '%s\n' "${_var:?}"
+    return
+  elif test "${_use_last_choice:?}" = 'custom' && _var="$(simple_file_getprop "${4:?}" "${SYS_PATH:?}/etc/zips/${MODULE_ID:?}.prop")" && test -n "${_var?}"; then
+    case "${_var:?}" in
+      "${5:?}") printf '1\n' ;;
+      *) printf '0\n' ;;
+    esac
     return
   fi
 
@@ -411,6 +424,24 @@ is_string_starting_with()
     *) ;;
   esac
   return 1 # NOT found
+}
+
+_write_test()
+{
+  if test ! -d "${1:?}"; then
+    mkdir -p "${1:?}" || return 1
+    set_perm 0 0 0755 "${1:?}"
+  fi
+
+  touch 2> /dev/null "${1:?}/write-test-file.dat" || return 1
+
+  if test "${FIRST_INSTALLATION:?}" = 'true'; then
+    printf '%512000s' '' 1> "${1:?}/write-test-file.dat" || return 1
+  fi
+
+  test -e "${1:?}/write-test-file.dat" || return 1
+
+  return 0
 }
 
 _detect_architectures()
@@ -582,8 +613,8 @@ initialize()
   _get_local_settings
 
   if test "${INPUT_FROM_TERMINAL:?}" = 'true' && test "${LIVE_SETUP_TIMEOUT:?}" -gt 0; then LIVE_SETUP_TIMEOUT="$((LIVE_SETUP_TIMEOUT + 3))"; fi
-  LIVE_SETUP_DEFAULT="$(parse_setting 'LIVE_SETUP_DEFAULT' "${LIVE_SETUP_DEFAULT:?}")"
-  LIVE_SETUP_TIMEOUT="$(parse_setting 'LIVE_SETUP_TIMEOUT' "${LIVE_SETUP_TIMEOUT:?}")"
+  LIVE_SETUP_DEFAULT="$(parse_setting 'LIVE_SETUP_DEFAULT' "${LIVE_SETUP_DEFAULT:?}" 'false')"
+  LIVE_SETUP_TIMEOUT="$(parse_setting 'LIVE_SETUP_TIMEOUT' "${LIVE_SETUP_TIMEOUT:?}" 'false')"
 
   ui_debug ''
 
@@ -795,18 +826,15 @@ clean_previous_installations()
 {
   local _initial_free_space
 
-  create_dir "${SYS_PATH:?}/etc"
-  if touch 2> /dev/null "${SYS_PATH:?}/etc/write-test-file.dat" && test -e "${SYS_PATH:?}/etc/write-test-file.dat" && rm -f -- "${SYS_PATH:?}/etc/write-test-file.dat"; then
+  if _write_test "${SYS_PATH:?}/etc"; then
     : # Really writable
   else
     ui_error "Something is wrong because '${SYS_PATH?}' is NOT really writable!!!"
   fi
 
-  if test "${FIRST_INSTALLATION:?}" = 'true'; then
-    _initial_free_space='-1'
-  else
-    _initial_free_space="$(_get_free_space)" || _initial_free_space='-1'
-  fi
+  _initial_free_space="$(_get_free_space)" || _initial_free_space='-1'
+
+  rm -f -- "${SYS_PATH:?}/etc/write-test-file.dat" || ui_error 'Failed to delete the test file'
 
   readonly IS_INCLUDED='true'
   export IS_INCLUDED
@@ -907,6 +935,10 @@ prepare_installation()
     echo "install.version.code=${MODULE_VERCODE:?}"
     echo "install.version=${MODULE_VERSION:?}"
   } 1> "${TMP_PATH:?}/files/etc/zips/${MODULE_ID:?}.prop" || ui_error 'Failed to generate the prop file of this zip'
+
+  if test -f "${TMP_PATH:?}/saved-choices.dat"; then
+    cat "${TMP_PATH:?}/saved-choices.dat" 1>> "${TMP_PATH:?}/files/etc/zips/${MODULE_ID:?}.prop" || ui_error 'Failed to update the prop file of this zip'
+  fi
 
   set_std_perm_recursive "${TMP_PATH:?}/files"
   if test -e "${TMP_PATH:?}/addon.d"; then
@@ -1648,83 +1680,94 @@ string_split()
   printf '%s' "${1:?}" | cut -d '|' -sf "${2:?}" || return "${?}"
 }
 
-# @description Setup an app for later installation.
+# @description Configure an app for later installation.
 # (it automatically handle the API compatibility)
 #
 # @arg $1 integer Default installation setting (default 0)
-# @arg $2 string Vanity name of the app
-# @arg $3 string Filename of the app
-# @arg $4 string Folder of the app
-# @arg $5 boolean Auto-enable URL handling (default false)
-# @arg $6 boolean Is the installation of this app optional? (default true)
+# @arg $2 string Name of the chosen option to be stored (default empty string)
+# @arg $3 string Vanity name of the app
+# @arg $4 string Filename of the app
+# @arg $5 string Folder of the app
+# @arg $6 boolean Auto-enable URL handling (default false)
+# @arg $7 boolean Is the installation of this app optional? (default true)
 #
 # @exitcode 0 If installed.
 # @exitcode 1 If NOT installed.
 setup_app()
 {
-  local _install _app_conf _min_api _max_api _output_name _extract_libs _internal_name _file_hash _url_handling _optional _installed_file_list
-  if test "${6:-true}" = 'true' && test ! -f "${TMP_PATH:?}/origin/${4:?}/${3:?}.apk"; then return 1; fi
+  local _install _chosen_option_name _vanity_name _filename _dir _url_handling _optional _app_conf _min_api _max_api _output_name _extract_libs _internal_name _file_hash _installed_file_list
+
   _install="${1:-0}"
-  _app_conf="$(file_get_first_line_that_start_with "${4:?}/${3:?}|" "${TMP_PATH:?}/origin/file-list.dat")" || ui_error "Failed to get app config for '${2}'"
-  _min_api="$(string_split "${_app_conf:?}" 2)" || ui_error "Failed to get min API for '${2}'"
-  _max_api="$(string_split "${_app_conf:?}" 3)" || ui_error "Failed to get max API for '${2}'"
-  _output_name="$(string_split "${_app_conf:?}" 4)" || ui_error "Failed to get output name for '${2}'"
-  _extract_libs="$(string_split "${_app_conf:?}" 5)" || ui_error "Failed to get the value of extract libs for '${2}'"
-  _internal_name="$(string_split "${_app_conf:?}" 6)" || ui_error "Failed to get internal name for '${2}'"
-  _file_hash="$(string_split "${_app_conf:?}" 7)" || ui_error "Failed to get the hash of '${2}'"
-  _url_handling="${5:-false}"
-  _optional="${6:-true}"
+  _chosen_option_name="${2:-}"
+  _vanity_name="${3:?}"
+  _filename="${4:?}"
+  _dir="${5:?}"
+  _url_handling="${6:-false}"
+  _optional="${7:-true}"
+  if test "${_optional:?}" = 'true' && test ! -f "${TMP_PATH:?}/origin/${_dir:?}/${_filename:?}.apk"; then return 1; fi
+
+  _app_conf="$(file_get_first_line_that_start_with "${_dir:?}/${_filename:?}|" "${TMP_PATH:?}/origin/file-list.dat")" || ui_error "Failed to get app config for '${_vanity_name?}'"
+  _min_api="$(string_split "${_app_conf:?}" 2)" || ui_error "Failed to get min API for '${_vanity_name?}'"
+  _max_api="$(string_split "${_app_conf:?}" 3)" || ui_error "Failed to get max API for '${_vanity_name?}'"
+  _output_name="$(string_split "${_app_conf:?}" 4)" || ui_error "Failed to get output name for '${_vanity_name?}'"
+  _extract_libs="$(string_split "${_app_conf:?}" 5)" || ui_error "Failed to get the value of extract libs for '${_vanity_name?}'"
+  _internal_name="$(string_split "${_app_conf:?}" 6)" || ui_error "Failed to get internal name for '${_vanity_name?}'"
+  _file_hash="$(string_split "${_app_conf:?}" 7)" || ui_error "Failed to get the hash of '${_vanity_name?}'"
 
   _installed_file_list=''
 
-  if test "${API:?}" -ge "${_min_api:?}" && test "${API:?}" -le "${_max_api:-99}"; then
+  if test "${API:?}" -ge "${_min_api:?}" && test "${API:?}" -le "${_max_api:-999}"; then
     if test "${_optional:?}" = 'true' && test "${LIVE_SETUP_ENABLED:?}" = 'true'; then
-      choose "Do you want to install ${2:?}?" '+) Yes' '-) No'
+      choose "Do you want to install ${_vanity_name:?}?" '+) Yes' '-) No'
       if test "${?}" -eq 3; then _install='1'; else _install='0'; fi
     fi
 
+    if test -n "${_chosen_option_name?}" && test "${CURRENTLY_ROLLBACKING:-false}" != 'true' && test "${_optional:?}" = 'true'; then
+      printf '%s\n' "${_chosen_option_name:?}=${_install:?}" 1>> "${TMP_PATH:?}/saved-choices.dat" || ui_error 'Failed to update saved-choices.dat'
+    fi
+
     if test "${_install:?}" -ne 0 || test "${_optional:?}" != 'true'; then
-      ui_msg "Enabling: ${2:?}"
+      ui_msg "Enabling: ${_vanity_name:?}"
 
       ui_msg_sameline_start 'Verifying... '
       ui_debug ''
-      verify_sha1 "${TMP_PATH:?}/origin/${4:?}/${3:?}.apk" "${_file_hash:?}" || ui_error "Failed hash verification of '${2}'"
+      verify_sha1 "${TMP_PATH:?}/origin/${_dir:?}/${_filename:?}.apk" "${_file_hash:?}" || ui_error "Failed hash verification of '${_vanity_name?}'"
       ui_msg_sameline_end 'OK'
 
-      if test "${4:?}" = 'priv-app' && test "${API:?}" -ge 26 && test -f "${TMP_PATH:?}/origin/etc/permissions/privapp-permissions-${3:?}.xml"; then
-        create_dir "${TMP_PATH:?}/files/etc/permissions" || ui_error "Failed to create the permissions folder for '${2}'"
-        move_rename_file "${TMP_PATH:?}/origin/etc/permissions/privapp-permissions-${3:?}.xml" "${TMP_PATH:?}/files/etc/permissions/privapp-permissions-${_output_name:?}.xml" || ui_error "Failed to setup the priv-app xml of '${2}'"
+      if test "${_dir:?}" = 'priv-app' && test "${API:?}" -ge 26 && test -f "${TMP_PATH:?}/origin/etc/permissions/privapp-permissions-${_filename:?}.xml"; then
+        create_dir "${TMP_PATH:?}/files/etc/permissions" || ui_error "Failed to create the permissions folder for '${_vanity_name?}'"
+        move_rename_file "${TMP_PATH:?}/origin/etc/permissions/privapp-permissions-${_filename:?}.xml" "${TMP_PATH:?}/files/etc/permissions/privapp-permissions-${_output_name:?}.xml" || ui_error "Failed to setup the priv-app xml of '${_vanity_name?}'"
         _installed_file_list="${_installed_file_list?}|etc/permissions/privapp-permissions-${_output_name:?}.xml"
       fi
-      if test "${API:?}" -ge 23 && test -f "${TMP_PATH:?}/origin/etc/default-permissions/default-permissions-${3:?}.xml"; then
-        create_dir "${TMP_PATH:?}/files/etc/default-permissions" || ui_error "Failed to create the default permissions folder for '${2}'"
-        move_rename_file "${TMP_PATH:?}/origin/etc/default-permissions/default-permissions-${3:?}.xml" "${TMP_PATH:?}/files/etc/default-permissions/default-permissions-${_output_name:?}.xml" || ui_error "Failed to setup the default permissions xml of '${2}'"
+      if test "${API:?}" -ge 23 && test -f "${TMP_PATH:?}/origin/etc/default-permissions/default-permissions-${_filename:?}.xml"; then
+        create_dir "${TMP_PATH:?}/files/etc/default-permissions" || ui_error "Failed to create the default permissions folder for '${_vanity_name?}'"
+        move_rename_file "${TMP_PATH:?}/origin/etc/default-permissions/default-permissions-${_filename:?}.xml" "${TMP_PATH:?}/files/etc/default-permissions/default-permissions-${_output_name:?}.xml" || ui_error "Failed to setup the default permissions xml of '${_vanity_name?}'"
         _installed_file_list="${_installed_file_list?}|etc/default-permissions/default-permissions-${_output_name:?}.xml"
       fi
       if test "${_url_handling:?}" != 'false'; then
-        add_line_in_file_after_string "${TMP_PATH:?}/files/etc/sysconfig/google.xml" '<!-- %CUSTOM_APP_LINKS-START% -->' "    <app-link package=\"${_internal_name:?}\" />" || ui_error "Failed to auto-enable URL handling for '${2}'"
+        add_line_in_file_after_string "${TMP_PATH:?}/files/etc/sysconfig/google.xml" '<!-- %CUSTOM_APP_LINKS-START% -->' "    <app-link package=\"${_internal_name:?}\" />" || ui_error "Failed to auto-enable URL handling for '${_vanity_name?}'"
       fi
-      create_dir "${TMP_PATH:?}/files/${4:?}" || ui_error "Failed to create the folder for '${2?}'"
-      move_rename_file "${TMP_PATH:?}/origin/${4:?}/${3:?}.apk" "${TMP_PATH:?}/files/${4:?}/${_output_name:?}.apk" || ui_error "Failed to setup the app => '${2?}'"
+      create_dir "${TMP_PATH:?}/files/${_dir:?}" || ui_error "Failed to create the folder for '${_vanity_name?}'"
+      move_rename_file "${TMP_PATH:?}/origin/${_dir:?}/${_filename:?}.apk" "${TMP_PATH:?}/files/${_dir:?}/${_output_name:?}.apk" || ui_error "Failed to setup the app => '${_vanity_name?}'"
 
-      if test "${CURRENTLY_ROLLBACKING:-false}" != 'true' && test "${_optional:?}" = 'true' && test "$(stat -c '%s' -- "${TMP_PATH:?}/files/${4:?}/${_output_name:?}.apk" || printf '0' || true)" -gt 300000; then
+      if test "${CURRENTLY_ROLLBACKING:-false}" != 'true' && test "${_optional:?}" = 'true' && test "$(stat -c '%s' -- "${TMP_PATH:?}/files/${_dir:?}/${_output_name:?}.apk" || printf '0' || true)" -gt 300000; then
         _installed_file_list="${_installed_file_list#|}"
-        printf '%s\n' "${2:?}|${4:?}/${_output_name:?}.apk|${_installed_file_list?}" 1>> "${TMP_PATH:?}/processed-${4:?}s.log" || ui_error "Failed to update processed-${4?}s.log"
+        printf '%s\n' "${_vanity_name:?}|${_dir:?}/${_output_name:?}.apk|${_installed_file_list?}" 1>> "${TMP_PATH:?}/processed-${_dir:?}s.log" || ui_error "Failed to update processed-${_dir?}s.log"
       fi
 
       # IMPORTANT: extract_libs can move the apk file in a subdir
       case "${_extract_libs?}" in
-        'libs') extract_libs "${4:?}" "${_output_name:?}" ;;
+        'libs') extract_libs "${_dir:?}" "${_output_name:?}" ;;
         '') ;;
         *) ui_error "Invalid value of extract libs => ${_extract_libs?}" ;;
       esac
 
       return 0
     else
-      ui_debug "Disabling: ${2:?}"
+      ui_debug "Disabling: ${_vanity_name:?}"
     fi
   else
-    ui_debug "Skipping: ${2:?}"
+    ui_debug "Skipping: ${_vanity_name:?}"
   fi
 
   return 1

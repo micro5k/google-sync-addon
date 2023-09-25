@@ -44,13 +44,13 @@ if test "${IS_INSTALLATION:?}" = 'true'; then
   # Configuring
   ui_msg 'Configuring...'
 
-  setup_app 1 'Google Backup Transport 4.4' 'GoogleBackupTransport44' 'priv-app' false false
+  setup_app 1 '' 'Google Backup Transport 4.4' 'GoogleBackupTransport44' 'priv-app' false false
 
-  setup_app "${INSTALL_CONTACTSSYNC:?}" 'Google Contacts Sync 8' 'GoogleContactsSyncAdapter8' 'priv-app' ||
-    setup_app "${INSTALL_CONTACTSSYNC:?}" 'Google Contacts Sync 4.4' 'GoogleContactsSyncAdapter44' 'app'
+  setup_app "${INSTALL_CONTACTSSYNC:?}" '' 'Google Contacts Sync 8' 'GoogleContactsSyncAdapter8' 'priv-app' ||
+    setup_app "${INSTALL_CONTACTSSYNC:?}" '' 'Google Contacts Sync 4.4' 'GoogleContactsSyncAdapter44' 'app'
 
-  setup_app "${INSTALL_CALENDARSYNC:?}" 'Google Calendar Sync 6' 'GoogleCalendarSyncAdapter6' 'app' ||
-    setup_app "${INSTALL_CALENDARSYNC:?}" 'Google Calendar Sync 5' 'GoogleCalendarSyncAdapter5' 'app'
+  setup_app "${INSTALL_CALENDARSYNC:?}" '' 'Google Calendar Sync 6' 'GoogleCalendarSyncAdapter6' 'app' ||
+    setup_app "${INSTALL_CALENDARSYNC:?}" '' 'Google Calendar Sync 5' 'GoogleCalendarSyncAdapter5' 'app'
 else
   ui_msg 'Starting uninstallation...'
   ui_msg_empty_line
