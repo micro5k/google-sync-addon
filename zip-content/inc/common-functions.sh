@@ -37,9 +37,9 @@ fi
 
 mkdir -p "${TMP_PATH:?}/func-tmp" || ui_error 'Failed to create the functions temp folder'
 
-NL='
+readonly ROLLBACK_TEST='false'
+readonly NL='
 '
-readonly NL
 
 ### FUNCTIONS ###
 
@@ -994,7 +994,18 @@ _wait_free_space_changes()
   ui_debug ''
 }
 
-_rolling_back_last_app_internal()
+_custom_rollback()
+{
+  if test "${ROLLBACK_TEST:?}" = 'false'; then
+    return 0
+  elif test "${1:?}" = 'priv-app' || test "${1:?}" = 'app'; then
+    return 1
+  fi
+
+  return 0
+}
+
+_do_rollback_last_app_internal()
 {
   local _backup_ifs _skip_first _initial_free_space _vanity_name _installed_file_list
   if test ! -s "${TMP_PATH:?}/processed-${1:?}s.log"; then return 1; fi
@@ -1040,13 +1051,13 @@ _rolling_back_last_app_internal()
   return 0
 }
 
-_rolling_back_last_app()
+_do_rollback_last_app()
 {
   if test "${1:?}" = 'priv-app'; then
-    _rolling_back_last_app_internal 'priv-app'
+    _do_rollback_last_app_internal 'priv-app'
     return "${?}"
   elif test "${1:?}" = 'app'; then
-    _rolling_back_last_app_internal 'app' || _rolling_back_last_app_internal 'priv-app'
+    _do_rollback_last_app_internal 'app' || _do_rollback_last_app_internal 'priv-app'
     return "${?}"
   fi
 
@@ -1055,6 +1066,8 @@ _rolling_back_last_app()
 
 _is_free_space_error()
 {
+  if test "${ROLLBACK_TEST:?}" != 'false'; then return 0; fi
+
   case "${1?}" in
     *'space left'*) return 0 ;; # Found
     *) ;;                       # NOT found
@@ -1070,10 +1083,13 @@ perform_secure_copy_to_device()
   ui_debug "  Copying the '${1?}' folder to the device..."
   create_dir "${SYS_PATH:?}/${1:?}"
 
-  if cp 2> /dev/null -r -p -f -- "${TMP_PATH:?}/files/${1:?}"/* "${SYS_PATH:?}/${1:?}"/ || _error_text="$(cp 2>&1 -r -p -f -- "${TMP_PATH:?}/files/${1:?}"/* "${SYS_PATH:?}/${1:?}"/)"; then
+  if {
+    cp 2> /dev/null -r -p -f -- "${TMP_PATH:?}/files/${1:?}"/* "${SYS_PATH:?}/${1:?}"/ ||
+      _error_text="$(cp 2>&1 -r -p -f -- "${TMP_PATH:?}/files/${1:?}"/* "${SYS_PATH:?}/${1:?}"/)"
+  } && _custom_rollback "${1:?}"; then
     return 0
   elif _is_free_space_error "${_error_text?}"; then
-    while _rolling_back_last_app "${1:?}"; do
+    while _do_rollback_last_app "${1:?}"; do
       if ! _something_exists "${TMP_PATH:?}/files/${1:?}"/* || cp 2> /dev/null -r -p -f -- "${TMP_PATH:?}/files/${1:?}"/* "${SYS_PATH:?}/${1:?}"/; then
         if test -n "${_error_text?}"; then
           ui_recovered_error "$(printf '%s\n' "${_error_text:?}" | head -n 1 || true)"
@@ -1611,7 +1627,7 @@ extract_libs()
 {
   local _lib_selected
 
-  ui_msg "Extracting libs from ${1:?}/${2:?}..."
+  ui_msg "Extracting libs from ${1:?}/${2:?}.apk..."
   create_dir "${TMP_PATH:?}/libs"
   zip_extract_dir "${TMP_PATH:?}/files/${1:?}/${2:?}.apk" 'lib' "${TMP_PATH:?}/libs"
 
@@ -1647,8 +1663,7 @@ extract_libs()
     fi
 
     if test "${_lib_selected:?}" = 'true'; then
-      _move_app_into_subfolder "${TMP_PATH:?}/files/${1:?}/${2:?}.apk"
-      move_rename_dir "${TMP_PATH:?}/selected-libs" "${TMP_PATH:?}/files/${1:?}/${2:?}/lib"
+      move_rename_dir "${TMP_PATH:?}/selected-libs" "${TMP_PATH:?}/files/${1:?}/lib"
     elif test "${MAIN_ABI:?}" = 'arm64-v8a' || test "${MAIN_ABI:?}" = 'mips64' || test "${MAIN_ABI:?}" = 'mips'; then
       : # Tolerate missing libraries
     else
@@ -1695,7 +1710,8 @@ string_split()
 # @exitcode 1 If NOT installed.
 setup_app()
 {
-  local _install _chosen_option_name _vanity_name _filename _dir _url_handling _optional _app_conf _min_api _max_api _output_name _extract_libs _internal_name _file_hash _installed_file_list
+  local _install _chosen_option_name _vanity_name _filename _dir _url_handling _optional
+  local _app_conf _min_api _max_api _output_name _extract_libs _internal_name _file_hash _output_dir _installed_file_list
 
   _install="${1:-0}"
   _chosen_option_name="${2:-}"
@@ -1714,6 +1730,7 @@ setup_app()
   _internal_name="$(string_split "${_app_conf:?}" 6)" || ui_error "Failed to get internal name for '${_vanity_name?}'"
   _file_hash="$(string_split "${_app_conf:?}" 7)" || ui_error "Failed to get the hash of '${_vanity_name?}'"
 
+  _output_dir=''
   _installed_file_list=''
 
   if test "${API:?}" -ge "${_min_api:?}" && test "${API:?}" -le "${_max_api:-999}"; then
@@ -1734,6 +1751,13 @@ setup_app()
       verify_sha1 "${TMP_PATH:?}/origin/${_dir:?}/${_filename:?}.apk" "${_file_hash:?}" || ui_error "Failed hash verification of '${_vanity_name?}'"
       ui_msg_sameline_end 'OK'
 
+      if test "${API:?}" -ge 21; then
+        _output_dir="${_dir:?}/${_output_name:?}"
+      else
+        _output_dir="${_dir:?}"
+      fi
+      mkdir -p "${TMP_PATH:?}/files/${_output_dir:?}" || ui_error "Failed to create the folder for '${_vanity_name?}'"
+
       if test "${_dir:?}" = 'priv-app' && test "${API:?}" -ge 26 && test -f "${TMP_PATH:?}/origin/etc/permissions/privapp-permissions-${_filename:?}.xml"; then
         create_dir "${TMP_PATH:?}/files/etc/permissions" || ui_error "Failed to create the permissions folder for '${_vanity_name?}'"
         move_rename_file "${TMP_PATH:?}/origin/etc/permissions/privapp-permissions-${_filename:?}.xml" "${TMP_PATH:?}/files/etc/permissions/privapp-permissions-${_output_name:?}.xml" || ui_error "Failed to setup the priv-app xml of '${_vanity_name?}'"
@@ -1747,17 +1771,15 @@ setup_app()
       if test "${_url_handling:?}" != 'false'; then
         add_line_in_file_after_string "${TMP_PATH:?}/files/etc/sysconfig/google.xml" '<!-- %CUSTOM_APP_LINKS-START% -->' "    <app-link package=\"${_internal_name:?}\" />" || ui_error "Failed to auto-enable URL handling for '${_vanity_name?}'"
       fi
-      create_dir "${TMP_PATH:?}/files/${_dir:?}" || ui_error "Failed to create the folder for '${_vanity_name?}'"
-      move_rename_file "${TMP_PATH:?}/origin/${_dir:?}/${_filename:?}.apk" "${TMP_PATH:?}/files/${_dir:?}/${_output_name:?}.apk" || ui_error "Failed to setup the app => '${_vanity_name?}'"
+      move_rename_file "${TMP_PATH:?}/origin/${_dir:?}/${_filename:?}.apk" "${TMP_PATH:?}/files/${_output_dir:?}/${_output_name:?}.apk" || ui_error "Failed to setup the app => '${_vanity_name?}'"
 
-      if test "${CURRENTLY_ROLLBACKING:-false}" != 'true' && test "${_optional:?}" = 'true' && test "$(stat -c '%s' -- "${TMP_PATH:?}/files/${_dir:?}/${_output_name:?}.apk" || printf '0' || true)" -gt 300000; then
+      if test "${CURRENTLY_ROLLBACKING:-false}" != 'true' && test "${_optional:?}" = 'true' && test "$(stat -c '%s' -- "${TMP_PATH:?}/files/${_output_dir:?}/${_output_name:?}.apk" || printf '0' || true)" -gt 300000; then
         _installed_file_list="${_installed_file_list#|}"
-        printf '%s\n' "${_vanity_name:?}|${_dir:?}/${_output_name:?}.apk|${_installed_file_list?}" 1>> "${TMP_PATH:?}/processed-${_dir:?}s.log" || ui_error "Failed to update processed-${_dir?}s.log"
+        printf '%s\n' "${_vanity_name:?}|${_output_dir:?}/${_output_name:?}.apk|${_installed_file_list?}" 1>> "${TMP_PATH:?}/processed-${_dir:?}s.log" || ui_error "Failed to update processed-${_dir?}s.log"
       fi
 
-      # IMPORTANT: extract_libs can move the apk file in a subdir
       case "${_extract_libs?}" in
-        'libs') extract_libs "${_dir:?}" "${_output_name:?}" ;;
+        'libs') extract_libs "${_output_dir:?}" "${_output_name:?}" ;;
         '') ;;
         *) ui_error "Invalid value of extract libs => ${_extract_libs?}" ;;
       esac
