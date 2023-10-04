@@ -618,10 +618,11 @@ initialize()
 
   ui_debug ''
 
-  # Some recoveries have a fake system folder when nothing is mounted with just bin, etc and lib / lib64.
+  # Some recoveries have a fake system folder when nothing is mounted with just bin, etc and lib / lib64 or, in some rare cases, just bin and usr.
   # Usable binaries are under the fake /system/bin so the /system mountpoint mustn't be used while in this recovery.
   if test "${BOOTMODE:?}" != 'true' &&
-    test -e '/system/bin/sh' &&
+    test -e '/system/bin' &&
+    test ! -e '/system/app' &&
     test ! -e '/system/build.prop' &&
     test ! -e '/system/system/build.prop'; then
     readonly RECOVERY_FAKE_SYSTEM='true'
@@ -1117,9 +1118,13 @@ perform_installation()
 {
   ui_msg 'Installing...'
 
+  if test ! -d "${SYS_PATH:?}/etc/zips"; then
+    mkdir -p "${SYS_PATH:?}/etc/zips" || ui_error "Failed to create the dir '${SYS_PATH:?}/etc/zips'"
+    set_perm 0 0 0750 "${SYS_PATH:?}/etc/zips"
+  fi
+
   set_perm 0 0 0640 "${TMP_PATH:?}/files/etc/zips/${MODULE_ID:?}.prop"
   perform_secure_copy_to_device 'etc/zips'
-  set_perm 0 0 0750 "${SYS_PATH:?}/etc/zips"
 
   if test "${API:?}" -lt 21; then
     if test "${CPU64}" != false; then
