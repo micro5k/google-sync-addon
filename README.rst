@@ -53,4 +53,4 @@ Code analysis
 
 .. image:: https://app.codacy.com/project/badge/Grade/a490a45291bb45208c025b26421402f5
    :alt: Codacy Badge
-   :target: https://www.codacy.com/gh/micro5k/google-sync-addon/dashboard
+   :target: https://app.codacy.com/gh/micro5k/google-sync-addon/dashboard
