@@ -436,7 +436,7 @@ _write_test()
   touch 2> /dev/null "${1:?}/write-test-file.dat" || return 1
 
   if test "${FIRST_INSTALLATION:?}" = 'true'; then
-    printf '%512000s' '' 1> "${1:?}/write-test-file.dat" || return 1
+    printf '%5120s' '' 1> "${1:?}/write-test-file.dat" || return 1
   fi
 
   test -e "${1:?}/write-test-file.dat" || return 1
@@ -664,7 +664,7 @@ initialize()
 
   IS_EMU='false'
   case "${BUILD_DEVICE?}" in
-    'windows_x86_64' | 'emu64x') IS_EMU='true' ;;
+    'windows_x86_64' | 'emu64'*) IS_EMU='true' ;;
     *) ;;
   esac
 
@@ -1737,6 +1737,8 @@ setup_app()
 
   _output_dir=''
   _installed_file_list=''
+
+  ui_debug ''
 
   if test "${API:?}" -ge "${_min_api:?}" && test "${API:?}" -le "${_max_api:-999}"; then
     if test "${_optional:?}" = 'true' && test "${LIVE_SETUP_ENABLED:?}" = 'true'; then

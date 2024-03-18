@@ -15,7 +15,7 @@ set -e
 }
 
 cat << 'LICENSE'
-  SPDX-FileCopyrightText: (c) 2016-2019, 2021-2023 ale5000
+  SPDX-FileCopyrightText: (c) 2016-2019, 2021-2024 ale5000
 
   This program is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -179,6 +179,7 @@ else
     cp -f -- "${SCRIPT_DIR:?}/cache/${LOCAL_PATH:?}/${LOCAL_FILENAME:?}.apk" "${TEMP_DIR:?}/zip-content/origin/${LOCAL_PATH:?}/" || ui_error "Failed to copy to the temp dir the file => '${LOCAL_PATH}/${LOCAL_FILENAME}.apk'"
 
     _extract_libs=''
+    if test "${LOCAL_FILENAME:?}" = 'PlayStore'; then _extract_libs='libs'; fi
 
     printf '%s\n' "${LOCAL_PATH:?}/${LOCAL_FILENAME:?}|${MIN_API:?}|${MAX_API?}|${FINAL_FILENAME:?}|${_extract_libs?}|${INTERNAL_NAME:?}|${FILE_HASH:?}" >> "${TEMP_DIR:?}/zip-content/origin/file-list.dat"
   done
