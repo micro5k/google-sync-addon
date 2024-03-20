@@ -83,16 +83,11 @@ prepare_installation
 # Install
 perform_installation
 
+reset_authenticator_and_sync_adapter_caches
+
 clear_and_enable_app 'com.google.android.backuptransport'
 clear_and_enable_app 'com.google.android.syncadapters.contacts'
 clear_and_enable_app 'com.google.android.syncadapters.calendar'
-
-# Reset to avoid problems with signature changes
-delete "${DATA_PATH:?}"/system/registered_services/android.accounts.AccountAuthenticator.xml
-delete "${DATA_PATH:?}"/system/registered_services/android.content.SyncAdapter.xml
-delete "${DATA_PATH:?}"/system/users/*/registered_services/android.accounts.AccountAuthenticator.xml
-delete "${DATA_PATH:?}"/system/users/*/registered_services/android.content.SyncAdapter.xml
-delete "${DATA_PATH:?}"/system/uiderrors.txt
 
 # Resetting Android runtime permissions
 if test "${API:?}" -ge 23; then
