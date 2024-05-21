@@ -2,6 +2,7 @@
 # SPDX-FileCopyrightText: (c) 2016 ale5000
 # SPDX-License-Identifier: GPL-3.0-or-later
 
+# shellcheck enable=all
 # shellcheck disable=SC3043 # In POSIX sh, local is undefined #
 
 echo 'PRELOADER'
@@ -21,6 +22,7 @@ set -u || true
 
 export OUTFD="${2:?}"
 export ZIPFILE="${3:?}"
+unset RANDOM_IS_SEEDED
 
 ### PREVENTIVE CHECKS ###
 
@@ -134,6 +136,50 @@ package_extract_file()
   if ! test -e "${2:?}"; then ui_error "Failed to extract the file '${1}' from this archive"; fi
 }
 
+generate_awk_random_seed()
+{
+  local _seed _pid
+
+  # IMPORTANT: On old versions of awk the maximum value of seed is 4294967295 (2^32 − 1); if you exceed the maximum then awk always returns the same random number (which is no longer random)
+
+  if _seed="$(LC_ALL=C date 2> /dev/null -u -- '+%N')" && test -n "${_seed?}" && test "${_seed:?}" != 'N'; then
+    echo "${_seed:?}"
+  elif command 1> /dev/null -v tail && _pid="$(echo "${$:?}" | tail -c 5)" && LC_ALL=C date 2> /dev/null -u -- "+%-I%M%S${_pid:?}"; then # tail -c 5 => Last 4 bytes + '\n'
+    echo 1>&2 'Seed: using unsafe seed'
+  else
+    return 1
+  fi
+}
+
+generate_random()
+{
+  local _seed
+
+  if test "${RANDOM_IS_SEEDED:-false}" = 'false'; then
+    # Seed the RANDOM variable
+    RANDOM="${$:?}"
+    readonly RANDOM_IS_SEEDED='true'
+  fi
+
+  # shellcheck disable=SC3028
+  LAST_RANDOM="${RANDOM-}"
+
+  if test -n "${LAST_RANDOM?}" && test "${LAST_RANDOM:?}" != "${$:?}"; then
+    : # OK
+  elif command 1> /dev/null -v shuf && LAST_RANDOM="$(shuf -n '1' -i '0-99999')"; then
+    : # OK
+  elif command 1> /dev/null -v hexdump && test -e '/dev/urandom' && LAST_RANDOM="$(hexdump -v -n '2' -e '1/2 "%u"' -- '/dev/urandom')"; then
+    echo 'Random: using hexdump' # OK
+  elif command 1> /dev/null -v awk && command 1> /dev/null -v date && _seed="$(generate_awk_random_seed)" && test -n "${_seed?}" && LAST_RANDOM="$(awk -v seed="${_seed:?}" -- 'BEGIN { srand(seed); print int( rand()*(99999+1) ) }')"; then
+    echo 'Random: using awk' # OK
+  elif test -e '/dev/urandom' && command 1> /dev/null -v tr && command 1> /dev/null -v head && LAST_RANDOM="$(tr 0< '/dev/urandom' -d -c '[:digit:]' | head -c 5 || true)" 2> /dev/null && test -n "${LAST_RANDOM?}"; then
+    echo 'Random: using tr/head' # OK
+  else
+    LAST_RANDOM=''
+    ui_error 'Unable to generate a random number'
+  fi
+}
+
 _ub_detect_bootmode
 _ub_we_mounted_tmp=false
 
@@ -185,19 +231,15 @@ _ub_we_mounted_tmp=false
   export TMPDIR
 }
 
-# Seed the RANDOM variable
-RANDOM="${$:?}${$:?}"
-
-# shellcheck disable=SC3028
-{
-  if test "${RANDOM:?}" = "${$:?}${$:?}"; then ui_error "\$RANDOM is not supported"; fi # Both BusyBox and Toybox support $RANDOM
-  _ub_our_main_script="${TMPDIR:?}/${RANDOM:?}-customize.sh"
-}
+generate_random
+_ub_our_main_script="${TMPDIR:?}/${LAST_RANDOM:?}-customize.sh"
 
 STATUS=1
 UNKNOWN_ERROR=1
 
 package_extract_file 'customize.sh' "${_ub_our_main_script:?}"
+
+echo "Loading ${LAST_RANDOM:?}-customize.sh..."
 # shellcheck source=SCRIPTDIR/../../../../customize.sh
 . "${_ub_our_main_script:?}" || ui_error "Failed to source customize.sh"
 rm -f "${_ub_our_main_script:?}" || ui_error "Failed to delete customize.sh"

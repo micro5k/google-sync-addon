@@ -125,7 +125,13 @@ _mount_and_verify_system_partition()
   IFS="${NL:?}"
 
   for _path in ${1?}; do
-    if test -z "${_path:-}" || test "${_path:?}" = '/mnt/system'; then continue; fi # Note: '/mnt/system' can only be manually mounted
+    test -n "${_path?}" || continue
+
+    case "${_path:?}" in
+      '/mnt/'* | "${TMP_PATH:?}/"*) continue ;; # Note: These paths can only be mounted manually (example: /mnt/system)
+      *) ;;
+    esac
+
     _path="$(_canonicalize "${_path:?}")"
     _mount_helper '-o' 'rw' "${_path:?}" || true
 
@@ -245,6 +251,18 @@ _find_block()
   return 1
 }
 
+_ensure_mountpoint_exist()
+{
+  if test -e "${1:?}"; then return 0; fi
+
+  ui_debug "Creating mountpoint '${1?}'..."
+  mkdir -p "${1:?}" || {
+    ui_warning "Failed to create mountpoint '${1?}'"
+    return 1
+  }
+  set_perm 0 0 0755 "${1:?}"
+}
+
 _manual_partition_mount()
 {
   local _backup_ifs _path _block _found
@@ -276,17 +294,20 @@ _manual_partition_mount()
 
   if test "${_found:?}" != 'false'; then
     for _path in ${2?}; do
-      if test -z "${_path:-}"; then continue; fi
+      test -n "${_path?}" || continue
+      _ensure_mountpoint_exist "${_path:?}" || continue
       _path="$(_canonicalize "${_path:?}")"
 
-      umount "${_path:?}" 2> /dev/null || true
+      umount 2> /dev/null "${_path:?}" || true
       if _mount_helper '-o' 'rw' "${_block:?}" "${_path:?}"; then
         IFS="${_backup_ifs:-}"
+        ui_debug "Mounted: ${_path?}"
         LAST_MOUNTPOINT="${_path:?}"
-        ui_debug "Mounted: ${_path:-}"
         return 0
       fi
     done
+
+    ui_warning 'Not mounted'
   fi
 
   IFS="${_backup_ifs:-}"
@@ -297,13 +318,13 @@ _find_and_mount_system()
 {
   local _sys_mountpoint_list='' # This is a list of paths separated by newlines
 
-  if test "${TEST_INSTALL:-false}" != 'false' && test -n "${ANDROID_ROOT:-}" && test -e "${ANDROID_ROOT:?}"; then
+  if test "${TEST_INSTALL:-false}" != 'false' && test -n "${ANDROID_ROOT-}" && test -e "${ANDROID_ROOT:?}"; then
     _sys_mountpoint_list="${ANDROID_ROOT:?}${NL:?}"
   else
     if test -e '/mnt/system'; then
       _sys_mountpoint_list="${_sys_mountpoint_list?}/mnt/system${NL:?}"
     fi
-    if test -n "${ANDROID_ROOT:-}" &&
+    if test -n "${ANDROID_ROOT-}" &&
       test "${ANDROID_ROOT:?}" != '/system_root' &&
       test "${ANDROID_ROOT:?}" != '/system' &&
       test -e "${ANDROID_ROOT:?}"; then
@@ -315,14 +336,15 @@ _find_and_mount_system()
     if test "${RECOVERY_FAKE_SYSTEM:?}" = 'false' && test -e '/system'; then
       _sys_mountpoint_list="${_sys_mountpoint_list?}/system${NL:?}"
     fi
+    _sys_mountpoint_list="${_sys_mountpoint_list?}${TMP_PATH:?}/system_mountpoint${NL:?}"
   fi
   ui_debug 'System mountpoint list:'
-  ui_debug "${_sys_mountpoint_list:-}"
+  ui_debug "${_sys_mountpoint_list?}"
 
   if _verify_system_partition "${_sys_mountpoint_list?}"; then
-    : # Found
+    : # Found (it was already mounted)
   else
-    SYS_INIT_STATUS=1
+    UNMOUNT_SYSTEM=1
     ui_debug "Mounting system..."
 
     if _mount_and_verify_system_partition "${_sys_mountpoint_list?}"; then
@@ -560,8 +582,11 @@ _generate_architectures_list()
 
 display_info()
 {
+  ui_msg "Brand: ${BUILD_BRAND?}"
   ui_msg "Manufacturer: ${BUILD_MANUFACTURER?}"
+  ui_msg "Model: ${BUILD_MODEL?}"
   ui_msg "Device: ${BUILD_DEVICE?}"
+  ui_msg "Product: ${BUILD_PRODUCT?}"
   ui_msg "Emulator: ${IS_EMU:?}"
   ui_msg_empty_line
   ui_msg "First installation: ${FIRST_INSTALLATION:?}"
@@ -596,7 +621,7 @@ display_info()
 initialize()
 {
   local _raw_arch_list
-  SYS_INIT_STATUS=0
+  UNMOUNT_SYSTEM=0
   DATA_INIT_STATUS=0
 
   # Make sure that the commands are still overridden here (most shells don't have the ability to export functions)
@@ -645,11 +670,13 @@ initialize()
   _find_and_mount_system
   cp -pf "${SYS_PATH:?}/build.prop" "${TMP_PATH:?}/build.prop" # Cache the file for faster access
 
+  BUILD_BRAND="$(sys_getprop 'ro.product.brand')"
   BUILD_MANUFACTURER="$(sys_getprop 'ro.product.manufacturer')" || BUILD_MANUFACTURER="$(sys_getprop 'ro.product.brand')"
+  BUILD_MODEL="$(sys_getprop 'ro.product.model')"
   BUILD_DEVICE="$(sys_getprop 'ro.product.device')" || BUILD_DEVICE="$(sys_getprop 'ro.build.product')"
   BUILD_PRODUCT="$(sys_getprop 'ro.product.name')"
-  readonly BUILD_MANUFACTURER BUILD_DEVICE BUILD_PRODUCT
-  export UILD_MANUFACTURER BUILD_DEVICE BUILD_PRODUCT
+  readonly BUILD_BRAND BUILD_MANUFACTURER BUILD_MODEL BUILD_DEVICE BUILD_PRODUCT
+  export BUILD_BRAND BUILD_MANUFACTURER BUILD_MODEL BUILD_DEVICE BUILD_PRODUCT
 
   if test "${BUILD_MANUFACTURER?}" = 'OnePlus' && test "${BUILD_DEVICE?}" = 'OnePlus6'; then
     export KEYCHECK_ENABLED='false' # It doesn't work properly on this device
@@ -819,8 +846,12 @@ initialize()
 
 deinitialize()
 {
-  if test "${SYS_INIT_STATUS:?}" = '1' && test -n "${SYS_MOUNTPOINT:-}"; then unmount "${SYS_MOUNTPOINT:?}"; fi
-  if test "${DATA_INIT_STATUS:?}" = '1' && test -n "${DATA_PATH:-}"; then unmount "${DATA_PATH:?}"; fi
+  if test "${UNMOUNT_SYSTEM:?}" -eq 1 && test -n "${SYS_MOUNTPOINT-}"; then unmount "${SYS_MOUNTPOINT:?}"; fi
+  if test -e "${TMP_PATH:?}/system_mountpoint"; then
+    rmdir -- "${TMP_PATH:?}/system_mountpoint" || ui_error 'Failed to delete the temp mountpoint'
+  fi
+
+  if test "${DATA_INIT_STATUS:?}" -eq 1 && test -n "${DATA_PATH-}"; then unmount "${DATA_PATH:?}"; fi
 }
 
 clean_previous_installations()
