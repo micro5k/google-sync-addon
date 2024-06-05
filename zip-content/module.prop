@@ -13,3 +13,4 @@ applicationId=net.ale5000.google_sync_addon.ota
 support=https://github.com/micro5k/google-sync-addon/issues
 donate=https://liberapay.com/microg-unofficial-by-ale5000/donate
 minApi=19
+maxApi=34
