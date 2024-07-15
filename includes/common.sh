@@ -1,20 +1,17 @@
 #!/usr/bin/env bash
 # SPDX-FileCopyrightText: (c) 2016 ale5000
 # SPDX-License-Identifier: GPL-3.0-or-later
-# SPDX-FileType: SOURCE
 
-# shellcheck disable=SC3043
-# SC3043: In POSIX sh, local is undefined
+# shellcheck enable=all
+# shellcheck disable=SC3043 # In POSIX sh, local is undefined
 
 if test "${A5K_FUNCTIONS_INCLUDED:-false}" = 'false'; then readonly A5K_FUNCTIONS_INCLUDED='true'; fi
 
 # shellcheck disable=SC3040
 set -o pipefail || true
 
-export TZ=UTC
-export LC_ALL=C
-export LANG=C.UTF-8
-export LC_CTYPE=UTF-8
+export LANG='en_US.UTF-8'
+export TZ='UTC'
 
 unset LANGUAGE
 unset LC_CTYPE
@@ -59,6 +56,11 @@ ui_error()
 ui_error_msg()
 {
   printf 1>&2 '\033[1;31m%s\033[0m\n' "ERROR: ${1?}"
+}
+
+ui_warning()
+{
+  printf 1>&2 '\033[0;33m%s\033[0m\n' "WARNING: ${1:?}"
 }
 
 ui_debug()
@@ -533,46 +535,200 @@ dl_list()
   IFS="${_backup_ifs:-}"
 }
 
+is_in_path()
+{
+  case "${PATHSEP:?}${PATH-}${PATHSEP:?}" in
+    *"${PATHSEP:?}${1:?}${PATHSEP:?}"*) return 0 ;; # Found
+    *) ;;
+  esac
+  return 1 # NOT found
+}
+
+add_to_path()
+{
+  if test "${PLATFORM:?}" = 'win' && test "${PATHSEP:?}" = ':' && command 1> /dev/null -v 'cygpath'; then
+    # Only on Bash under Windows
+    local _path
+    _path="$(cygpath -u -a -- "${1:?}")" || ui_error 'Unable to convert a path in add_to_path()'
+    set -- "${_path:?}"
+  fi
+
+  if is_in_path "${1:?}" || test ! -e "${1:?}"; then return; fi
+
+  if test -z "${PATH-}"; then
+    ui_warning 'PATH env is empty'
+    PATH="${1:?}"
+  else
+    PATH="${1:?}${PATHSEP:?}${PATH:?}"
+  fi
+}
+
+remove_from_path()
+{
+  local _path
+
+  if _path="$(printf '%s\n' "${PATH-}" | tr -- "${PATHSEP:?}" '\n' | grep -v -x -F -e "${1:?}" | tr -- '\n' "${PATHSEP:?}")" && _path="${_path%"${PATHSEP:?}"}"; then
+    PATH="${_path?}"
+  fi
+}
+
+move_to_begin_of_path_env()
+{
+  local _path
+  if test ! -e "${1:?}"; then return; fi
+
+  if test -z "${PATH-}"; then
+    ui_warning 'PATH env is empty'
+    PATH="${1:?}"
+  elif _path="$(printf '%s\n' "${PATH:?}" | tr -- "${PATHSEP:?}" '\n' | grep -v -x -F -e "${1:?}" | tr -- '\n' "${PATHSEP:?}")" && _path="${_path%"${PATHSEP:?}"}" && test -n "${_path?}"; then
+    PATH="${1:?}${PATHSEP:?}${_path:?}"
+  fi
+}
+
+remove_duplicates_from_path_env()
+{
+  local _path
+
+  if test "${PLATFORM:?}" = 'win' && _path="$(printf '%s\n' "${PATH-}" | tr -- "${PATHSEP:?}" '\n' | awk -- '!x[tolower($0)]++' - | tr -- '\n' "${PATHSEP:?}")" && _path="${_path%"${PATHSEP:?}"}"; then
+    :
+  elif test "${PLATFORM:?}" != 'win' && _path="$(printf '%s\n' "${PATH-}" | tr -- "${PATHSEP:?}" '\n' | awk -- '!x[$0]++' - | tr -- '\n' "${PATHSEP:?}")" && _path="${_path%"${PATHSEP:?}"}"; then
+    :
+  else
+    ui_warning 'Removing duplicates from PATH env failed'
+    return
+  fi
+
+  PATH="${_path?}"
+}
+
+init_vars()
+{
+  local _main_dir
+
+  # shellcheck disable=SC3028 # Ignore: In POSIX sh, BASH_SOURCE is undefined
+  if test -z "${SCRIPT_DIR-}" && test -n "${BASH_SOURCE-}" && _main_dir="$(dirname "${BASH_SOURCE:?}")" && _main_dir="$(realpath "${_main_dir:?}/..")"; then
+    SCRIPT_DIR="${_main_dir:?}"
+  elif test "${STARTED_FROM_BATCH_FILE:-0}" != '0' && test -n "${SCRIPT_DIR-}"; then
+    SCRIPT_DIR="$(realpath "${SCRIPT_DIR:?}")" || ui_error 'Unable to resolve the main script dir'
+  fi
+
+  if test "${PLATFORM:?}" = 'win' && test "${PATHSEP:?}" = ':' && command 1> /dev/null -v 'cygpath' && test -n "${SCRIPT_DIR-}"; then
+    # Only on Bash under Windows
+    SCRIPT_DIR="$(cygpath -m -l -- "${SCRIPT_DIR:?}")" || ui_error 'Unable to convert the main script dir'
+  fi
+
+  test -n "${SCRIPT_DIR-}" || ui_error 'SCRIPT_DIR env var is empty'
+  TOOLS_DIR="${SCRIPT_DIR:?}/tools/${PLATFORM:?}"
+  MODULE_NAME="$(simple_get_prop 'name' "${SCRIPT_DIR:?}/zip-content/module.prop")" || ui_error 'Failed to parse the module name string'
+  readonly SCRIPT_DIR TOOLS_DIR MODULE_NAME
+  export SCRIPT_DIR TOOLS_DIR MODULE_NAME
+}
+
+init_path()
+{
+  test "${IS_PATH_INITIALIZED:-false}" = 'false' || return
+  readonly IS_PATH_INITIALIZED='true'
+  if is_in_path "${TOOLS_DIR:?}"; then return; fi
+
+  if test -n "${PATH-}"; then PATH="${PATH%"${PATHSEP:?}"}"; fi
+
+  # On Bash under Windows (for example the one included inside Git for Windows) we need to move '/usr/bin'
+  # before 'C:/Windows/System32' otherwise it will use the find/sort/etc. of Windows instead of the Unix compatible ones.
+  if test "${PLATFORM:?}" = 'win' && test "${PATHSEP:?}" = ':'; then move_to_begin_of_path_env '/usr/bin'; fi
+
+  remove_duplicates_from_path_env
+  add_to_path "${TOOLS_DIR:?}"
+}
+
 init_cmdline()
 {
   change_title 'Command-line'
 
-  if test -n "${HOME:-}"; then
-    HOME="$(realpath "${HOME:?}")" || ui_error 'Failed to set HOME'
-    export HOME
+  if test "${STARTED_FROM_BATCH_FILE:-0}" != '0' && test -n "${HOME-}"; then
+    HOME="$(realpath "${HOME:?}")" || ui_error 'Unable to resolve the home dir'
   fi
-  export SCRIPT_DIR MODULE_NAME
+  if test "${PLATFORM:?}" = 'win' && test "${PATHSEP:?}" = ':' && command 1> /dev/null -v 'cygpath' && test -n "${HOME-}"; then
+    # Only on Bash under Windows
+    HOME="$(cygpath -u -- "${HOME:?}")" || ui_error 'Unable to convert the home dir'
+  fi
 
-  alias dir=ls
+  # Set some shell variables
+  PS1='\[\033[1;32m\]\u\[\033[0m\]:\[\033[1;34m\]\w\[\033[0m\]\$' # Escape the colors with \[ \] => https://mywiki.wooledge.org/BashFAQ/053
+  unset PROMPT_COMMAND
+
+  # Clean useless directories from the $PATH env
+  if test "${PLATFORM?}" = 'win'; then
+    remove_from_path "${SYSTEMDRIVE-}/Windows/System32/Wbem"
+    remove_from_path "${LOCALAPPDATA-}/Microsoft/WindowsApps"
+  fi
+
+  # Set environment variables
+  UTILS_DIR="${SCRIPT_DIR:?}/utils"
+  UTILS_DATA_DIR="${UTILS_DIR:?}/data"
+  readonly UTILS_DIR UTILS_DATA_DIR
+  export UTILS_DIR UTILS_DATA_DIR
+
+  add_to_path "${UTILS_DIR:?}"
+  add_to_path "${SCRIPT_DIR:?}"
+
+  alias 'dir'='ls'
   alias 'cd..'='cd ..'
   alias 'cd.'='cd .'
   alias 'cls'='reset'
-  alias 'profgen'='profile-generator.sh'
-  unset JAVA_HOME
+  if test "${PLATFORM:?}" = 'win'; then unset JAVA_HOME; fi
+
+  # Set the path of Android SDK if not already set
+  if test -z "${ANDROID_SDK_ROOT-}" && test -n "${LOCALAPPDATA-}" && test -e "${LOCALAPPDATA:?}/Android/Sdk"; then
+    export ANDROID_SDK_ROOT="${LOCALAPPDATA:?}/Android/Sdk"
+  fi
+  if test "${PLATFORM:?}" = 'win' && test "${PATHSEP:?}" = ':' && command 1> /dev/null -v 'cygpath' && test -n "${ANDROID_SDK_ROOT-}"; then
+    # Only on Bash under Windows
+    ANDROID_SDK_ROOT="$(cygpath -m -l -a -- "${ANDROID_SDK_ROOT:?}")" || ui_error 'Unable to convert the Android SDK dir'
+  fi
+
+  if test -n "${ANDROID_SDK_ROOT-}" && test -d "${ANDROID_SDK_ROOT-}/build-tools"; then
+    if AAPT2_PATH="$(find "${ANDROID_SDK_ROOT:?}/build-tools" -iname 'aapt2*' | LC_ALL=C sort -V -r | head -n 1)" && test -n "${AAPT2_PATH?}"; then
+      export AAPT2_PATH
+      # shellcheck disable=SC2139
+      alias 'aapt2'="'${AAPT2_PATH:?}'"
+    else
+      unset AAPT2_PATH
+    fi
+  fi
+
+  if test -f "${SCRIPT_DIR:?}/includes/custom-aliases.sh"; then
+    # shellcheck source=SCRIPTDIR/custom-aliases.sh
+    . "${SCRIPT_DIR:?}/includes/custom-aliases.sh" || ui_error 'Unable to source includes/custom-aliases.sh'
+  fi
+
+  if test "${PLATFORM:?}" = 'win'; then
+    export BB_FIX_BACKSLASH=1
+    export PATHEXT="${PATHEXT:-.BAT};.SH"
+  fi
+
+  export PATH_SEPARATOR="${PATHSEP:?}"
+  export DIRECTORY_SEPARATOR='/'
 }
 
-SCRIPT_DIR="$(realpath "${SCRIPT_DIR:?}")" || ui_error 'Failed to set SCRIPT_DIR'
-MODULE_NAME="$(simple_get_prop 'name' "${SCRIPT_DIR:?}/zip-content/module.prop")" || ui_error 'Failed to parse the module name string'
-readonly SCRIPT_DIR MODULE_NAME
-
-if test "${DO_INIT_CMDLINE:-0}" = '1'; then
-  init_cmdline
-  unset DO_INIT_CMDLINE
-fi
-
-# Detect OS and set OS specific info
+# Set environment variables
 PLATFORM="$(detect_os)"
-SEP='/'
 PATHSEP=':'
 if test "${PLATFORM?}" = 'win' && test "$(uname -o 2> /dev/null | LC_ALL=C tr '[:upper:]' '[:lower:]' || true)" = 'ms/windows'; then
   PATHSEP=';' # BusyBox-w32
 fi
-readonly PLATFORM SEP PATHSEP
+readonly PLATFORM PATHSEP
+export PLATFORM PATHSEP
 
-# Set the path of Android SDK if not already set
-if test -z "${ANDROID_SDK_ROOT:-}" && test -n "${LOCALAPPDATA:-}" && test -e "${LOCALAPPDATA:?}/Android/Sdk"; then
-  export ANDROID_SDK_ROOT="${LOCALAPPDATA:?}/Android/Sdk"
+init_vars
+init_path
+
+if test "${DO_INIT_CMDLINE:-0}" != '0'; then
+  unset DO_INIT_CMDLINE
+  init_cmdline
 fi
+
+export PATH
+
 if test -n "${ANDROID_SDK_ROOT:-}" && test -e "${ANDROID_SDK_ROOT:?}/emulator/emulator.exe"; then
   # shellcheck disable=SC2139
   {
@@ -580,16 +736,3 @@ if test -n "${ANDROID_SDK_ROOT:-}" && test -e "${ANDROID_SDK_ROOT:?}/emulator/em
     alias 'emu-w'="'${ANDROID_SDK_ROOT:?}/emulator/emulator.exe' -writable-system"
   }
 fi
-
-# Set some environment variables
-PS1='\[\033[1;32m\]\u\[\033[0m\]:\[\033[1;34m\]\w\[\033[0m\]\$' # Escape the colors with \[ \] => https://mywiki.wooledge.org/BashFAQ/053
-PROMPT_COMMAND=
-
-UTILS_DIR="${SCRIPT_DIR:?}${SEP:?}utils"
-export UTILS_DIR
-UTILS_DATA_DIR="${UTILS_DIR:?}${SEP:?}data"
-export UTILS_DATA_DIR
-
-TOOLS_DIR="${SCRIPT_DIR:?}${SEP:?}tools${SEP:?}${PLATFORM:?}"
-PATH="${UTILS_DIR:?}${PATHSEP:?}${TOOLS_DIR:?}${PATHSEP:?}${PATH}"
-export PATH

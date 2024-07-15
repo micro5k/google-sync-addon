@@ -3,9 +3,9 @@
 # SPDX-FileType: OTHER
 
 # Custom project folders
-utils/debug/
-utils/data/
+local/
 cache/
+utils/data/
 output/
 recovery-simulator/output/
 
