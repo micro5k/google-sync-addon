@@ -7,9 +7,6 @@
 
 if test "${A5K_FUNCTIONS_INCLUDED:-false}" = 'false'; then readonly A5K_FUNCTIONS_INCLUDED='true'; fi
 
-# shellcheck disable=SC3040
-set -o pipefail || true
-
 export LANG='en_US.UTF-8'
 export TZ='UTC'
 
@@ -70,9 +67,10 @@ ui_debug()
 
 readonly DL_DEBUG='false'
 readonly WGET_CMD='wget'
-readonly DL_UA='Mozilla/5.0 (Linux x86_64; rv:115.0) Gecko/20100101 Firefox/115.0'
+readonly DL_UA='Mozilla/5.0 (Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0'
 readonly DL_ACCEPT_HEADER='Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8'
 readonly DL_ACCEPT_LANG_HEADER='Accept-Language: en-US,en;q=0.5'
+readonly DL_AJAX_ACCEPT_HEADER='Accept: */*'
 readonly DL_DNT='DNT: 1'
 readonly DL_PROT='https://'
 
@@ -308,10 +306,43 @@ _parse_webpage_and_get_url()
   printf '%s\n' "${_parsed_url?}"
 }
 
-# 1 => URL; 2 => Origin header; 3 => Name to find
-get_JSON_value_from_ajax_request()
+do_AJAX_get_request_and_output_response_to_stdout()
 {
-  "${WGET_CMD:?}" -qO '-' -U "${DL_UA:?}" --header 'Accept: */*' --header "${DL_ACCEPT_LANG_HEADER:?}" --header "Origin: ${2:?}" --header 'DNT: 1' -- "${1:?}" | grep -Eom 1 -e "\"${3:?}\""'\s*:\s*"([^"]+)' | grep -Eom 1 -e ':\s*"([^"]+)' | grep -Eom 1 -e '"([^"]+)' | cut -c '2-' || return "${?}"
+  local _url _origin _referrer _authorization
+  _url="${1:?}"
+  _origin="${2:?}"
+  _referrer="${3-}" # Optional
+  _authorization="${4-}" # Optional
+
+  set -- -U "${DL_UA:?}" --header "${DL_AJAX_ACCEPT_HEADER:?}" --header "${DL_ACCEPT_LANG_HEADER:?}" || return "${?}"
+  if test -n "${_referrer?}"; then set -- "${@}" --header "Referer: ${_referrer:?}" || return "${?}"; fi
+  if test -n "${_authorization?}"; then set -- "${@}" --header "Authorization: ${_authorization:?}" || return "${?}"; fi
+  set -- "${@}" --header "Origin: ${_origin:?}" || return "${?}"
+
+  "${WGET_CMD:?}" -q -O '-' "${@}" -- "${_url:?}"
+}
+
+do_AJAX_post_request_and_output_response_to_stdout()
+{
+  local _url _origin _post_data _referrer _authorization
+  _url="${1:?}"
+  _origin="${2:?}"
+  _post_data="${3?}"
+  _referrer="${4-}" # Optional
+  _authorization="${5-}" # Optional
+
+  set -- -U "${DL_UA:?}" --header "${DL_AJAX_ACCEPT_HEADER:?}" --header "${DL_ACCEPT_LANG_HEADER:?}" || return "${?}"
+  if test -n "${_referrer?}"; then set -- "${@}" --header "Referer: ${_referrer:?}" || return "${?}"; fi
+  if test -n "${_authorization?}"; then set -- "${@}" --header "Authorization: ${_authorization:?}" || return "${?}"; fi
+  set -- "${@}" --header "Origin: ${_origin:?}" || return "${?}"
+
+  "${WGET_CMD:?}" -q -O '-' "${@}" --post-data "${_post_data?}" -- "${_url:?}"
+}
+
+# 1 => JSON response; 2 => Field to parse
+parse_JSON_response()
+{
+  printf '%s\n' "${1:?}" | grep -o -m 1 -E -e "\"${2:?}\""'\s*:\s*"[^"]+' | cut -d ':' -f '2-' -s | grep -o -e '".*' | cut -c '2-'
 }
 
 # 1 => URL
@@ -319,7 +350,7 @@ get_location_header_from_http_request()
 {
   {
     "${WGET_CMD:?}" 2>&1 --spider -qSO '-' -U "${DL_UA:?}" --header "${DL_ACCEPT_HEADER:?}" --header "${DL_ACCEPT_LANG_HEADER:?}" --header 'DNT: 1' -- "${1:?}" || true
-  } | grep -aom 1 -e 'Location:[[:space:]]*[^[:cntrl:]]*$' | head -n '1' || return "${?}"
+  } | grep -aom 1 -e 'Location:[[:space:]][^[:cntrl:]]*$' | cut -d ':' -f '2-' -s | cut -c '2-' || return "${?}"
 }
 
 # 1 => URL; # 2 => Origin header
@@ -342,7 +373,7 @@ _direct_download()
   _cookies="${_cookies%; }" || return "${?}"
   _status=0
 
-  set -- -U "${DL_UA:?}" --header "${DL_ACCEPT_HEADER:?}" --header "${DL_ACCEPT_LANG_HEADER:?}" --header "${DL_DNT:?}" || return "${?}"
+  set -- -U "${DL_UA:?}" --header "${DL_ACCEPT_HEADER:?}" --header "${DL_ACCEPT_LANG_HEADER:?}" || return "${?}"
   if test -n "${_referrer?}"; then
     set -- "${@}" --header "Referer: ${_referrer:?}" || return "${?}"
   fi
@@ -356,7 +387,6 @@ _direct_download()
     ui_debug "User-Agent: ${DL_UA?}"
     ui_debug "${DL_ACCEPT_HEADER?}"
     ui_debug "${DL_ACCEPT_LANG_HEADER?}"
-    ui_debug "${DL_DNT?}"
     ui_debug "Referer: ${_referrer?}"
     ui_debug "Cookie: ${_cookies?}"
     ui_debug ''
@@ -433,7 +463,8 @@ dl_type_two()
 {
   local _url _output
   local _domain _base_dm
-  local _loc_code _other_code
+  local _base_api_url _base_origin _base_referrer
+  local _json_response _location_header _loc_code _id_code _token_code
 
   _url="${1:?}" || return "${?}"
   _output="${2:?}" || return "${?}"
@@ -441,21 +472,63 @@ dl_type_two()
   _domain="$(get_domain_from_url "${_url:?}")" || report_failure 2 "${?}" || return "${?}"
   _base_dm="$(printf '%s\n' "${_domain:?}" | cut -d '.' -f '2-' -s)" || report_failure 2 "${?}" || return "${?}"
 
-  _loc_code="$(get_location_header_from_http_request "${_url:?}" | cut -d '/' -f '5-' -s)" ||
-    report_failure 2 "${?}" 'get location' || return "${?}"
+  _base_api_url="${DL_PROT:?}api.${_base_dm:?}"
+  _base_origin="${DL_PROT:?}${_base_dm:?}"
+  _base_referrer="${_base_origin:?}/"
+
+  _location_header="$(get_location_header_from_http_request "${_url:?}")" ||
+    report_failure 2 "${?}" 'get location header 1' 'THE FILE HAS PROBABLY BEEN DELETED ON THE SERVER!!!' || return "${?}"
+  # DEBUG => echo "${_location_header:?}"
+
+  if ! printf '%s\n' "${_location_header:?}" | grep -q -m 1 -F -e "${_base_referrer:?}d/"; then
+    _location_header="$(get_location_header_from_http_request "${_location_header:?}")" ||
+      report_failure 2 "${?}" 'get location header 2' 'THE FILE HAS PROBABLY BEEN DELETED ON THE SERVER!!!' || return "${?}"
+    # DEBUG => echo "${_location_header:?}"
+    
+    if ! printf '%s\n' "${_location_header:?}" | grep -q -m 1 -F -e "${_base_referrer:?}d/"; then
+      _location_header="$(get_location_header_from_http_request "${_location_header:?}")" ||
+        report_failure 2 "${?}" 'get location header 3' 'THE FILE HAS PROBABLY BEEN DELETED ON THE SERVER!!!' || return "${?}"
+      # DEBUG => echo "${_location_header:?}"
+
+      if ! printf '%s\n' "${_location_header:?}" | grep -q -m 1 -F -e "${_base_referrer:?}d/"; then
+        report_failure 2 "77" 'get location header 4' 'THE FILE HAS PROBABLY BEEN DELETED ON THE SERVER!!!' || return "${?}"
+      fi
+    fi
+  fi
+
+  _loc_code="$(printf '%s\n' "${_location_header:?}" | cut -d '/' -f '5-' -s)" ||
+    report_failure 2 "${?}" 'get location code' || return "${?}"
+  # DEBUG => echo "${_loc_code:?}"
 
   sleep 0.2
-  _other_code="$(get_JSON_value_from_ajax_request "${DL_PROT:?}api.${_base_dm:?}/createAccount" "${DL_PROT:?}${_base_dm:?}" 'token')" ||
-    report_failure 2 "${?}" 'get JSON' || return "${?}"
+  _json_response="$(do_AJAX_post_request_and_output_response_to_stdout "${_base_api_url:?}/accounts" "${_base_origin:?}" '' "${_base_referrer:?}")" ||
+    report_failure 2 "${?}" 'do AJAX post req' || return "${?}"
+  # DEBUG => echo "${_json_response:?}"
+
+  _id_code="$(parse_JSON_response "${_json_response:?}" 'id')" ||
+    report_failure 2 "${?}" 'parse JSON 1' || return "${?}"
+  _token_code="$(parse_JSON_response "${_json_response:?}" 'token')" ||
+    report_failure 2 "${?}" 'parse JSON 2' || return "${?}"
 
   sleep 0.2
-  send_empty_ajax_request "${DL_PROT:?}api.${_base_dm:?}/getContent?contentId=${_loc_code:?}&token=${_other_code:?}"'&website''Token=''7fd9''4ds1''2fds4' "${DL_PROT:?}${_base_dm:?}" ||
-    report_failure 2 "${?}" 'get content' || return "${?}"
+  _json_response="$(do_AJAX_get_request_and_output_response_to_stdout "${_base_api_url:?}/accounts/${_id_code:?}" "${_base_origin:?}" "${_base_referrer:?}" "Bearer ${_token_code:?}")" ||
+    report_failure 2 "${?}" 'do AJAX get req 1' || return "${?}"
+  # DEBUG => echo "${_json_response:?}"
+
+  sleep 0.2
+  _parse_and_store_cookie "${_domain:?}" 'account''Token='"${_token_code:?}" ||
+    report_failure 2 "${?}" 'set cookie' || return "${?}"
+
+  do_AJAX_get_request_and_output_response_to_stdout 1> /dev/null "${DL_PROT:?}${_base_dm:?}/contents/files.html" "${_base_origin:?}" "${_base_referrer:?}" ||
+    report_failure 2 "${?}" 'do AJAX get req 2' || return "${?}"
+  # DEBUG => echo "${_json_response:?}"
+
+  sleep 0.2
+  do_AJAX_get_request_and_output_response_to_stdout 1> /dev/null "${_base_api_url:?}/contents/${_loc_code:?}?"'wt''=''4fd6''sg89''d7s6' "${_base_origin:?}" "${_base_referrer:?}" "Bearer ${_token_code:?}" ||
+    report_failure 2 "${?}" 'do AJAX get req 3' || return "${?}"
 
   sleep 0.3
-  _parse_and_store_cookie "${_domain:?}" 'account''Token='"${_other_code:?}" ||
-    report_failure 2 "${?}" 'set cookie' || return "${?}"
-  _direct_download "${_url:?}" '' "${_output:?}" ||
+  _direct_download "${_url:?}" "${_base_referrer:?}" "${_output:?}" ||
     report_failure 2 "${?}" 'dl' || return "${?}"
 }
 
@@ -521,16 +594,16 @@ dl_list()
   _backup_ifs="${IFS:-}"
   IFS="${NL:?}"
 
-  # shellcheck disable=SC3040
-  set 2> /dev/null +o posix || true
+  # shellcheck disable=SC3040,SC2015 # Ignore: In POSIX sh, set option xxx is undefined. / C may run when A is true.
+  (set 2> /dev/null +o posix) && set +o posix || true
 
   for _current_line in ${1?}; do
     IFS='|' read -r local_filename local_path _ _ _ _ dl_hash dl_url dl_mirror _ 0< <(printf '%s\n' "${_current_line:?}") || return "${?}"
     dl_file "${local_path:?}" "${local_filename:?}.apk" "${dl_hash:?}" "${dl_url:?}" "${dl_mirror?}" || return "${?}"
   done || return "${?}"
 
-  # shellcheck disable=SC3040
-  set 2> /dev/null -o posix || true
+  # shellcheck disable=SC3040,SC2015 # Ignore: In POSIX sh, set option xxx is undefined. / C may run when A is true.
+  (set 2> /dev/null -o posix) && set -o posix || true
 
   IFS="${_backup_ifs:-}"
 }
@@ -544,12 +617,12 @@ is_in_path()
   return 1 # NOT found
 }
 
-add_to_path()
+add_to_path_env()
 {
   if test "${PLATFORM:?}" = 'win' && test "${PATHSEP:?}" = ':' && command 1> /dev/null -v 'cygpath'; then
     # Only on Bash under Windows
     local _path
-    _path="$(cygpath -u -a -- "${1:?}")" || ui_error 'Unable to convert a path in add_to_path()'
+    _path="$(cygpath -u -a -- "${1:?}")" || ui_error 'Unable to convert a path in add_to_path_env()'
     set -- "${_path:?}"
   fi
 
@@ -563,9 +636,16 @@ add_to_path()
   fi
 }
 
-remove_from_path()
+remove_from_path_env()
 {
   local _path
+
+  if test "${PLATFORM:?}" = 'win' && test "${PATHSEP:?}" = ':' && command 1> /dev/null -v 'cygpath'; then
+    # Only on Bash under Windows
+    local _single_path
+    _single_path="$(cygpath -u -- "${1:?}")" || ui_error 'Unable to convert a path in remove_from_path_env()'
+    set -- "${_single_path:?}"
+  fi
 
   if _path="$(printf '%s\n' "${PATH-}" | tr -- "${PATHSEP:?}" '\n' | grep -v -x -F -e "${1:?}" | tr -- '\n' "${PATHSEP:?}")" && _path="${_path%"${PATHSEP:?}"}"; then
     PATH="${_path?}"
@@ -637,7 +717,7 @@ init_path()
   if test "${PLATFORM:?}" = 'win' && test "${PATHSEP:?}" = ':'; then move_to_begin_of_path_env '/usr/bin'; fi
 
   remove_duplicates_from_path_env
-  add_to_path "${TOOLS_DIR:?}"
+  add_to_path_env "${TOOLS_DIR:?}"
 }
 
 init_cmdline()
@@ -653,13 +733,15 @@ init_cmdline()
   fi
 
   # Set some shell variables
-  PS1='\[\033[1;32m\]\u\[\033[0m\]:\[\033[1;34m\]\w\[\033[0m\]\$' # Escape the colors with \[ \] => https://mywiki.wooledge.org/BashFAQ/053
   unset PROMPT_COMMAND
+  unset PS1
+  PS1='\[\033[1;32m\]\u\[\033[0m\]:\[\033[1;34m\]\w\[\033[0m\]\$' # Escape the colors with \[ \] => https://mywiki.wooledge.org/BashFAQ/053
+  if test "${PLATFORM:?}" = 'win'; then unset JAVA_HOME; fi
 
   # Clean useless directories from the $PATH env
   if test "${PLATFORM?}" = 'win'; then
-    remove_from_path "${SYSTEMDRIVE-}/Windows/System32/Wbem"
-    remove_from_path "${LOCALAPPDATA-}/Microsoft/WindowsApps"
+    remove_from_path_env "${SYSTEMDRIVE-}/Windows/System32/Wbem"
+    remove_from_path_env "${LOCALAPPDATA-}/Microsoft/WindowsApps"
   fi
 
   # Set environment variables
@@ -668,38 +750,53 @@ init_cmdline()
   readonly UTILS_DIR UTILS_DATA_DIR
   export UTILS_DIR UTILS_DATA_DIR
 
-  add_to_path "${UTILS_DIR:?}"
-  add_to_path "${SCRIPT_DIR:?}"
+  # Set the path of Android SDK if not already set
+  if test -z "${ANDROID_SDK_ROOT-}"; then
+    if test -n "${USER_HOME-}" && test -e "${USER_HOME:?}/Android/Sdk"; then
+      # Linux
+      export ANDROID_SDK_ROOT="${USER_HOME:?}/Android/Sdk"
+    elif test -n "${LOCALAPPDATA-}" && test -e "${LOCALAPPDATA:?}/Android/Sdk"; then
+      # Windows
+      export ANDROID_SDK_ROOT="${LOCALAPPDATA:?}/Android/Sdk"
+    elif test -n "${USER_HOME-}" && test -e "${USER_HOME:?}/Library/Android/sdk"; then
+      # macOS
+      export ANDROID_SDK_ROOT="${USER_HOME:?}/Library/Android/sdk"
+    fi
+  fi
+
+  if test -n "${ANDROID_SDK_ROOT-}"; then
+    if test "${PLATFORM:?}" = 'win' && test "${PATHSEP:?}" = ':' && command 1> /dev/null -v 'cygpath'; then
+      # Only on Bash under Windows
+      ANDROID_SDK_ROOT="$(cygpath -m -l -a -- "${ANDROID_SDK_ROOT:?}")" || ui_error 'Unable to convert the Android SDK dir'
+    fi
+
+    add_to_path_env "${ANDROID_SDK_ROOT:?}/platform-tools"
+
+    if test -e "${ANDROID_SDK_ROOT:?}/build-tools"; then
+      if AAPT2_PATH="$(find "${ANDROID_SDK_ROOT:?}/build-tools" -iname 'aapt2*' | LC_ALL=C sort -V -r | head -n 1)" && test -n "${AAPT2_PATH?}"; then
+        export AAPT2_PATH
+        # shellcheck disable=SC2139
+        alias 'aapt2'="'${AAPT2_PATH:?}'"
+      else
+        unset AAPT2_PATH
+      fi
+    fi
+  fi
+
+  add_to_path_env "${UTILS_DIR:?}"
+  add_to_path_env "${SCRIPT_DIR:?}"
 
   alias 'dir'='ls'
   alias 'cd..'='cd ..'
   alias 'cd.'='cd .'
   alias 'cls'='reset'
-  if test "${PLATFORM:?}" = 'win'; then unset JAVA_HOME; fi
-
-  # Set the path of Android SDK if not already set
-  if test -z "${ANDROID_SDK_ROOT-}" && test -n "${LOCALAPPDATA-}" && test -e "${LOCALAPPDATA:?}/Android/Sdk"; then
-    export ANDROID_SDK_ROOT="${LOCALAPPDATA:?}/Android/Sdk"
-  fi
-  if test "${PLATFORM:?}" = 'win' && test "${PATHSEP:?}" = ':' && command 1> /dev/null -v 'cygpath' && test -n "${ANDROID_SDK_ROOT-}"; then
-    # Only on Bash under Windows
-    ANDROID_SDK_ROOT="$(cygpath -m -l -a -- "${ANDROID_SDK_ROOT:?}")" || ui_error 'Unable to convert the Android SDK dir'
-  fi
-
-  if test -n "${ANDROID_SDK_ROOT-}" && test -d "${ANDROID_SDK_ROOT-}/build-tools"; then
-    if AAPT2_PATH="$(find "${ANDROID_SDK_ROOT:?}/build-tools" -iname 'aapt2*' | LC_ALL=C sort -V -r | head -n 1)" && test -n "${AAPT2_PATH?}"; then
-      export AAPT2_PATH
-      # shellcheck disable=SC2139
-      alias 'aapt2'="'${AAPT2_PATH:?}'"
-    else
-      unset AAPT2_PATH
-    fi
-  fi
 
   if test -f "${SCRIPT_DIR:?}/includes/custom-aliases.sh"; then
     # shellcheck source=/dev/null
     . "${SCRIPT_DIR:?}/includes/custom-aliases.sh" || ui_error 'Unable to source includes/custom-aliases.sh'
   fi
+
+  alias build='build.sh'
 
   if test "${PLATFORM:?}" = 'win'; then
     export BB_FIX_BACKSLASH=1
@@ -709,6 +806,16 @@ init_cmdline()
   export PATH_SEPARATOR="${PATHSEP:?}"
   export DIRECTORY_SEPARATOR='/'
 }
+
+if test "${DO_INIT_CMDLINE:-0}" != '0'; then
+  # shellcheck disable=SC3040,SC3041,SC2015 # Ignore: In POSIX sh, set option xxx is undefined. / In POSIX sh, set flag -X is undefined. / C may run when A is true.
+  {
+    # Unsupported set options may cause the shell to exit (even without set -e), so first try them in a subshell to avoid this issue
+    (set 2> /dev/null -o posix) && set -o posix || true
+    (set 2> /dev/null +H) && set +H || true
+    (set 2> /dev/null -o pipefail) && set -o pipefail || true
+  }
+fi
 
 # Set environment variables
 PLATFORM="$(detect_os)"

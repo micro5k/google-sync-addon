@@ -5,12 +5,12 @@
 last_command="${_}" # IMPORTANT: This line must be at the start of the script before any other command otherwise it will not work
 
 set -e
-# shellcheck disable=SC3040,SC3041,SC2015
+# shellcheck disable=SC3040,SC3041,SC2015 # Ignore: In POSIX sh, set option xxx is undefined. / In POSIX sh, set flag -X is undefined. / C may run when A is true.
 {
   # Unsupported set options may cause the shell to exit (even without set -e), so first try them in a subshell to avoid this issue
-  (set -o posix 2> /dev/null) && set -o posix || true
-  (set +H 2> /dev/null) && set +H || true
-  (set -o pipefail 2> /dev/null) && set -o pipefail || true
+  (set 2> /dev/null -o posix) && set -o posix || true
+  (set 2> /dev/null +H) && set +H || true
+  (set 2> /dev/null -o pipefail) && set -o pipefail || true
 }
 
 cat << 'LICENSE'
@@ -209,8 +209,8 @@ BASE_TMP_SCRIPT_DIR="${TEMP_DIR}/zip-content/META-INF/com/google/android"
 mv -f "${BASE_TMP_SCRIPT_DIR}/update-binary.sh" "${BASE_TMP_SCRIPT_DIR}/update-binary" || ui_error 'Failed to rename a file'
 mv -f "${BASE_TMP_SCRIPT_DIR}/updater-script.dat" "${BASE_TMP_SCRIPT_DIR}/updater-script" || ui_error 'Failed to rename a file'
 find "${TEMP_DIR}/zip-content" -type d -exec chmod 0700 '{}' + -o -type f -exec chmod 0600 '{}' + || ui_error 'Failed to set permissions of files'
-if test "${PLATFORM:?}" = 'win'; then
-  attrib.exe -R -A -S -H "${TEMP_DIR:?}/zip-content/*" /S /D
+if test "${PLATFORM:?}" = 'win' && command 1> /dev/null -v 'attrib.exe'; then
+  MSYS_NO_PATHCONV=1 attrib.exe -R -A -S -H "${TEMP_DIR:?}/zip-content/*" /S /D
 fi
 find "${TEMP_DIR}/zip-content" -exec touch -c -t 200802290333.46 '{}' + || ui_error 'Failed to set the modification date of files'
 
