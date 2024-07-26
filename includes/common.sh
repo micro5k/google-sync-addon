@@ -33,7 +33,7 @@ readonly NL='
 pause_if_needed()
 {
   # shellcheck disable=SC3028 # In POSIX sh, SHLVL is undefined
-  if test "${CI:-false}" = 'false' && test "${APP_BASE_NAME:-false}" != 'gradlew' && test "${SHLVL:-1}" = '1' && test -t 0 && test -t 2; then
+  if test "${CI:-false}" = 'false' && test "${TERM_PROGRAM-}" != 'vscode' && test "${APP_BASE_NAME:-false}" != 'gradlew' && test "${SHLVL:-1}" = '1' && test -t 0 && test -t 2; then
     printf 1>&2 '\n\033[1;32m%s\033[0m' 'Press any key to exit...' || true
     # shellcheck disable=SC3045
     IFS='' read 1>&2 -r -s -n 1 _ || true
@@ -66,6 +66,8 @@ ui_debug()
 }
 
 export DL_DEBUG="${DL_DEBUG:-false}"
+export http_proxy="${http_proxy-}"
+export ftp_proxy="${ftp_proxy-}"
 # shellcheck disable=SC2034
 {
   readonly WGET_CMD='wget'
@@ -268,6 +270,13 @@ corrupted_file()
   ui_error "The file '$1' is corrupted."
 }
 
+_get_byte_length()
+{
+  local LC_ALL
+  export LC_ALL=C
+  printf '%s\n' "${#1}"
+}
+
 _parse_webpage_and_get_url()
 {
   local _url _referrer _search_pattern
@@ -330,6 +339,8 @@ _parse_webpage_and_get_url()
 
 dl_debug()
 {
+  local _show_response='false'
+
   ui_debug ''
   ui_debug '--------'
   ui_debug "URL: ${1:?}"
@@ -353,6 +364,10 @@ dl_debug()
         fi
         ;;
 
+      -S)
+        _show_response='true'
+        ;;
+
       --post-data)
         if test "${#}" -ge 2; then
           shift
@@ -372,7 +387,11 @@ dl_debug()
     shift
   done
 
-  ui_debug '--------'
+  if test "${_show_response:?}" = 'true'; then
+    ui_debug 'RESPONSE:'
+  else
+    ui_debug '--------'
+  fi
 }
 
 clear_previous_url()
@@ -385,27 +404,9 @@ get_previous_url()
   printf '%s\n' "${PREVIOUS_URL-}"
 }
 
-do_AJAX_get_request_and_output_response_to_stdout()
-{
-  local _url _origin _referrer _authorization
-  _url="${1:?}"
-  _origin="${2:?}"
-  _referrer="${3-}"      # Optional
-  _authorization="${4-}" # Optional
-  PREVIOUS_URL="${_url:?}"
-
-  set -- -U "${DL_UA:?}" --header "${DL_ACCEPT_ALL_HEADER:?}" --header "${DL_ACCEPT_LANG_HEADER:?}" || return "${?}"
-  if test -n "${_referrer?}"; then set -- "${@}" --header "Referer: ${_referrer:?}" || return "${?}"; fi
-  if test -n "${_authorization?}"; then set -- "${@}" --header "Authorization: ${_authorization:?}" || return "${?}"; fi
-  set -- "${@}" --header "Origin: ${_origin:?}" || return "${?}"
-
-  if test "${DL_DEBUG:?}" = 'true'; then dl_debug "${_url:?}" 'GET' "${@}"; fi
-  "${WGET_CMD:?}" -q -O '-' "${@}" -- "${_url:?}"
-}
-
 send_web_request_and_output_response()
 {
-  local _url _method _referrer _origin _authorization _accept
+  local _url _method _referrer _origin _authorization _accept _body_data _body_data_length
   local _is_ajax='false'
   local _cookies=''
 
@@ -415,6 +416,7 @@ send_web_request_and_output_response()
   _origin="${4-}"        # Optional (empty or unset for normal requests but not empty for AJAX requests)
   _authorization="${5-}" # Optional
   _accept="${6-}"        # Optional
+  _body_data="${7-}"     # Optional
   if test -n "${_origin?}"; then _is_ajax='true'; fi
   PREVIOUS_URL="${_url:?}"
 
@@ -430,18 +432,33 @@ send_web_request_and_output_response()
 
   if test -n "${_referrer?}"; then set -- "${@}" --header "Referer: ${_referrer:?}" || return "${?}"; fi
   if test -n "${_authorization?}"; then set -- "${@}" --header "Authorization: ${_authorization:?}" || return "${?}"; fi
+  if test "${_method:?}" = 'POST'; then
+    _body_data_length="$(_get_byte_length "${_body_data?}")" || return "${?}"
+    #set -- "${@}" --header 'Content-Type: text/plain;charset=UTF-8' --header "Content-Length: ${_body_data_length:?}" || return "${?}"
+    set -- "${@}" --header 'Content-Type: text/plain;charset=UTF-8' || return "${?}"
+  fi
   if test -n "${_origin?}"; then set -- "${@}" --header "Origin: ${_origin:?}" || return "${?}"; fi
   if test -n "${_cookies?}"; then set -- "${@}" --header "Cookie: ${_cookies:?}" || return "${?}"; fi
-  if test "${_method:?}" = 'POST'; then set -- "${@}" --post-data '' || return "${?}"; fi
+  if test "${_method:?}" = 'POST'; then set -- "${@}" --post-data "${_body_data?}" || return "${?}"; fi
 
-  if test "${DL_DEBUG:?}" = 'true'; then dl_debug "${_url:?}" "${_method:?}" "${@}"; fi
+  if test "${DL_DEBUG:?}" = 'true'; then
+    set -- -S "${@}" || return "${?}"
+    dl_debug "${_url:?}" "${_method:?}" "${@}"
+  fi
   "${WGET_CMD:?}" -q -O '-' "${@}" -- "${_url:?}"
 }
 
-# 1 => JSON response; 2 => Field to retrieve
-parse_JSON_response()
+# 1 => JSON string; 2 => Key to search
+parse_json_and_retrieve_first_value_by_key()
 {
-  printf '%s\n' "${1:?}" | grep -o -m 1 -E -e "\"${2:?}\""'\s*:\s*"[^"]+' | cut -d ':' -f '2-' -s | grep -o -e '".*' | cut -c '2-'
+  printf '%s\n' "${1:?}" | grep -o -m 1 -E -e "\"${2:?}\""'\s*:\s*"[^"]+' | head -n 1 | cut -d ':' -f '2-' -s | grep -o -e '".*' | cut -c '2-'
+}
+
+# 1 => JSON string; 2 => Object to search
+# NOTE: The object cannot contains other objects
+parse_json_and_retrieve_object()
+{
+  printf '%s\n' "${1:?}" | grep -o -m 1 -e "\"${2:?}\""'\s*:\s*{[^}]*}' | head -n 1 | cut -d ':' -f '2-' -s
 }
 
 send_web_request_and_output_headers()
@@ -686,34 +703,54 @@ dl_type_two()
   # DEBUG => echo "${_loc_code:?}"
 
   sleep 0.2
-  _json_response="$(send_web_request_and_output_response "${_base_api_url:?}/accounts" 'POST' "${_base_referrer:?}" "${_base_origin:?}")" ||
+  _json_response="$(send_web_request_and_output_response "${_base_api_url:?}/accounts" 'POST' "${_base_referrer:?}" "${_base_origin:?}" '' '' '{}')" ||
     report_failure 2 "${?}" 'do AJAX post req' || return "${?}"
-  # DEBUG => echo "${_json_response:?}"
+  if test "${DL_DEBUG:?}" = 'true'; then printf '%s\n' "${_json_response?}"; fi
 
-  _id_code="$(parse_JSON_response "${_json_response:?}" 'id')" ||
+  _id_code="$(parse_json_and_retrieve_first_value_by_key "${_json_response:?}" 'id')" ||
     report_failure 2 "${?}" 'parse JSON 1' || return "${?}"
-  _token_code="$(parse_JSON_response "${_json_response:?}" 'token')" ||
+  _token_code="$(parse_json_and_retrieve_first_value_by_key "${_json_response:?}" 'token')" ||
     report_failure 2 "${?}" 'parse JSON 2' || return "${?}"
 
   sleep 0.2
-  _json_response="$(do_AJAX_get_request_and_output_response_to_stdout "${_base_api_url:?}/accounts/${_id_code:?}" "${_base_origin:?}" "${_base_referrer:?}" "Bearer ${_token_code:?}")" ||
+  _json_response="$(send_web_request_and_output_response "${_base_api_url:?}/accounts/${_id_code:?}" 'GET' "${_base_referrer:?}" "${_base_origin:?}" "Bearer ${_token_code:?}")" ||
     report_failure 2 "${?}" 'do AJAX get req 1' || return "${?}"
-  # DEBUG => echo "${_json_response:?}"
+  if test "${DL_DEBUG:?}" = 'true'; then printf '%s\n' "${_json_response?}"; fi
 
   _parse_and_store_cookie "${_second_level_domain:?}" 'account''Token='"${_token_code:?}" ||
     report_failure 2 "${?}" 'set cookie' || return "${?}"
 
-  sleep 0.2
-  send_web_request_and_no_output "${DL_PROT:?}${_second_level_domain:?}/contents/files.html" 'GET' "${_base_referrer:?}" '' '' 'all' ||
-    report_failure 2 "${?}" 'do web get req' || return "${?}"
+  ### NOTE: This is not required ###
+  #sleep 0.2
+  #send_web_request_and_no_output "${DL_PROT:?}${_second_level_domain:?}/contents/files.html" 'GET' "${_base_referrer:?}" '' '' 'all' ||
+  #  report_failure 2 "${?}" 'do req files.html' || return "${?}"
 
   sleep 0.2
-  _json_response="$(do_AJAX_get_request_and_output_response_to_stdout "${_base_api_url:?}/contents/${_loc_code:?}?"'wt''=''4fd6''sg89''d7s6' "${_base_origin:?}" "${_base_referrer:?}" "Bearer ${_token_code:?}")" ||
+  _json_response="$(send_web_request_and_output_response "${_base_api_url:?}/contents/${_loc_code:?}?"'wt''=''4fd6''sg89''d7s6' 'GET' "${_base_referrer:?}" "${_base_origin:?}" "Bearer ${_token_code:?}")" ||
     report_failure 2 "${?}" 'do AJAX get req 2' || return "${?}"
-  # DEBUG => echo "${_json_response:?}"
+  if test "${DL_DEBUG:?}" = 'true'; then printf '%s\n' "${_json_response?}"; fi
+
+  local _dl_unique_id _json_object _parsed_link
+
+  _dl_unique_id="$(printf '%s\n' "${_url:?}" | rev | cut -d '/' -f '2' -s | rev)" ||
+    report_failure 2 "${?}" 'parse DL unique ID' || return "${?}"
+
+  if test "${_dl_unique_id?}" = 'd'; then
+    # If it is a folder link then choose the first download
+    _parsed_link="$(parse_json_and_retrieve_first_value_by_key "${_json_response:?}" 'link')" ||
+      report_failure 2 "${?}" 'parse last JSON' || return "${?}"
+  else
+    if test "${DL_DEBUG:?}" = 'true'; then printf '\n%s\n' "DL unique ID: ${_dl_unique_id?}"; fi
+
+    _json_object="$(parse_json_and_retrieve_object "${_json_response:?}" "${_dl_unique_id:?}")" ||
+      report_failure 2 "${?}" 'parse last JSON 1' || return "${?}"
+    _parsed_link="$(parse_json_and_retrieve_first_value_by_key "${_json_object:?}" 'link')" ||
+      report_failure 2 "${?}" 'parse last JSON 2' || return "${?}"
+  fi
+  if test "${DL_DEBUG:?}" = 'true'; then printf '\n%s\n' "Parsed link: ${_parsed_link?}"; fi
 
   sleep 0.3
-  _direct_download "${_url:?}" "${_output:?}" 'GET' "${_base_referrer:?}" ||
+  _direct_download "${_parsed_link:?}" "${_output:?}" 'GET' "${_base_referrer:?}" ||
     report_failure 2 "${?}" 'dl' || return "${?}"
 }
 
