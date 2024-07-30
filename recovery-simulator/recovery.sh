@@ -19,7 +19,7 @@ set -e
 }
 
 # shellcheck disable=SC3028
-case ":${SHELLOPTS:-}:" in
+case ":${SHELLOPTS-}:" in
   *':xtrace:'*) # Auto-enable `set -x` for shells that do NOT support SHELLOPTS
     set -x
     COVERAGE='true'
@@ -27,86 +27,75 @@ case ":${SHELLOPTS:-}:" in
   *) ;;
 esac
 
-detect_os()
-{
-  local _os
-  _os="$(uname | tr -- '[:upper:]' '[:lower:]')"
-
-  case "${_os?}" in
-    'linux') # Returned by both Linux and Android, it will be identified later in the code
-      _os='linux'
-      ;;
-    'android') # Currently never returned, but may be in the future
-      _os='android'
-      ;;
-    'windows'*) # BusyBox-w32 on Windows => Windows_NT (other Windows cases will be detected in the default case)
-      _os='win'
-      ;;
-    'darwin')
-      _os='macos'
-      ;;
-    'freebsd')
-      _os='freebsd'
-      ;;
-    '')
-      _os='unknown'
-      ;;
-
-    *)
-      case "$(uname 2> /dev/null -o | tr -- '[:upper:]' '[:lower:]')" in
-        # Output of uname -o:
-        # - MinGW => Msys
-        # - MSYS => Msys
-        # - Cygwin => Cygwin
-        # - BusyBox-w32 => MS/Windows
-        'msys' | 'cygwin' | 'ms/windows')
-          _os='win'
-          ;;
-        *)
-          printf '%s\n' "${_os:?}" | tr -d '/' || ui_error 'Failed to get uname'
-          return 0
-          ;;
-      esac
-      ;;
-  esac
-
-  # Android identify itself as Linux
-  if test "${_os?}" = 'linux'; then
-    case "$(uname 2> /dev/null -a | tr -- '[:upper:]' '[:lower:]')" in
-      *' android'* | *'-lineage-'* | *'-leapdroid-'*)
-        _os='android'
-        ;;
-      *) ;;
-    esac
-  fi
-
-  printf '%s\n' "${_os:?}"
-}
-
-detect_path_sep()
-{
-  if test "${PLATFORM?}" = 'win' && test "$(uname 2> /dev/null -o | tr -- '[:upper:]' '[:lower:]' || true)" = 'ms/windows'; then
-    printf ';\n' # BusyBox-w32
-  else
-    printf ':\n'
-  fi
-}
-
 fail_with_msg()
 {
   echo "${1:?}"
   exit 1
 }
 
-create_junction()
+show_cmdline()
 {
-  if test "${uname_o_saved}" != 'MS/Windows'; then return 1; fi
-  jn -- "${1:?}" "${2:?}"
+  printf "'%s'" "${0-}"
+  if test "${#}" -gt 0; then printf " '%s'" "${@}"; fi
+  printf '\n'
 }
 
-link_folder()
+detect_os_and_other_things()
 {
-  ln -sf "${2:?}" "${1:?}" 2> /dev/null || create_junction "${2:?}" "${1:?}" || mkdir -p "${1:?}" || fail_with_msg "Failed to link dir '${1}' to '${2}'"
+  if test -n "${PLATFORM-}"; then return; fi
+
+  PLATFORM="$(uname | tr -- '[:upper:]' '[:lower:]')"
+  IS_BUSYBOX='false'
+  PATHSEP=':'
+  CYGPATH=''
+
+  case "${PLATFORM?}" in
+    'linux') ;;   # Returned by both Linux and Android, Android will be identified later in the function
+    'android') ;; # Currently never returned by Android
+    'windows_nt') # BusyBox-w32 on Windows => Windows_NT
+      PLATFORM='win'
+      IS_BUSYBOX='true'
+      ;;
+    'msys_'* | 'cygwin_'* | 'mingw32_'* | 'mingw64_'*) PLATFORM='win' ;;
+    'windows'*) PLATFORM='win' ;; # Unknown shell on Windows
+    'darwin') PLATFORM='macos' ;;
+    'freebsd') ;;
+    '') PLATFORM='unknown' ;;
+
+    *)
+      # Output of uname -o:
+      # - MinGW => Msys
+      # - MSYS => Msys
+      # - Cygwin => Cygwin
+      # - BusyBox-w32 => MS/Windows
+      case "$(uname 2> /dev/null -o | tr -- '[:upper:]' '[:lower:]')" in
+        'ms/windows')
+          PLATFORM='win'
+          IS_BUSYBOX='true'
+          ;;
+        'msys' | 'cygwin') PLATFORM='win' ;;
+        *) PLATFORM="$(printf '%s\n' "${PLATFORM:?}" | tr -d '/')" || fail_with_msg 'Failed to get uname' ;;
+      esac
+      ;;
+  esac
+
+  # Android identify itself as Linux
+  if test "${PLATFORM?}" = 'linux'; then
+    case "$(uname 2> /dev/null -a | tr -- '[:upper:]' '[:lower:]')" in
+      *' android'* | *'-lineage-'* | *'-leapdroid-'*) PLATFORM='android' ;;
+      *) ;;
+    esac
+  fi
+
+  if test "${PLATFORM:?}" = 'win' && test "${IS_BUSYBOX:?}" = 'true'; then
+    PATHSEP=';'
+  fi
+
+  if test "${PLATFORM:?}" = 'win' && test "${IS_BUSYBOX:?}" = 'false' && PATH="/usr/bin${PATHSEP:?}${PATH-}" command 1> /dev/null -v 'cygpath'; then
+    CYGPATH="$(PATH="/usr/bin${PATHSEP:?}${PATH-}" command -v cygpath)" || fail_with_msg 'Unable to find the path of cygpath'
+  fi
+
+  readonly PLATFORM IS_BUSYBOX PATHSEP CYGPATH
 }
 
 is_in_path_env()
@@ -120,12 +109,64 @@ is_in_path_env()
 
 add_to_path_env()
 {
+  if test -n "${CYGPATH?}"; then
+    # Only on Bash under Windows
+    local _path
+    _path="$("${CYGPATH:?}" -u -a -- "${1:?}")" || fail_with_msg 'Unable to convert a path in add_to_path_env()'
+    set -- "${_path:?}"
+  fi
+
   if is_in_path_env "${1:?}" || test ! -e "${1:?}"; then return; fi
 
   if test -z "${PATH-}"; then
     PATH="${1:?}"
   else
     PATH="${1:?}${PATHSEP:?}${PATH:?}"
+  fi
+}
+
+move_to_begin_of_path_env()
+{
+  local _path
+  if test ! -e "${1:?}"; then return; fi
+
+  if test -z "${PATH-}"; then
+    PATH="${1:?}"
+  elif _path="$(printf '%s\n' "${PATH:?}" | tr -- "${PATHSEP:?}" '\n' | grep -v -x -F -e "${1:?}" | tr -- '\n' "${PATHSEP:?}")" && _path="${_path%"${PATHSEP:?}"}" && test -n "${_path?}"; then
+    PATH="${1:?}${PATHSEP:?}${_path:?}"
+  fi
+}
+
+init_path()
+{
+  test "${IS_PATH_INITIALIZED:-false}" = 'false' || return
+  readonly IS_PATH_INITIALIZED='true'
+
+  if test -n "${PATH-}"; then PATH="${PATH%"${PATHSEP:?}"}"; fi
+  # On Bash under Windows (for example the one included inside Git for Windows) we need to move '/usr/bin'
+  # before 'C:/Windows/System32' otherwise it will use the find/sort/etc. of Windows instead of the Unix compatible ones.
+  if test "${PLATFORM:?}" = 'win' && test "${IS_BUSYBOX:?}" = 'false'; then move_to_begin_of_path_env '/usr/bin'; fi
+
+  add_to_path_env "$(realpath "${THIS_SCRIPT_DIR:?}/../tools/${PLATFORM:?}" || true)" || fail_with_msg 'Unable to add the tools dir to the PATH env'
+}
+
+create_junction()
+{
+  if test "${PLATFORM:?}" != 'win' || test "${IS_BUSYBOX:?}" = 'false'; then return 1; fi
+  jn -- "${1:?}" "${2:?}"
+}
+
+link_folder()
+{
+  ln -sf "${2:?}" "${1:?}" 2> /dev/null || create_junction "${2:?}" "${1:?}" || mkdir -p "${1:?}" || fail_with_msg "Failed to link dir '${1}' to '${2}'"
+}
+
+remove_folder_link()
+{
+  if test -h "${1:?}"; then
+    rm -f -- "${1:?}"
+  else
+    rmdir -- "${1:?}"
   fi
 }
 
@@ -184,23 +225,26 @@ recovery_flash_end()
   echo ''
 }
 
-if test -z "${*}"; then fail_with_msg 'You must pass the filename of the flashable ZIP as parameter'; fi
-
 # Reset environment
-if ! "${ENV_RESETTED:-false}"; then
+if test "${ENV_RESETTED:-false}" = 'false'; then
+  printf '%s\n' 'FULL COMMAND LINE:'
+  show_cmdline "${@}"
+  printf '\n'
+
+  if test "${#}" -eq 0; then fail_with_msg 'You must pass the filename of the flashable ZIP as parameter'; fi
+
   THIS_SCRIPT="$(realpath "${0:?}" 2> /dev/null)" || fail_with_msg 'Failed to get script filename'
-  # Create the temp dir (must be done before resetting environment)
-  OUR_TEMP_DIR="$(mktemp -d -t ANDR-RECOV-XXXXXX)" || fail_with_msg 'Failed to create our temp dir'
 
-  if test "${APP_BASE_NAME:-false}" = 'gradlew' || test "${APP_BASE_NAME:-false}" = 'gradlew.'; then
-    APP_NAME='Gradle'
-  fi
+  reset_env_and_rerun_myself()
+  {
+    if test "${COVERAGE:-false}" = 'false'; then
+      exec env -i -- ENV_RESETTED=true PATH="${PATH:?}" BB_GLOBBING='0' THIS_SCRIPT="${THIS_SCRIPT:?}" TMPDIR="${TMPDIR:-${RUNNER_TEMP:-${TMP:-${TEMP:-/tmp}}}}" DEBUG_LOG="${DEBUG_LOG-}" LIVE_SETUP_ALLOWED="${LIVE_SETUP_ALLOWED-}" FORCE_HW_BUTTONS="${FORCE_HW_BUTTONS-}" CI="${CI-}" bash -- "${THIS_SCRIPT:?}" "${@}"
+    else
+      exec env -i -- ENV_RESETTED=true PATH="${PATH:?}" BB_GLOBBING='0' THIS_SCRIPT="${THIS_SCRIPT:?}" TMPDIR="${TMPDIR:-${RUNNER_TEMP:-${TMP:-${TEMP:-/tmp}}}}" DEBUG_LOG="${DEBUG_LOG-}" LIVE_SETUP_ALLOWED="${LIVE_SETUP_ALLOWED-}" FORCE_HW_BUTTONS="${FORCE_HW_BUTTONS-}" CI="${CI-}" BASH_XTRACEFD="${BASH_XTRACEFD-}" BASH_ENV="${BASH_ENV-}" OLDPWD="${OLDPWD-}" SHELLOPTS="${SHELLOPTS-}" PS4="${PS4-}" bash -x -- "${THIS_SCRIPT:?}" "${@}"
+    fi
+  }
 
-  if test "${COVERAGE:-false}" = 'false'; then
-    exec env -i -- ENV_RESETTED=true BB_GLOBBING='0' THIS_SCRIPT="${THIS_SCRIPT:?}" OUR_TEMP_DIR="${OUR_TEMP_DIR:?}" DEBUG_LOG="${DEBUG_LOG:-}" LIVE_SETUP_ALLOWED="${LIVE_SETUP_ALLOWED:-}" FORCE_HW_BUTTONS="${FORCE_HW_BUTTONS:-}" CI="${CI:-}" APP_NAME="${APP_NAME:-}" SHELLOPTS="${SHELLOPTS:-}" SHELL="${SHELL:-}" PATH="${PATH:?}" bash -- "${THIS_SCRIPT:?}" "${@}" || fail_with_msg 'failed: exec'
-  else
-    exec env -i -- ENV_RESETTED=true BB_GLOBBING='0' THIS_SCRIPT="${THIS_SCRIPT:?}" OUR_TEMP_DIR="${OUR_TEMP_DIR:?}" DEBUG_LOG="${DEBUG_LOG:-}" LIVE_SETUP_ALLOWED="${LIVE_SETUP_ALLOWED:-}" FORCE_HW_BUTTONS="${FORCE_HW_BUTTONS:-}" CI="${CI:-}" APP_NAME="${APP_NAME:-}" SHELLOPTS="${SHELLOPTS:-}" SHELL="${SHELL:-}" PATH="${PATH:?}" COVERAGE="true" bashcov -- "${THIS_SCRIPT:?}" "${@}" || fail_with_msg 'failed: exec'
-  fi
+  reset_env_and_rerun_myself "${@}" || fail_with_msg 'failed: exec'
   exit 127
 fi
 unset ENV_RESETTED
@@ -209,26 +253,39 @@ if test -z "${LIVE_SETUP_ALLOWED-}"; then unset LIVE_SETUP_ALLOWED; fi
 if test -z "${FORCE_HW_BUTTONS-}"; then unset FORCE_HW_BUTTONS; fi
 
 if test -z "${CI-}"; then unset CI; fi
-if test -z "${APP_NAME-}"; then unset APP_NAME; fi
 if test -z "${SHELLOPTS-}"; then unset SHELLOPTS; fi
-_backup_path="${PATH:?}"
-uname_o_saved="$(uname -o)" || fail_with_msg 'Failed to get uname -o'
 
-# Set variables that we need
-PLATFORM="$(detect_os)"
-PATHSEP="$(detect_path_sep)"
-readonly PLATFORM PATHSEP
+detect_os_and_other_things
+
+if test -n "${CYGPATH?}" && test "${TMPDIR?}" = '/tmp'; then
+  # Workaround for issues with Bash under Windows (for example the one included inside Git for Windows)
+  TMPDIR="$("${CYGPATH:?}" -m -a -l -- '/tmp')" || fail_with_msg 'Unable to convert the temp directory'
+fi
+
+# Create our temp dir (must be done with a valid TMPDIR env var)
+export TMPDIR
+OUR_TEMP_DIR="$(mktemp -d -t ANDR-RECOV-XXXXXX)" || fail_with_msg 'Failed to create our temp dir'
+readonly OUR_TEMP_DIR
 
 # Get dir of this script
 THIS_SCRIPT_DIR="$(dirname "${THIS_SCRIPT:?}")" || fail_with_msg 'Failed to get script dir'
 unset THIS_SCRIPT
 
-add_to_path_env "${THIS_SCRIPT_DIR:?}/../tools/${PLATFORM:?}"
+init_path
+
+# Backup original variables
+_backup_path="${PATH?}"
+_backup_tmpdir="${TMPDIR:?}"
+readonly _backup_path _backup_tmpdir
 
 # Check dependencies
 _our_busybox="$(env -- which -- busybox)" || fail_with_msg 'BusyBox is missing'
+_tee_cmd="$(command -v tee)" || fail_with_msg 'tee is missing'
+readonly _our_busybox _tee_cmd
+
 if test "${COVERAGE:-false}" != 'false'; then
-  COVERAGE="$(command -v bashcov)" || fail_with_msg 'Bashcov is missing'
+  _bash_cmd="$(command -v bash)" || fail_with_msg 'bash is missing'
+  readonly _bash_cmd
 fi
 
 case "${*}" in
@@ -245,41 +302,47 @@ done
 unset param
 
 # Ensure we have a path for the temp dir and empty it (should be already empty, but we must be sure)
-test -n "${OUR_TEMP_DIR:-}" || fail_with_msg 'Failed to get a temp dir'
+test -n "${OUR_TEMP_DIR-}" || fail_with_msg 'Failed to get a temp dir'
 mkdir -p -- "${OUR_TEMP_DIR:?}" || fail_with_msg 'Failed to create our temp dir'
 rm -rf -- "${OUR_TEMP_DIR:?}"/* || fail_with_msg 'Failed to empty our temp dir'
 
 # Setup the needed variables
-BASE_SIMULATION_PATH="${OUR_TEMP_DIR}/root"                           # Internal var
-_our_overrider_dir="${THIS_SCRIPT_DIR}/override"                      # Internal var
-_our_overrider_script="${THIS_SCRIPT_DIR}/inc/configure-overrides.sh" # Internal var
+_base_simulation_path="${OUR_TEMP_DIR:?}/root-dir"
+_our_overrider_dir="${THIS_SCRIPT_DIR:?}/override"
+_our_overrider_script="${THIS_SCRIPT_DIR:?}/inc/configure-overrides.sh"
 _init_dir="$(pwd)" || fail_with_msg 'Failed to read the current dir'
 
+readonly _base_simulation_path _our_overrider_dir _our_overrider_script _init_dir
+
 # Configure the Android recovery environment variables (they will be used later)
-_android_tmp="${BASE_SIMULATION_PATH}/tmp"
-_android_sys="${BASE_SIMULATION_PATH}/system"
-_android_data="${BASE_SIMULATION_PATH}/data"
-_android_ext_stor="${BASE_SIMULATION_PATH}/sdcard0"
-_android_sec_stor="${BASE_SIMULATION_PATH}/sdcard1"
-_android_path="${_our_overrider_dir}:${BASE_SIMULATION_PATH}/sbin:${_android_sys}/bin"
-_android_lib_path=".:${BASE_SIMULATION_PATH}/sbin"
+_android_ext_stor="${_base_simulation_path:?}/sdcard0"
+_android_sec_stor="${_base_simulation_path:?}/sdcard1"
+_android_lib_path=".:${_base_simulation_path:?}/sbin"
+_android_data="${_base_simulation_path:?}/data"
+_android_sys="${_base_simulation_path:?}/system"
+_android_path="${_our_overrider_dir:?}:${_android_sys:?}/bin"
+_android_tmp="${_base_simulation_path:?}/tmp"
+
+_android_busybox="${_android_sys:?}/bin/busybox"
+
+readonly _android_ext_stor _android_sec_stor _android_lib_path _android_data _android_sys _android_path _android_tmp _android_busybox
 
 # Simulate the Android recovery environment inside the temp folder
-mkdir -p "${BASE_SIMULATION_PATH}"
-cd "${BASE_SIMULATION_PATH}" || fail_with_msg 'Failed to change dir to the base simulation path'
-mkdir -p "${_android_tmp}"
-mkdir -p "${_android_sys}"
-mkdir -p "${_android_sys}/addon.d"
-mkdir -p "${_android_sys}/etc"
-mkdir -p "${_android_sys}/priv-app"
-mkdir -p "${_android_sys}/app"
-mkdir -p "${_android_sys}/bin"
-mkdir -p "${_android_data}"
-mkdir -p "${_android_ext_stor}"
-mkdir -p "${_android_sec_stor}"
-touch "${_android_tmp}/recovery.log"
-link_folder "${BASE_SIMULATION_PATH:?}/sbin" "${_android_sys:?}/bin"
-link_folder "${BASE_SIMULATION_PATH:?}/sdcard" "${_android_ext_stor:?}"
+mkdir -p "${_base_simulation_path:?}"
+cd "${_base_simulation_path:?}" || fail_with_msg 'Failed to change dir to the base simulation path'
+mkdir -p "${_android_tmp:?}"
+mkdir -p "${_android_sys:?}"
+mkdir -p "${_android_sys:?}/addon.d"
+mkdir -p "${_android_sys:?}/etc"
+mkdir -p "${_android_sys:?}/priv-app"
+mkdir -p "${_android_sys:?}/app"
+mkdir -p "${_android_sys:?}/bin"
+mkdir -p "${_android_data:?}"
+mkdir -p "${_android_ext_stor:?}"
+mkdir -p "${_android_sec_stor:?}"
+touch "${_android_tmp:?}/recovery.log"
+link_folder "${_base_simulation_path:?}/sbin" "${_android_sys:?}/bin"
+link_folder "${_base_simulation_path:?}/sdcard" "${_android_ext_stor:?}"
 
 {
   echo 'ro.build.characteristics=phone,emulator'
@@ -294,14 +357,14 @@ link_folder "${BASE_SIMULATION_PATH:?}/sdcard" "${_android_ext_stor:?}"
   echo 'ro.product.manufacturer=ale5000'
 } 1> "${_android_sys:?}/build.prop"
 
-touch "${BASE_SIMULATION_PATH:?}/AndroidManifest.xml"
-printf 'a\0n\0d\0r\0o\0i\0d\0.\0p\0e\0r\0m\0i\0s\0s\0i\0o\0n\0.\0F\0A\0K\0E\0_\0P\0A\0C\0K\0A\0G\0E\0_\0S\0I\0G\0N\0A\0T\0U\0R\0E\0' 1> "${BASE_SIMULATION_PATH:?}/AndroidManifest.xml"
+touch "${_base_simulation_path:?}/AndroidManifest.xml"
+printf 'a\0n\0d\0r\0o\0i\0d\0.\0p\0e\0r\0m\0i\0s\0s\0i\0o\0n\0.\0F\0A\0K\0E\0_\0P\0A\0C\0K\0A\0G\0E\0_\0S\0I\0G\0N\0A\0T\0U\0R\0E\0' 1> "${_base_simulation_path:?}/AndroidManifest.xml"
 mkdir -p "${_android_sys:?}/framework"
 zip -D -9 -X -UN=n -nw -q "${_android_sys:?}/framework/framework-res.apk" 'AndroidManifest.xml' || fail_with_msg 'Failed compressing framework-res.apk'
-rm -f -- "${BASE_SIMULATION_PATH:?}/AndroidManifest.xml"
+rm -f -- "${_base_simulation_path:?}/AndroidManifest.xml"
 
 cp -pf -- "${THIS_SCRIPT_DIR:?}/updater.sh" "${_android_tmp:?}/updater" || fail_with_msg 'Failed to copy the updater script'
-chmod +x "${_android_tmp:?}/updater" || fail_with_msg "chmod failed on '${_android_tmp}/updater'"
+chmod +x "${_android_tmp:?}/updater" || fail_with_msg "chmod failed on '${_android_tmp?}/updater'"
 
 if test "${COVERAGE:-false}" != 'false'; then
   cd "${_init_dir:?}" || fail_with_msg 'Failed to change back the folder'
@@ -322,10 +385,11 @@ _is_export_f_supported=0
 
 override_command()
 {
-  if ! test -e "${_our_overrider_dir:?}/${1:?}"; then return 1; fi
-  rm -f -- "${_android_sys:?}/bin/${1:?}"
+  if test ! -e "${_our_overrider_dir:?}/${1:?}"; then return 1; fi
 
-  unset -f -- "${1:?}"
+  rm -f -- "${_android_sys:?}/bin/${1:?}" || return "${?}"
+  unset -f -- "${1:?}" || return "${?}"
+
   eval " ${1:?}() { '${_our_overrider_dir:?}/${1:?}' \"\${@}\"; }" || return "${?}" # The folder expands when defined, not when used
 
   if test "${_is_export_f_supported:?}" -eq 0; then
@@ -336,10 +400,19 @@ override_command()
 
 simulate_env()
 {
-  cp -pf -- "${_our_busybox:?}" "${_android_sys:?}/bin/busybox" || fail_with_msg 'Failed to copy BusyBox'
-  if test "${COVERAGE:-false}" != 'false'; then
-    cp -pf -- "${COVERAGE:?}" "${_android_sys:?}/bin/bashcov" || fail_with_msg 'Failed to copy Bashcov'
+  cp -pf -- "${_our_busybox:?}" "${_android_busybox:?}" || fail_with_msg 'Failed to copy BusyBox'
+
+  if test "${PLATFORM:?}" != 'win'; then
+    "${_android_busybox:?}" --install -s "${_android_sys:?}/bin" || fail_with_msg 'Failed to install BusyBox'
+  else
+    "${_android_busybox:?}" --install "${_android_sys:?}/bin" || fail_with_msg 'Failed to install BusyBox'
   fi
+
+  override_command mount || return 123
+  override_command umount || return 123
+  override_command chown || return 123
+  override_command su || return 123
+  override_command sudo || return 123
 
   export EXTERNAL_STORAGE="${_android_ext_stor:?}"
   export SECONDARY_STORAGE="${_android_sec_stor:?}"
@@ -352,42 +425,34 @@ simulate_env()
   export TMPDIR="${_android_tmp:?}"
 
   # Our custom variables
-  export CUSTOM_BUSYBOX="${_android_sys:?}/bin/busybox"
+  export CUSTOM_BUSYBOX="${_android_busybox:?}"
   export OVERRIDE_DIR="${_our_overrider_dir:?}"
   export RS_OVERRIDE_SCRIPT="${_our_overrider_script:?}"
   export TEST_INSTALL=true
-
-  if test "${uname_o_saved:?}" != 'MS/Windows' && test "${uname_o_saved:?}" != 'Msys'; then
-    "${CUSTOM_BUSYBOX:?}" --install -s "${_android_sys:?}/bin" || fail_with_msg 'Failed to install BusyBox'
-  else
-    "${CUSTOM_BUSYBOX:?}" --install "${_android_sys:?}/bin" || fail_with_msg 'Failed to install BusyBox'
-  fi
-
-  override_command mount || return 123
-  override_command umount || return 123
-  override_command chown || return 123
-  override_command su || return 123
-  override_command sudo || return 123
 }
 
 restore_env()
 {
   local _backup_ifs
 
-  export PATH="${_backup_path}"
+  export PATH="${_backup_path?}"
+  export TMPDIR="${_backup_tmpdir:?}"
+
   unset BB_OVERRIDE_APPLETS
+  unset CUSTOM_BUSYBOX
+
   unset -f -- mount umount chown su sudo
 
-  "${_our_busybox:?}" 2> /dev/null --uninstall "${CUSTOM_BUSYBOX:?}" || true
+  "${_our_busybox:?}" 2> /dev/null --uninstall "${_android_busybox:?}" || true
 
   # Fallback if --uninstall is NOT supported
   {
-    _backup_ifs="${IFS:-}"
+    _backup_ifs="${IFS-}"
     IFS=' '
-    find "${_android_sys:?}/bin" -type l -exec sh -c 'bb_path="${1:?}"; shift; if test "$(realpath "${*}")" = "${bb_path:?}"; then rm -f -- "${*}"; fi' _ "${CUSTOM_BUSYBOX:?}" '{}' ';' || true
-    IFS="${_backup_ifs:-}"
+    find "${_android_sys:?}/bin" -type l -exec sh -c 'bb_path="${1:?}"; shift; if test "$(realpath "${*}")" = "${bb_path:?}"; then rm -f -- "${*}"; fi' _ "${_android_busybox:?}" '{}' ';' || true
+    IFS="${_backup_ifs-}"
 
-    rm -f "${CUSTOM_BUSYBOX:?}" || true
+    rm -f -- "${_android_busybox:?}" || true
   }
 }
 
@@ -398,7 +463,7 @@ if test -e "/proc/self/fd/${recovery_fd:?}"; then fail_with_msg 'Recovery FD alr
 mkdir -p "${recovery_logs_dir:?}"
 touch "${recovery_logs_dir:?}/recovery-raw.log" "${recovery_logs_dir:?}/recovery-output-raw.log" "${recovery_logs_dir:?}/recovery-stdout.log" "${recovery_logs_dir:?}/recovery-stderr.log"
 
-if test "${uname_o_saved:?}" != 'MS/Windows' && test "${uname_o_saved:?}" != 'Msys'; then # ToDO: Rewrite this code
+if test "${PLATFORM:?}" != 'win'; then
   sudo chattr +aAd "${recovery_logs_dir:?}/recovery-raw.log" || fail_with_msg "chattr failed on 'recovery-raw.log'"
   sudo chattr +aAd "${recovery_logs_dir:?}/recovery-output-raw.log" || fail_with_msg "chattr failed on 'recovery-output-raw.log'"
   sudo chattr +aAd "${recovery_logs_dir:?}/recovery-stdout.log" || fail_with_msg "chattr failed on 'recovery-stdout.log'"
@@ -406,7 +471,7 @@ if test "${uname_o_saved:?}" != 'MS/Windows' && test "${uname_o_saved:?}" != 'Ms
 fi
 
 # shellcheck disable=SC3023
-exec 99> >(tee -a "${recovery_logs_dir:?}/recovery-raw.log" "${recovery_logs_dir:?}/recovery-output-raw.log" || true)
+exec 99> >("${_tee_cmd:?}" -a "${recovery_logs_dir:?}/recovery-raw.log" "${recovery_logs_dir:?}/recovery-output-raw.log" || true)
 
 flash_zips()
 {
@@ -417,15 +482,15 @@ flash_zips()
     # Simulate the environment variables of a real recovery
     simulate_env || return "${?}"
 
-    "${CUSTOM_BUSYBOX:?}" unzip -opq "${_android_sec_stor:?}/${FLASHABLE_ZIP_NAME:?}" 'META-INF/com/google/android/update-binary' > "${_android_tmp:?}/update-binary" || fail_with_msg 'Failed to extract the update-binary'
+    "${_android_busybox:?}" unzip -opq "${_android_sec_stor:?}/${FLASHABLE_ZIP_NAME:?}" 'META-INF/com/google/android/update-binary' > "${_android_tmp:?}/update-binary" || fail_with_msg 'Failed to extract the update-binary'
 
     echo "custom_flash_start ${_android_sec_stor:?}/${FLASHABLE_ZIP_NAME:?}" 1>&"${recovery_fd:?}"
     set +e
     # Execute the script that will run the flashable zip
     if test "${COVERAGE:-false}" = 'false'; then
-      "${CUSTOM_BUSYBOX:?}" sh -- "${_android_tmp:?}/updater" 3 "${recovery_fd:?}" "${_android_sec_stor:?}/${FLASHABLE_ZIP_NAME:?}" 1> >(tee -a "${recovery_logs_dir:?}/recovery-raw.log" "${recovery_logs_dir:?}/recovery-stdout.log" || true) 2> >(tee -a "${recovery_logs_dir:?}/recovery-raw.log" "${recovery_logs_dir:?}/recovery-stderr.log" 1>&2 || true)
+      "${_android_busybox:?}" sh -- "${_android_tmp:?}/updater" 3 "${recovery_fd:?}" "${_android_sec_stor:?}/${FLASHABLE_ZIP_NAME:?}" 1> >("${_tee_cmd:?}" -a "${recovery_logs_dir:?}/recovery-raw.log" "${recovery_logs_dir:?}/recovery-stdout.log" || true) 2> >("${_tee_cmd:?}" -a "${recovery_logs_dir:?}/recovery-raw.log" "${recovery_logs_dir:?}/recovery-stderr.log" 1>&2 || true)
     else
-      bashcov -- "${THIS_SCRIPT_DIR:?}/updater.sh" 3 "${recovery_fd:?}" "${_android_sec_stor:?}/${FLASHABLE_ZIP_NAME:?}" 1> >(tee -a "${recovery_logs_dir:?}/recovery-raw.log" "${recovery_logs_dir:?}/recovery-stdout.log" || true) 2> >(tee -a "${recovery_logs_dir:?}/recovery-raw.log" "${recovery_logs_dir:?}/recovery-stderr.log" 1>&2 || true)
+      "${_bash_cmd:?}" -x -- "${THIS_SCRIPT_DIR:?}/updater.sh" 3 "${recovery_fd:?}" "${_android_sec_stor:?}/${FLASHABLE_ZIP_NAME:?}" 1> >("${_tee_cmd:?}" -a "${recovery_logs_dir:?}/recovery-raw.log" "${recovery_logs_dir:?}/recovery-stdout.log" || true) 2> >("${_tee_cmd:?}" -a "${recovery_logs_dir:?}/recovery-raw.log" "${recovery_logs_dir:?}/recovery-stderr.log" 1>&2 || true)
     fi
     STATUS="${?}"
     set -e
@@ -443,7 +508,7 @@ flash_zips "${@}" || STATUS="${?}"
 # shellcheck disable=SC3023
 exec 99>&-
 
-if test "${uname_o_saved:?}" != 'MS/Windows' && test "${uname_o_saved:?}" != 'Msys'; then # ToDO: Rewrite this code
+if test "${PLATFORM:?}" != 'win'; then
   sudo chattr -a "${recovery_logs_dir:?}/recovery-raw.log" || fail_with_msg "chattr failed on 'recovery-raw.log'"
   sudo chattr -a "${recovery_logs_dir:?}/recovery-output-raw.log" || fail_with_msg "chattr failed on 'recovery-output-raw.log'"
   sudo chattr -a "${recovery_logs_dir:?}/recovery-stdout.log" || fail_with_msg "chattr failed on 'recovery-stdout.log'"
@@ -477,17 +542,16 @@ parse_recovery_output true "${recovery_logs_dir:?}/recovery-output-raw.log" "${r
 parse_recovery_output false "${recovery_logs_dir:?}/recovery-raw.log" "${recovery_logs_dir:?}/recovery.log"
 
 # List installed files
-rm -f -- "${BASE_SIMULATION_PATH:?}/sbin" || true
-rm -f -- "${BASE_SIMULATION_PATH:?}/sdcard" || true
+remove_folder_link "${_base_simulation_path:?}/sbin" || true
+remove_folder_link "${_base_simulation_path:?}/sdcard" || true
 rm -f -- "${_android_sys:?}/build.prop" || true
 rm -f -- "${_android_sys:?}/framework/framework-res.apk" || true
 cd "${OUR_TEMP_DIR:?}" || fail_with_msg 'Failed to change dir to our temp dir'
-TZ=UTC find "${BASE_SIMULATION_PATH}" -exec touch -c -h -t '202001010000' -- '{}' '+' || true
-TZ=UTC ls -A -R -F -l -n --color='never' -- 'root' 1> "${recovery_logs_dir:?}/installed-files.log" || true
+TZ=UTC find "${_base_simulation_path:?}" -exec touch -c -h -t '202001010000' -- '{}' '+' || true
+TZ=UTC ls -A -R -F -l -n --color='never' -- 'root-dir' 1> "${recovery_logs_dir:?}/installed-files.log" || true
 
 # Final cleanup
 cd "${_init_dir:?}" || fail_with_msg 'Failed to change back the folder'
-unset TMPDIR
 rm -rf -- "${OUR_TEMP_DIR:?}" &
 set +e
-if test "${STATUS}" -ne 0; then exit "${STATUS}"; fi
+if test "${STATUS:?}" -ne 0; then exit "${STATUS:?}"; fi
