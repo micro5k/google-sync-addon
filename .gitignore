@@ -3,11 +3,10 @@
 # SPDX-FileType: OTHER
 
 # Custom project folders
-local/
 cache/
-utils/data/
 output/
 recovery-simulator/output/
+utils/data/
 
 # Gradle files
 .gradle/
@@ -16,6 +15,10 @@ user.gradle
 
 # VS Code files
 .vscode/launch.json
+
+# Local files
+.local/
+local/
 
 # Local configuration files
 local.properties
@@ -31,6 +34,7 @@ coverage
 
 # Caches and other files
 __pycache__/
-Thumbs.db
+.cache/
 .DS_Store
 desktop.ini
+Thumbs.db

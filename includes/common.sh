@@ -96,89 +96,96 @@ compare_start_uname()
   return 1 # NOT found
 }
 
-detect_os()
+detect_os_and_other_things()
 {
-  local _os
-  _os="$(uname | tr -- '[:upper:]' '[:lower:]')"
+  if test -n "${PLATFORM-}"; then return; fi
 
-  case "${_os?}" in
-    'linux') # Returned by both Linux and Android, it will be identified later in the code
-      _os='linux'
+  PLATFORM="$(uname | tr -- '[:upper:]' '[:lower:]')"
+  IS_BUSYBOX='false'
+  PATHSEP=':'
+  CYGPATH=''
+
+  case "${PLATFORM?}" in
+    'linux') ;;   # Returned by both Linux and Android, Android will be identified later in the function
+    'android') ;; # Currently never returned by Android
+    'windows_nt') # BusyBox-w32 on Windows => Windows_NT
+      PLATFORM='win'
+      IS_BUSYBOX='true'
       ;;
-    'android') # Currently never returned, but may be in the future
-      _os='android'
-      ;;
-    'windows'*) # BusyBox-w32 on Windows => Windows_NT (other Windows cases will be detected in the default case)
-      _os='win'
-      ;;
-    'darwin')
-      _os='macos'
-      ;;
-    'freebsd')
-      _os='freebsd'
-      ;;
-    '')
-      _os='unknown'
-      ;;
+    'msys_'* | 'cygwin_'* | 'mingw32_'* | 'mingw64_'*) PLATFORM='win' ;;
+    'windows'*) PLATFORM='win' ;; # Unknown shell on Windows
+    'darwin') PLATFORM='macos' ;;
+    'freebsd') ;;
+    '') PLATFORM='unknown' ;;
 
     *)
+      # Output of uname -o:
+      # - MinGW => Msys
+      # - MSYS => Msys
+      # - Cygwin => Cygwin
+      # - BusyBox-w32 => MS/Windows
       case "$(uname 2> /dev/null -o | tr -- '[:upper:]' '[:lower:]')" in
-        # Output of uname -o:
-        # - MinGW => Msys
-        # - MSYS => Msys
-        # - Cygwin => Cygwin
-        # - BusyBox-w32 => MS/Windows
-        'msys' | 'cygwin' | 'ms/windows')
-          _os='win'
+        'ms/windows')
+          PLATFORM='win'
+          IS_BUSYBOX='true'
           ;;
-        *)
-          printf '%s\n' "${_os:?}" | tr -d '/' || ui_error 'Failed to get uname'
-          return 0
-          ;;
+        'msys' | 'cygwin') PLATFORM='win' ;;
+        *) PLATFORM="$(printf '%s\n' "${PLATFORM:?}" | tr -d ':\\/')" || ui_error 'Failed to get uname' ;;
       esac
       ;;
   esac
 
   # Android identify itself as Linux
-  if test "${_os?}" = 'linux'; then
+  if test "${PLATFORM?}" = 'linux'; then
     case "$(uname 2> /dev/null -a | tr -- '[:upper:]' '[:lower:]')" in
-      *' android'* | *'-lineage-'* | *'-leapdroid-'*)
-        _os='android'
-        ;;
+      *' android'* | *'-lineage-'* | *'-leapdroid-'*) PLATFORM='android' ;;
       *) ;;
     esac
   fi
 
-  printf '%s\n' "${_os:?}"
-}
-
-detect_path_sep()
-{
-  if test "${PLATFORM?}" = 'win' && test "$(uname 2> /dev/null -o | tr -- '[:upper:]' '[:lower:]' || true)" = 'ms/windows'; then
-    printf ';\n' # BusyBox-w32
-  else
-    printf ':\n'
+  if test "${PLATFORM:?}" = 'win' && test "${IS_BUSYBOX:?}" = 'true'; then
+    PATHSEP=';'
   fi
+
+  if test "${PLATFORM:?}" = 'win' && test "${IS_BUSYBOX:?}" = 'false' && PATH="/usr/bin${PATHSEP:?}${PATH-}" command 1> /dev/null -v 'cygpath'; then
+    CYGPATH="$(PATH="/usr/bin${PATHSEP:?}${PATH-}" command -v cygpath)" || ui_error 'Unable to find the path of cygpath'
+  fi
+
+  readonly PLATFORM IS_BUSYBOX PATHSEP CYGPATH
 }
 
 change_title()
 {
-  if test "${CI:-false}" = 'false'; then printf '\033]0;%s - %s\007\r' "${1:?}" "${MODULE_NAME:?}" && printf '       %*s   %*s    \r' "${#1}" '' "${#MODULE_NAME}" ''; fi
+  test "${CI:-false}" = 'false' || return 0
+  A5K_TITLE_IS_DEFAULT='false'
   A5K_LAST_TITLE="${1:?}"
-  export A5K_LAST_TITLE
+  printf '\033]0;%s - %s\007\r' "${1:?}" "${MODULE_NAME:?}" && printf '       %*s   %*s    \r' "${#1}" '' "${#MODULE_NAME}" ''
+}
+
+set_default_title()
+{
+  change_title "Command-line: ${0-}"
+  A5K_TITLE_IS_DEFAULT='true'
 }
 
 save_last_title()
 {
-  A5K_SAVED_TITLE="${A5K_LAST_TITLE:-}"
-  export A5K_SAVED_TITLE
+  A5K_SAVED_TITLE="${A5K_LAST_TITLE-}"
 }
 
 restore_saved_title_if_exist()
 {
-  if test -n "${A5K_SAVED_TITLE:-}"; then
+  if test -n "${A5K_SAVED_TITLE-}"; then
     change_title "${A5K_SAVED_TITLE:?}"
+    A5K_SAVED_TITLE=''
   fi
+}
+
+_update_title()
+{
+  test "${A5K_TITLE_IS_DEFAULT-}" = 'true' || return 0
+  test -t 2 || return 0
+  printf 1>&2 '\033]0;%s\007\r' "Command-line: ${1?} - ${MODULE_NAME?}" && printf 1>&2 '    %*s                 %*s \r' "${#1}" '' "${#MODULE_NAME}" ''
 }
 
 simple_get_prop()
@@ -203,25 +210,25 @@ get_base_url()
 
 clear_dl_temp_dir()
 {
-  rm -f -r "${SCRIPT_DIR:?}/cache/temp"
+  rm -f -r "${MAIN_DIR:?}/cache/temp"
 }
 
 _clear_cookies()
 {
-  rm -f -r "${SCRIPT_DIR:?}/cache/temp/cookies"
+  rm -f -r "${MAIN_DIR:?}/cache/temp/cookies"
 }
 
 _parse_and_store_cookie()
 {
   local IFS _line_no _cookie_file _elem
 
-  if test ! -e "${SCRIPT_DIR:?}/cache/temp/cookies"; then mkdir -p "${SCRIPT_DIR:?}/cache/temp/cookies" || return "${?}"; fi
+  if test ! -e "${MAIN_DIR:?}/cache/temp/cookies"; then mkdir -p "${MAIN_DIR:?}/cache/temp/cookies" || return "${?}"; fi
 
   if test "${DL_DEBUG:?}" = 'true'; then
-    printf '%s\n' "Set-Cookie: ${2:?}" >> "${SCRIPT_DIR:?}/cache/temp/cookies/${1:?}.dat.debug"
+    printf '%s\n' "Set-Cookie: ${2:?}" >> "${MAIN_DIR:?}/cache/temp/cookies/${1:?}.dat.debug"
   fi
 
-  _cookie_file="${SCRIPT_DIR:?}/cache/temp/cookies/${1:?}.dat"
+  _cookie_file="${MAIN_DIR:?}/cache/temp/cookies/${1:?}.dat"
 
   IFS=';'
   for _elem in ${2:?}; do
@@ -245,7 +252,7 @@ _parse_and_store_all_cookies()
   done
 
   if test "${DL_DEBUG:?}" = 'true'; then
-    if test -e "${SCRIPT_DIR:?}/cache/temp/cookies"; then printf '\n' >> "${SCRIPT_DIR:?}/cache/temp/cookies/${1:?}.dat.debug"; fi
+    if test -e "${MAIN_DIR:?}/cache/temp/cookies"; then printf '\n' >> "${MAIN_DIR:?}/cache/temp/cookies/${1:?}.dat.debug"; fi
   fi
 }
 
@@ -254,11 +261,11 @@ _load_cookies()
   local _domain _cookie_file
 
   _domain="$(get_domain_from_url "${1:?}")" || return "${?}"
-  _cookie_file="${SCRIPT_DIR:?}/cache/temp/cookies/${_domain:?}.dat"
+  _cookie_file="${MAIN_DIR:?}/cache/temp/cookies/${_domain:?}.dat"
 
   if test ! -e "${_cookie_file:?}"; then
     _domain="$(get_second_level_domain_from_url "${1:?}")" || return "${?}"
-    _cookie_file="${SCRIPT_DIR:?}/cache/temp/cookies/${_domain:?}.dat"
+    _cookie_file="${MAIN_DIR:?}/cache/temp/cookies/${_domain:?}.dat"
     if test ! -e "${_cookie_file:?}"; then return 0; fi
   fi
 
@@ -772,7 +779,7 @@ dl_type_two()
 
 dl_file()
 {
-  if test -e "${SCRIPT_DIR:?}/cache/$1/$2"; then verify_sha1 "${SCRIPT_DIR:?}/cache/$1/$2" "$3" || rm -f "${SCRIPT_DIR:?}/cache/$1/$2"; fi # Preventive check to silently remove corrupted/invalid files
+  if test -e "${MAIN_DIR:?}/cache/$1/$2"; then verify_sha1 "${MAIN_DIR:?}/cache/$1/$2" "$3" || rm -f "${MAIN_DIR:?}/cache/$1/$2"; fi # Preventive check to silently remove corrupted/invalid files
 
   printf '%s ' "Checking ${2?}..."
   local _status _url _domain
@@ -782,22 +789,22 @@ dl_file()
 
   _clear_cookies || return "${?}"
 
-  if ! test -e "${SCRIPT_DIR:?}/cache/${1:?}/${2:?}"; then
-    mkdir -p "${SCRIPT_DIR:?}/cache/${1:?}"
+  if ! test -e "${MAIN_DIR:?}/cache/${1:?}/${2:?}"; then
+    mkdir -p "${MAIN_DIR:?}/cache/${1:?}"
 
     if test "${CI:-false}" = 'false'; then sleep 0.5; else sleep 3; fi
     case "${_domain:?}" in
       *\.'go''file''.io')
         printf '\n %s: ' 'DL type 2'
-        dl_type_two "${_url:?}" "${SCRIPT_DIR:?}/cache/${1:?}/${2:?}" || _status="${?}"
+        dl_type_two "${_url:?}" "${MAIN_DIR:?}/cache/${1:?}/${2:?}" || _status="${?}"
         ;;
       *\.'apk''mirror''.com')
         printf '\n %s: ' 'DL type 1'
-        dl_type_one "${_url:?}" "${DL_PROT:?}${_domain:?}/" "${SCRIPT_DIR:?}/cache/${1:?}/${2:?}" || _status="${?}"
+        dl_type_one "${_url:?}" "${DL_PROT:?}${_domain:?}/" "${MAIN_DIR:?}/cache/${1:?}/${2:?}" || _status="${?}"
         ;;
       ????*)
         printf '\n %s: ' 'DL type 0'
-        dl_type_zero "${_url:?}" "${SCRIPT_DIR:?}/cache/${1:?}/${2:?}" || _status="${?}"
+        dl_type_zero "${_url:?}" "${MAIN_DIR:?}/cache/${1:?}/${2:?}" || _status="${?}"
         ;;
       *)
         ui_error "Invalid download URL => '${_url?}'"
@@ -822,7 +829,7 @@ dl_file()
     fi
   fi
 
-  verify_sha1 "${SCRIPT_DIR:?}/cache/$1/$2" "$3" || corrupted_file "${SCRIPT_DIR:?}/cache/$1/$2"
+  verify_sha1 "${MAIN_DIR:?}/cache/$1/$2" "$3" || corrupted_file "${MAIN_DIR:?}/cache/$1/$2"
   printf '%s\n' 'OK'
 }
 
@@ -859,10 +866,10 @@ is_in_path_env()
 
 add_to_path_env()
 {
-  if test "${PLATFORM:?}" = 'win' && test "${PATHSEP:?}" = ':' && command 1> /dev/null -v 'cygpath'; then
+  if test -n "${CYGPATH?}"; then
     # Only on Bash under Windows
     local _path
-    _path="$(cygpath -u -a -- "${1:?}")" || ui_error 'Unable to convert a path in add_to_path_env()'
+    _path="$("${CYGPATH:?}" -u -a -- "${1:?}")" || ui_error 'Unable to convert a path in add_to_path_env()'
     set -- "${_path:?}"
   fi
 
@@ -880,10 +887,10 @@ remove_from_path_env()
 {
   local _path
 
-  if test "${PLATFORM:?}" = 'win' && test "${PATHSEP:?}" = ':' && command 1> /dev/null -v 'cygpath'; then
+  if test -n "${CYGPATH?}"; then
     # Only on Bash under Windows
     local _single_path
-    _single_path="$(cygpath -u -- "${1:?}")" || ui_error 'Unable to convert a path in remove_from_path_env()'
+    _single_path="$("${CYGPATH:?}" -u -- "${1:?}")" || ui_error 'Unable to convert a path in remove_from_path_env()'
     set -- "${_single_path:?}"
   fi
 
@@ -921,27 +928,39 @@ remove_duplicates_from_path_env()
   PATH="${_path?}"
 }
 
-init_vars()
+init_base()
 {
   local _main_dir
 
+  if test "${STARTED_FROM_BATCH_FILE:-0}" != '0' && test -n "${MAIN_DIR-}"; then
+    MAIN_DIR="$(realpath "${MAIN_DIR:?}")" || ui_error 'Unable to resolve the main dir'
+  fi
+
   # shellcheck disable=SC3028 # Ignore: In POSIX sh, BASH_SOURCE is undefined
-  if test -z "${SCRIPT_DIR-}" && test -n "${BASH_SOURCE-}" && _main_dir="$(dirname "${BASH_SOURCE:?}")" && _main_dir="$(realpath "${_main_dir:?}/..")"; then
-    SCRIPT_DIR="${_main_dir:?}"
-  elif test "${STARTED_FROM_BATCH_FILE:-0}" != '0' && test -n "${SCRIPT_DIR-}"; then
-    SCRIPT_DIR="$(realpath "${SCRIPT_DIR:?}")" || ui_error 'Unable to resolve the main script dir'
+  if test -z "${MAIN_DIR-}" && test -n "${BASH_SOURCE-}" && _main_dir="$(dirname "${BASH_SOURCE:?}")" && _main_dir="$(realpath "${_main_dir:?}/..")"; then
+    MAIN_DIR="${_main_dir:?}"
   fi
 
-  if test "${PLATFORM:?}" = 'win' && test "${PATHSEP:?}" = ':' && command 1> /dev/null -v 'cygpath' && test -n "${SCRIPT_DIR-}"; then
+  if test -n "${CYGPATH?}" && test -n "${MAIN_DIR-}"; then
     # Only on Bash under Windows
-    SCRIPT_DIR="$(cygpath -m -l -- "${SCRIPT_DIR:?}")" || ui_error 'Unable to convert the main script dir'
+    MAIN_DIR="$("${CYGPATH:?}" -m -l -- "${MAIN_DIR:?}")" || ui_error 'Unable to convert the main dir'
   fi
 
-  test -n "${SCRIPT_DIR-}" || ui_error 'SCRIPT_DIR env var is empty'
-  TOOLS_DIR="${SCRIPT_DIR:?}/tools/${PLATFORM:?}"
-  MODULE_NAME="$(simple_get_prop 'name' "${SCRIPT_DIR:?}/zip-content/module.prop")" || ui_error 'Failed to parse the module name string'
-  readonly SCRIPT_DIR TOOLS_DIR MODULE_NAME
-  export SCRIPT_DIR TOOLS_DIR MODULE_NAME
+  test -n "${MAIN_DIR-}" || ui_error 'MAIN_DIR env var is empty'
+
+  TMPDIR="${TMPDIR:-${RUNNER_TEMP:-${TMP:-${TEMP:-/tmp}}}}"
+  export TMPDIR
+
+  if test -n "${CYGPATH?}" && test "${TMPDIR?}" = '/tmp'; then
+    # Workaround for issues with Bash under Windows (for example the one included inside Git for Windows)
+    TMPDIR="$("${CYGPATH:?}" -m -a -l -- '/tmp')" || ui_error 'Unable to convert the temp directory'
+    TMP="${TMPDIR:?}"
+    TEMP="${TMPDIR:?}"
+  fi
+
+  TOOLS_DIR="${MAIN_DIR:?}/tools/${PLATFORM:?}"
+
+  readonly MAIN_DIR TOOLS_DIR
 }
 
 init_path()
@@ -951,31 +970,36 @@ init_path()
   if is_in_path_env "${TOOLS_DIR:?}"; then return; fi
 
   if test -n "${PATH-}"; then PATH="${PATH%"${PATHSEP:?}"}"; fi
-
   # On Bash under Windows (for example the one included inside Git for Windows) we need to move '/usr/bin'
   # before 'C:/Windows/System32' otherwise it will use the find/sort/etc. of Windows instead of the Unix compatible ones.
-  if test "${PLATFORM:?}" = 'win' && test "${PATHSEP:?}" = ':'; then move_to_begin_of_path_env '/usr/bin'; fi
+  if test "${PLATFORM:?}" = 'win' && test "${IS_BUSYBOX:?}" = 'false'; then move_to_begin_of_path_env '/usr/bin'; fi
 
   remove_duplicates_from_path_env
   add_to_path_env "${TOOLS_DIR:?}"
 }
 
+init_vars()
+{
+  MODULE_NAME="$(simple_get_prop 'name' "${MAIN_DIR:?}/zip-content/module.prop")" || ui_error 'Failed to parse the module name string'
+  readonly MODULE_NAME
+  export MODULE_NAME
+}
+
 init_cmdline()
 {
-  change_title 'Command-line'
+  unset PROMPT_COMMAND
+  unset PS1
+
+  if test "${A5K_TITLE_IS_DEFAULT-}" != 'false'; then set_default_title; fi
 
   if test "${STARTED_FROM_BATCH_FILE:-0}" != '0' && test -n "${HOME-}"; then
     HOME="$(realpath "${HOME:?}")" || ui_error 'Unable to resolve the home dir'
   fi
-  if test "${PLATFORM:?}" = 'win' && test "${PATHSEP:?}" = ':' && command 1> /dev/null -v 'cygpath' && test -n "${HOME-}"; then
+  if test -n "${CYGPATH?}" && test -n "${HOME-}"; then
     # Only on Bash under Windows
-    HOME="$(cygpath -u -- "${HOME:?}")" || ui_error 'Unable to convert the home dir'
+    HOME="$("${CYGPATH:?}" -u -- "${HOME:?}")" || ui_error 'Unable to convert the home dir'
   fi
 
-  # Set some shell variables
-  unset PROMPT_COMMAND
-  unset PS1
-  PS1='\[\033[1;32m\]\u\[\033[0m\]:\[\033[1;34m\]\w\[\033[0m\]\$' # Escape the colors with \[ \] => https://mywiki.wooledge.org/BashFAQ/053
   if test "${PLATFORM:?}" = 'win'; then unset JAVA_HOME; fi
 
   # Clean useless directories from the $PATH env
@@ -985,7 +1009,7 @@ init_cmdline()
   fi
 
   # Set environment variables
-  UTILS_DIR="${SCRIPT_DIR:?}/utils"
+  UTILS_DIR="${MAIN_DIR:?}/utils"
   UTILS_DATA_DIR="${UTILS_DIR:?}/data"
   readonly UTILS_DIR UTILS_DATA_DIR
   export UTILS_DIR UTILS_DATA_DIR
@@ -1005,9 +1029,9 @@ init_cmdline()
   fi
 
   if test -n "${ANDROID_SDK_ROOT-}"; then
-    if test "${PLATFORM:?}" = 'win' && test "${PATHSEP:?}" = ':' && command 1> /dev/null -v 'cygpath'; then
+    if test -n "${CYGPATH?}"; then
       # Only on Bash under Windows
-      ANDROID_SDK_ROOT="$(cygpath -m -l -a -- "${ANDROID_SDK_ROOT:?}")" || ui_error 'Unable to convert the Android SDK dir'
+      ANDROID_SDK_ROOT="$("${CYGPATH:?}" -m -l -a -- "${ANDROID_SDK_ROOT:?}")" || ui_error 'Unable to convert the Android SDK dir'
     fi
 
     add_to_path_env "${ANDROID_SDK_ROOT:?}/platform-tools"
@@ -1024,27 +1048,38 @@ init_cmdline()
   fi
 
   add_to_path_env "${UTILS_DIR:?}"
-  add_to_path_env "${SCRIPT_DIR:?}"
+  add_to_path_env "${MAIN_DIR:?}"
 
   alias 'dir'='ls'
   alias 'cd..'='cd ..'
   alias 'cd.'='cd .'
   alias 'cls'='reset'
+  alias 'clear-prev'="printf '\033[A\33[2K\033[A\33[2K\r'"
 
-  if test -f "${SCRIPT_DIR:?}/includes/custom-aliases.sh"; then
+  if test -f "${MAIN_DIR:?}/includes/custom-aliases.sh"; then
     # shellcheck source=/dev/null
-    . "${SCRIPT_DIR:?}/includes/custom-aliases.sh" || ui_error 'Unable to source includes/custom-aliases.sh'
+    . "${MAIN_DIR:?}/includes/custom-aliases.sh" || ui_error 'Unable to source includes/custom-aliases.sh'
   fi
 
   alias build='build.sh'
+  if test "${PLATFORM:?}" = 'win' && test "${IS_BUSYBOX:?}" = 'true'; then alias cmdline='cmdline.bat'; else alias cmdline='cmdline.sh'; fi
 
   if test "${PLATFORM:?}" = 'win'; then
     export BB_FIX_BACKSLASH=1
     export PATHEXT="${PATHEXT:-.BAT};.SH"
   fi
 
+  export A5K_TITLE_IS_DEFAULT
+  export A5K_LAST_TITLE
+
   export PATH_SEPARATOR="${PATHSEP:?}"
   export DIRECTORY_SEPARATOR='/'
+  export GRADLE_OPTS="${GRADLE_OPTS:--Dorg.gradle.daemon=false}"
+
+  if test "${CI:-false}" = 'false'; then
+    PS1='\[\033[1;32m\]\u\[\033[0m\]:\[\033[1;34m\]\w\[\033[0m\]\$' # Escape the colors with \[ \] => https://mywiki.wooledge.org/BashFAQ/053
+    PROMPT_COMMAND='_update_title "${0-} (${SHLVL-})"'
+  fi
 }
 
 if test "${DO_INIT_CMDLINE:-0}" != '0'; then
@@ -1058,13 +1093,12 @@ if test "${DO_INIT_CMDLINE:-0}" != '0'; then
 fi
 
 # Set environment variables
-PLATFORM="$(detect_os)"
-PATHSEP="$(detect_path_sep)"
-readonly PLATFORM PATHSEP
-export PLATFORM PATHSEP
-
-init_vars
+detect_os_and_other_things
+export PLATFORM IS_BUSYBOX PATHSEP CYGPATH
+init_base
+export MAIN_DIR TOOLS_DIR
 init_path
+init_vars
 
 if test "${DO_INIT_CMDLINE:-0}" != '0'; then
   unset DO_INIT_CMDLINE
