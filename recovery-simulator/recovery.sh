@@ -6,6 +6,7 @@
 # REALLY IMPORTANT: A misbehaving flashable zip can damage your real system.
 
 # shellcheck enable=all
+# shellcheck disable=SC3043 # In POSIX sh, local is undefined
 # shellcheck disable=SC2310 # This function is invoked in an XXX condition so set -e will be disabled. Invoke separately if failures should cause the script to exit
 
 set -e
@@ -390,17 +391,17 @@ if test "${COVERAGE:-false}" != 'false'; then
 fi
 
 # Detect whether "export -f" is supported (0 means supported)
-_is_export_f_supported=0
-{
-  test_export_f()
+_export_func_supported='false'
+# shellcheck disable=SC2015
+(
+  # shellcheck disable=SC2329
+  dummy()
   {
-    # shellcheck disable=SC2216,SC3045
-    : | export -f -- test_export_f 2> /dev/null
-    return "${?}"
+    :
   }
-  test_export_f || _is_export_f_supported="${?}"
-  unset -f test_export_f
-}
+  # shellcheck disable=SC3045
+  export -f -- dummy 2> /dev/null
+) && _export_func_supported='true' || true
 
 override_command()
 {
@@ -411,7 +412,7 @@ override_command()
 
   eval " ${1:?}() { '${_our_overrider_dir:?}/${1:?}' \"\${@}\"; }" || return "${?}" # The folder expands when defined, not when used
 
-  if test "${_is_export_f_supported:?}" -eq 0; then
+  if test "${_export_func_supported:?}" = 'true'; then
     # shellcheck disable=SC3045
     export -f -- "${1:?}"
   fi
@@ -509,7 +510,7 @@ flash_zips()
     if test "${COVERAGE:-false}" = 'false'; then
       "${_android_busybox:?}" sh -- "${_android_tmp:?}/updater" 3 "${recovery_fd:?}" "${_android_sec_stor:?}/${FLASHABLE_ZIP_NAME:?}" 1> >("${_tee_cmd:?}" -a "${recovery_logs_dir:?}/recovery-raw.log" "${recovery_logs_dir:?}/recovery-stdout.log" || true) 2> >("${_tee_cmd:?}" -a "${recovery_logs_dir:?}/recovery-raw.log" "${recovery_logs_dir:?}/recovery-stderr.log" 1>&2 || true)
     else
-      "${_bash_cmd:?}" -x -- "${THIS_SCRIPT_DIR:?}/updater.sh" 3 "${recovery_fd:?}" "${_android_sec_stor:?}/${FLASHABLE_ZIP_NAME:?}" 1> >("${_tee_cmd:?}" -a "${recovery_logs_dir:?}/recovery-raw.log" "${recovery_logs_dir:?}/recovery-stdout.log" || true) 2> >("${_tee_cmd:?}" -a "${recovery_logs_dir:?}/recovery-raw.log" "${recovery_logs_dir:?}/recovery-stderr.log" 1>&2 || true)
+      COVERAGE_SHELL="${_bash_cmd:?}" "${_bash_cmd:?}" -x -- "${THIS_SCRIPT_DIR:?}/updater.sh" 3 "${recovery_fd:?}" "${_android_sec_stor:?}/${FLASHABLE_ZIP_NAME:?}" 1> >("${_tee_cmd:?}" -a "${recovery_logs_dir:?}/recovery-raw.log" "${recovery_logs_dir:?}/recovery-stdout.log" || true) 2> >("${_tee_cmd:?}" -a "${recovery_logs_dir:?}/recovery-raw.log" "${recovery_logs_dir:?}/recovery-stderr.log" 1>&2 || true)
     fi
     STATUS="${?}"
     set -e

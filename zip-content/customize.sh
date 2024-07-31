@@ -401,10 +401,7 @@ else
 fi
 
 # Live setup under continuous integration systems doesn't make sense
-# Live setup doesn't work when executed through Gradle
-if test "${CI:-false}" != 'false' || test "${APP_NAME:-false}" = 'Gradle'; then
-  LIVE_SETUP_ALLOWED='false'
-fi
+if test "${CI:-false}" != 'false'; then LIVE_SETUP_ALLOWED='false'; fi
 
 readonly LIVE_SETUP_ALLOWED KEYCHECK_PATH
 export LIVE_SETUP_ALLOWED KEYCHECK_PATH
@@ -430,7 +427,11 @@ if test "${DEBUG_LOG_ENABLED}" -eq 1; then export DEBUG_LOG=1; fi
 
 ui_debug ''
 ui_debug 'Starting main script...'
-"${OUR_BB:?}" sh "${TMP_PATH:?}/install.sh" Preloader "${TMP_PATH:?}"
+if test "${COVERAGE:-false}" = 'false'; then
+  "${OUR_BB:?}" sh "${TMP_PATH:?}/install.sh" Preloader "${TMP_PATH:?}"
+else
+  "${COVERAGE_SHELL:?}" -x -- "${TMP_PATH:?}/install.sh" Preloader "${TMP_PATH:?}"
+fi
 export STATUS="${?}"
 if test -f "${TMP_PATH:?}/installed"; then export UNKNOWN_ERROR=0; else export UNKNOWN_ERROR=1; fi
 

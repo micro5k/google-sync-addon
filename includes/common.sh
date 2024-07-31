@@ -164,7 +164,7 @@ change_title()
 
 set_default_title()
 {
-  change_title "Command-line: ${0-}"
+  change_title "Command-line: ${CURRENT_SHELL:-${0-}}"
   A5K_TITLE_IS_DEFAULT='true'
 }
 
@@ -974,7 +974,7 @@ init_path()
   # before 'C:/Windows/System32' otherwise it will use the find/sort/etc. of Windows instead of the Unix compatible ones.
   if test "${PLATFORM:?}" = 'win' && test "${IS_BUSYBOX:?}" = 'false'; then move_to_begin_of_path_env '/usr/bin'; fi
 
-  remove_duplicates_from_path_env
+  if test "${DO_INIT_CMDLINE:-0}" != '0'; then remove_duplicates_from_path_env; fi
   add_to_path_env "${TOOLS_DIR:?}"
 }
 
@@ -989,6 +989,10 @@ init_cmdline()
 {
   unset PROMPT_COMMAND
   unset PS1
+
+  CURRENT_SHELL="${0-}"
+  test "${IS_BUSYBOX:?}" = 'false' || CURRENT_SHELL="busybox ${CURRENT_SHELL-}"
+  readonly CURRENT_SHELL
 
   if test "${A5K_TITLE_IS_DEFAULT-}" != 'false'; then set_default_title; fi
 
@@ -1078,7 +1082,7 @@ init_cmdline()
 
   if test "${CI:-false}" = 'false'; then
     PS1='\[\033[1;32m\]\u\[\033[0m\]:\[\033[1;34m\]\w\[\033[0m\]\$' # Escape the colors with \[ \] => https://mywiki.wooledge.org/BashFAQ/053
-    PROMPT_COMMAND='_update_title "${0-} (${SHLVL-})"'
+    PROMPT_COMMAND='_update_title "${CURRENT_SHELL-} (${SHLVL-})"'
   fi
 }
 
