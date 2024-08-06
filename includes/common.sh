@@ -86,24 +86,15 @@ export ftp_proxy="${ftp_proxy-}"
   readonly DL_PROT='https://'
 }
 
-_uname_saved="$(uname)"
-compare_start_uname()
-{
-  case "${_uname_saved}" in
-    "$1"*) return 0 ;; # Found
-    *) ;;              # NOT found
-  esac
-  return 1 # NOT found
-}
-
 detect_os_and_other_things()
 {
-  if test -n "${PLATFORM-}"; then return; fi
+  if test -n "${PLATFORM-}" && test -n "${IS_BUSYBOX-}" && test -n "${PATHSEP-}"; then return 0; fi
 
   PLATFORM="$(uname | tr -- '[:upper:]' '[:lower:]')"
   IS_BUSYBOX='false'
   PATHSEP=':'
   CYGPATH=''
+  SHELL_CMD="${BASH:-${SHELL-}}"
 
   case "${PLATFORM?}" in
     'linux') ;;   # Returned by both Linux and Android, Android will be identified later in the function
@@ -130,7 +121,7 @@ detect_os_and_other_things()
           IS_BUSYBOX='true'
           ;;
         'msys' | 'cygwin') PLATFORM='win' ;;
-        *) PLATFORM="$(printf '%s\n' "${PLATFORM:?}" | tr -d ':\\/')" || ui_error 'Failed to get uname' ;;
+        *) PLATFORM="$(printf '%s\n' "${PLATFORM:?}" | tr -d ':;\\/')" || ui_error 'Failed to find platform' ;;
       esac
       ;;
   esac
@@ -143,15 +134,19 @@ detect_os_and_other_things()
     esac
   fi
 
-  if test "${PLATFORM:?}" = 'win' && test "${IS_BUSYBOX:?}" = 'true'; then
-    PATHSEP=';'
+  if test "${PLATFORM:?}" = 'win'; then
+    if test "${IS_BUSYBOX:?}" = 'true'; then
+      PATHSEP=';'
+      SHELL_CMD=''
+    fi
+
+    if test "${IS_BUSYBOX:?}" = 'false' && PATH="/usr/bin${PATHSEP:?}${PATH-}" command 1> /dev/null -v 'cygpath'; then
+      CYGPATH="$(PATH="/usr/bin${PATHSEP:?}${PATH-}" command -v cygpath)" || ui_error 'Unable to find the path of cygpath'
+      SHELL_CMD="$("${CYGPATH:?}" -m -a -l -- "${SHELL_CMD:?}")" || ui_error 'Unable to convert the path of the shell'
+    fi
   fi
 
-  if test "${PLATFORM:?}" = 'win' && test "${IS_BUSYBOX:?}" = 'false' && PATH="/usr/bin${PATHSEP:?}${PATH-}" command 1> /dev/null -v 'cygpath'; then
-    CYGPATH="$(PATH="/usr/bin${PATHSEP:?}${PATH-}" command -v cygpath)" || ui_error 'Unable to find the path of cygpath'
-  fi
-
-  readonly PLATFORM IS_BUSYBOX PATHSEP CYGPATH
+  readonly PLATFORM IS_BUSYBOX PATHSEP CYGPATH SHELL_CMD
 }
 
 change_title()
@@ -164,28 +159,48 @@ change_title()
 
 set_default_title()
 {
-  change_title "Command-line: ${CURRENT_SHELL:-${0-}}"
+  if is_root; then
+    change_title "[root] Command-line: ${__TITLE_CMD_PREFIX-}$(basename "${0-}" || true)${__TITLE_CMD_PARAMS-}"
+  else
+    change_title "Command-line: ${__TITLE_CMD_PREFIX-}$(basename "${0-}" || true)${__TITLE_CMD_PARAMS-}"
+  fi
   A5K_TITLE_IS_DEFAULT='true'
 }
 
 save_last_title()
 {
-  A5K_SAVED_TITLE="${A5K_LAST_TITLE-}"
+  if test "${A5K_TITLE_IS_DEFAULT-}" = 'true'; then
+    A5K_SAVED_TITLE='default'
+  else
+    A5K_SAVED_TITLE="${A5K_LAST_TITLE-}"
+  fi
 }
 
 restore_saved_title_if_exist()
 {
-  if test -n "${A5K_SAVED_TITLE-}"; then
+  if test "${A5K_SAVED_TITLE-}" = 'default'; then
+    set_default_title
+    A5K_SAVED_TITLE=''
+  elif test -n "${A5K_SAVED_TITLE-}"; then
     change_title "${A5K_SAVED_TITLE:?}"
     A5K_SAVED_TITLE=''
   fi
 }
 
-_update_title()
+__update_title_and_ps1()
 {
+  local _title
+  _title="Command-line: ${__TITLE_CMD_PREFIX-}$(basename "${0-}" || true)${__TITLE_CMD_PARAMS-} (${SHLVL-}) - ${MODULE_NAME-}"
+  PS1="${__DEFAULT_PS1-}"
+
+  if is_root; then
+    _title="[root] ${_title}"
+    test -z "${__DEFAULT_PS1_AS_ROOT-}" || PS1="${__DEFAULT_PS1_AS_ROOT-}"
+  fi
+
   test "${A5K_TITLE_IS_DEFAULT-}" = 'true' || return 0
   test -t 2 || return 0
-  printf 1>&2 '\033]0;%s\007\r' "Command-line: ${1?} - ${MODULE_NAME?}" && printf 1>&2 '    %*s                 %*s \r' "${#1}" '' "${#MODULE_NAME}" ''
+  printf 1>&2 '\033]0;%s\007\r' "${_title}" && printf 1>&2 '    %*s \r' "${#_title}" ''
 }
 
 simple_get_prop()
@@ -855,7 +870,7 @@ dl_list()
   IFS="${_backup_ifs:-}"
 }
 
-is_in_path_env()
+_is_in_path_env_internal()
 {
   case "${PATHSEP:?}${PATH-}${PATHSEP:?}" in
     *"${PATHSEP:?}${1:?}${PATHSEP:?}"*) return 0 ;; # Found
@@ -864,16 +879,28 @@ is_in_path_env()
   return 1 # NOT found
 }
 
+is_in_path_env()
+{
+  if test -n "${CYGPATH?}"; then
+    # Only on Bash under Windows
+    local _path
+    _path="$("${CYGPATH:?}" -u -- "${1:?}")" || ui_error 'Unable to convert a path in is_in_path_env()'
+    set -- "${_path:?}"
+  fi
+
+  _is_in_path_env_internal "${1:?}"
+}
+
 add_to_path_env()
 {
   if test -n "${CYGPATH?}"; then
     # Only on Bash under Windows
     local _path
-    _path="$("${CYGPATH:?}" -u -a -- "${1:?}")" || ui_error 'Unable to convert a path in add_to_path_env()'
+    _path="$("${CYGPATH:?}" -u -- "${1:?}")" || ui_error 'Unable to convert a path in add_to_path_env()'
     set -- "${_path:?}"
   fi
 
-  if is_in_path_env "${1:?}" || test ! -e "${1:?}"; then return; fi
+  if _is_in_path_env_internal "${1:?}" || test ! -e "${1:?}"; then return 0; fi
 
   if test -z "${PATH-}"; then
     ui_warning 'PATH env is empty'
@@ -885,7 +912,7 @@ add_to_path_env()
 
 remove_from_path_env()
 {
-  local _path
+  local _new_path
 
   if test -n "${CYGPATH?}"; then
     # Only on Bash under Windows
@@ -894,21 +921,21 @@ remove_from_path_env()
     set -- "${_single_path:?}"
   fi
 
-  if _path="$(printf '%s\n' "${PATH-}" | tr -- "${PATHSEP:?}" '\n' | grep -v -x -F -e "${1:?}" | tr -- '\n' "${PATHSEP:?}")" && _path="${_path%"${PATHSEP:?}"}"; then
-    PATH="${_path?}"
+  if _new_path="$(printf '%s\n' "${PATH-}" | tr -- "${PATHSEP:?}" '\n' | grep -v -x -F -e "${1:?}" | tr -- '\n' "${PATHSEP:?}")" && _new_path="${_new_path%"${PATHSEP:?}"}"; then
+    PATH="${_new_path?}"
   fi
 }
 
 move_to_begin_of_path_env()
 {
-  local _path
-  if test ! -e "${1:?}"; then return; fi
+  local _new_path
+  if test ! -e "${1:?}"; then return 0; fi
 
   if test -z "${PATH-}"; then
     ui_warning 'PATH env is empty'
     PATH="${1:?}"
-  elif _path="$(printf '%s\n' "${PATH:?}" | tr -- "${PATHSEP:?}" '\n' | grep -v -x -F -e "${1:?}" | tr -- '\n' "${PATHSEP:?}")" && _path="${_path%"${PATHSEP:?}"}" && test -n "${_path?}"; then
-    PATH="${1:?}${PATHSEP:?}${_path:?}"
+  elif _new_path="$(printf '%s\n' "${PATH:?}" | tr -- "${PATHSEP:?}" '\n' | grep -v -x -F -e "${1:?}" | tr -- '\n' "${PATHSEP:?}")" && _new_path="${_new_path%"${PATHSEP:?}"}" && test -n "${_new_path?}"; then
+    PATH="${1:?}${PATHSEP:?}${_new_path:?}"
   fi
 }
 
@@ -926,6 +953,49 @@ remove_duplicates_from_path_env()
   fi
 
   PATH="${_path?}"
+}
+
+sume()
+{
+  local _fix_pwd
+
+  if test "${PLATFORM:?}" != 'win'; then
+    ui_warning 'sume not supported!!!'
+    return 1
+  fi
+  ! is_root || return 0
+
+  if test "${IS_BUSYBOX:?}" = 'true'; then
+    # shellcheck disable=SC2016 # Ignore: Expressions don't expand in single quotes
+    su -c "${MAIN_DIR:?}"'/cmdline.bat "${@}"' -- root "${0-}" "${@}"
+  elif test -n "${BB_CMD?}" && test -n "${SHELL_CMD?}"; then
+    _fix_pwd="cd '${PWD:?}'"
+    # shellcheck disable=SC2016 # Ignore: Expressions don't expand in single quotes
+    "${BB_CMD:?}" su -s "${SHELL_CMD:?}" -c "${_fix_pwd:?}; ${MAIN_DIR:?}"'/cmdline.sh "${@}"' -- root "${0-}" "${@}"
+  else
+    ui_warning 'sume failed!!!'
+    return 125
+  fi
+}
+
+dropme()
+{
+  if test "${PLATFORM:?}" != 'win'; then
+    ui_warning 'dropme not supported!!!'
+    return 1
+  fi
+  is_root || return 0
+
+  if test "${IS_BUSYBOX:?}" = 'true'; then
+    # shellcheck disable=SC2016 # Ignore: Expressions don't expand in single quotes
+    drop -c "${MAIN_DIR:?}"'/cmdline.bat "${@}"' -- "${0-}" "${@}"
+  elif test -n "${BB_CMD?}" && test -n "${SHELL_CMD?}"; then
+    # shellcheck disable=SC2016 # Ignore: Expressions don't expand in single quotes
+    "${BB_CMD:?}" drop -s "${SHELL_CMD:?}" -c "${MAIN_DIR:?}"'/cmdline.sh "${@}"' -- "${0-}" "${@}"
+  else
+    ui_warning 'dropme failed!!!'
+    return 125
+  fi
 }
 
 init_base()
@@ -985,15 +1055,51 @@ init_vars()
   export MODULE_NAME
 }
 
+detect_bb_and_id()
+{
+  BB_CMD=''
+  ID_CMD=''
+
+  if command 1> /dev/null -v 'busybox'; then
+    BB_CMD="$(command -v busybox)" || ui_error 'Unable to get the path of BusyBox'
+  fi
+
+  if test "${PLATFORM:?}" = 'win' && test -n "${BB_CMD?}"; then
+    ID_CMD='id'
+  else
+    ID_CMD="$(command -v id)" || ui_error 'Unable to get the path of id'
+  fi
+
+  readonly BB_CMD ID_CMD
+}
+
+is_root()
+{
+  local _user_id
+
+  if test "${PLATFORM:?}" = 'win' && test -n "${BB_CMD?}"; then
+    # Bash under Windows is unable to detect root so we need to use BusyBox
+    _user_id="$("${BB_CMD:?}" id -u)" || ui_error 'Unable to get user ID'
+  else
+    _user_id="$("${ID_CMD:?}" -u)" || ui_error 'Unable to get user ID'
+  fi
+
+  if test "${_user_id:?}" -ne 0; then return 1; fi # Return false
+  return 0                                         # Return true
+}
+
 init_cmdline()
 {
-  unset PROMPT_COMMAND
-  unset PS1
+  unset PROMPT_COMMAND PS1 A5K_SAVED_TITLE
+  unset __TITLE_CMD_PREFIX __TITLE_CMD_PARAMS __DEFAULT_PS1 __DEFAULT_PS1_AS_ROOT
 
-  CURRENT_SHELL="${0-}"
-  test "${IS_BUSYBOX:?}" = 'false' || CURRENT_SHELL="busybox ${CURRENT_SHELL-}"
-  readonly CURRENT_SHELL
+  __TITLE_CMD_PREFIX=''
+  __TITLE_CMD_PARAMS=''
+  test "${IS_BUSYBOX:?}" = 'false' || __TITLE_CMD_PREFIX='busybox '
+  test "${#}" -eq 0 || __TITLE_CMD_PARAMS="$(printf ' "%s"' "${@}")"
+  readonly __TITLE_CMD_PREFIX __TITLE_CMD_PARAMS
 
+  A5K_LAST_TITLE="${A5K_LAST_TITLE-}"
   if test "${A5K_TITLE_IS_DEFAULT-}" != 'false'; then set_default_title; fi
 
   if test "${STARTED_FROM_BATCH_FILE:-0}" != '0' && test -n "${HOME-}"; then
@@ -1068,21 +1174,32 @@ init_cmdline()
   alias build='build.sh'
   if test "${PLATFORM:?}" = 'win' && test "${IS_BUSYBOX:?}" = 'true'; then alias cmdline='cmdline.bat'; else alias cmdline='cmdline.sh'; fi
 
-  if test "${PLATFORM:?}" = 'win'; then
-    export BB_FIX_BACKSLASH=1
-    export PATHEXT="${PATHEXT:-.BAT};.SH"
-  fi
-
   export A5K_TITLE_IS_DEFAULT
   export A5K_LAST_TITLE
 
+  if test "${PLATFORM:?}" = 'win'; then
+    export PATHEXT="${PATHEXT:-.BAT};.SH"
+    export BB_FIX_BACKSLASH=1
+    export ac_executable_extensions='.exe'
+  fi
+
   export PATH_SEPARATOR="${PATHSEP:?}"
   export DIRECTORY_SEPARATOR='/'
+
   export GRADLE_OPTS="${GRADLE_OPTS:--Dorg.gradle.daemon=false}"
 
+  # Escape the colors with \[ \] => https://mywiki.wooledge.org/BashFAQ/053
+  readonly __DEFAULT_PS1='\[\033[1;32m\]\u\[\033[0m\]:\[\033[1;34m\]\w\[\033[0m\]\$ '
+  if test "${PLATFORM:?}" = 'win' && test "${IS_BUSYBOX:?}" = 'false'; then
+    # Only needed on Bash under Windows
+    readonly __DEFAULT_PS1_AS_ROOT='\[\033[1;32m\]root\[\033[0m\]:\[\033[1;34m\]\w\[\033[0m\]# '
+  else
+    readonly __DEFAULT_PS1_AS_ROOT=''
+  fi
+
   if test "${CI:-false}" = 'false'; then
-    PS1='\[\033[1;32m\]\u\[\033[0m\]:\[\033[1;34m\]\w\[\033[0m\]\$' # Escape the colors with \[ \] => https://mywiki.wooledge.org/BashFAQ/053
-    PROMPT_COMMAND='_update_title "${CURRENT_SHELL-} (${SHLVL-})"'
+    PS1="${__DEFAULT_PS1:?}"
+    PROMPT_COMMAND='__update_title_and_ps1'
   fi
 }
 
@@ -1098,15 +1215,18 @@ fi
 
 # Set environment variables
 detect_os_and_other_things
-export PLATFORM IS_BUSYBOX PATHSEP CYGPATH
+export PLATFORM IS_BUSYBOX PATHSEP CYGPATH SHELL_CMD
 init_base
 export MAIN_DIR TOOLS_DIR
 init_path
 init_vars
+detect_bb_and_id
 
 if test "${DO_INIT_CMDLINE:-0}" != '0'; then
+  if test -n "${QUOTED_PARAMS-}" && test "${#}" -eq 0; then eval ' \set' '--' "${QUOTED_PARAMS:?} " || exit 100; fi
   unset DO_INIT_CMDLINE
-  init_cmdline
+  unset QUOTED_PARAMS
+  if test "${#}" -eq 0; then init_cmdline; else init_cmdline "${@}"; fi
 fi
 
 export PATH

@@ -33,6 +33,11 @@ fail_with_msg()
   exit 1
 }
 
+ui_error()
+{
+  fail_with_msg "${@}"
+}
+
 show_cmdline()
 {
   printf "'%s'" "${0-}"
@@ -42,12 +47,13 @@ show_cmdline()
 
 detect_os_and_other_things()
 {
-  if test -n "${PLATFORM-}"; then return; fi
+  if test -n "${PLATFORM-}" && test -n "${IS_BUSYBOX-}" && test -n "${PATHSEP-}"; then return 0; fi
 
   PLATFORM="$(uname | tr -- '[:upper:]' '[:lower:]')"
   IS_BUSYBOX='false'
   PATHSEP=':'
   CYGPATH=''
+  SHELL_CMD="${BASH:-${SHELL-}}"
 
   case "${PLATFORM?}" in
     'linux') ;;   # Returned by both Linux and Android, Android will be identified later in the function
@@ -74,7 +80,7 @@ detect_os_and_other_things()
           IS_BUSYBOX='true'
           ;;
         'msys' | 'cygwin') PLATFORM='win' ;;
-        *) PLATFORM="$(printf '%s\n' "${PLATFORM:?}" | tr -d '/')" || fail_with_msg 'Failed to get uname' ;;
+        *) PLATFORM="$(printf '%s\n' "${PLATFORM:?}" | tr -d ':;\\/')" || ui_error 'Failed to find platform' ;;
       esac
       ;;
   esac
@@ -87,18 +93,22 @@ detect_os_and_other_things()
     esac
   fi
 
-  if test "${PLATFORM:?}" = 'win' && test "${IS_BUSYBOX:?}" = 'true'; then
-    PATHSEP=';'
+  if test "${PLATFORM:?}" = 'win'; then
+    if test "${IS_BUSYBOX:?}" = 'true'; then
+      PATHSEP=';'
+      SHELL_CMD=''
+    fi
+
+    if test "${IS_BUSYBOX:?}" = 'false' && PATH="/usr/bin${PATHSEP:?}${PATH-}" command 1> /dev/null -v 'cygpath'; then
+      CYGPATH="$(PATH="/usr/bin${PATHSEP:?}${PATH-}" command -v cygpath)" || ui_error 'Unable to find the path of cygpath'
+      SHELL_CMD="$("${CYGPATH:?}" -m -a -l -- "${SHELL_CMD:?}")" || ui_error 'Unable to convert the path of the shell'
+    fi
   fi
 
-  if test "${PLATFORM:?}" = 'win' && test "${IS_BUSYBOX:?}" = 'false' && PATH="/usr/bin${PATHSEP:?}${PATH-}" command 1> /dev/null -v 'cygpath'; then
-    CYGPATH="$(PATH="/usr/bin${PATHSEP:?}${PATH-}" command -v cygpath)" || fail_with_msg 'Unable to find the path of cygpath'
-  fi
-
-  readonly PLATFORM IS_BUSYBOX PATHSEP CYGPATH
+  readonly PLATFORM IS_BUSYBOX PATHSEP CYGPATH SHELL_CMD
 }
 
-is_in_path_env()
+_is_in_path_env_internal()
 {
   case "${PATHSEP:?}${PATH-}${PATHSEP:?}" in
     *"${PATHSEP:?}${1:?}${PATHSEP:?}"*) return 0 ;; # Found
@@ -107,16 +117,28 @@ is_in_path_env()
   return 1 # NOT found
 }
 
+is_in_path_env()
+{
+  if test -n "${CYGPATH?}"; then
+    # Only on Bash under Windows
+    local _path
+    _path="$("${CYGPATH:?}" -u -- "${1:?}")" || ui_error 'Unable to convert a path in is_in_path_env()'
+    set -- "${_path:?}"
+  fi
+
+  _is_in_path_env_internal "${1:?}"
+}
+
 add_to_path_env()
 {
   if test -n "${CYGPATH?}"; then
     # Only on Bash under Windows
     local _path
-    _path="$("${CYGPATH:?}" -u -a -- "${1:?}")" || fail_with_msg 'Unable to convert a path in add_to_path_env()'
+    _path="$("${CYGPATH:?}" -u -- "${1:?}")" || ui_error 'Unable to convert a path in add_to_path_env()'
     set -- "${_path:?}"
   fi
 
-  if is_in_path_env "${1:?}" || test ! -e "${1:?}"; then return; fi
+  if _is_in_path_env_internal "${1:?}" || test ! -e "${1:?}"; then return 0; fi
 
   if test -z "${PATH-}"; then
     PATH="${1:?}"
@@ -127,13 +149,13 @@ add_to_path_env()
 
 move_to_begin_of_path_env()
 {
-  local _path
-  if test ! -e "${1:?}"; then return; fi
+  local _new_path
+  if test ! -e "${1:?}"; then return 0; fi
 
   if test -z "${PATH-}"; then
     PATH="${1:?}"
-  elif _path="$(printf '%s\n' "${PATH:?}" | tr -- "${PATHSEP:?}" '\n' | grep -v -x -F -e "${1:?}" | tr -- '\n' "${PATHSEP:?}")" && _path="${_path%"${PATHSEP:?}"}" && test -n "${_path?}"; then
-    PATH="${1:?}${PATHSEP:?}${_path:?}"
+  elif _new_path="$(printf '%s\n' "${PATH:?}" | tr -- "${PATHSEP:?}" '\n' | grep -v -x -F -e "${1:?}" | tr -- '\n' "${PATHSEP:?}")" && _new_path="${_new_path%"${PATHSEP:?}"}" && test -n "${_new_path?}"; then
+    PATH="${1:?}${PATHSEP:?}${_new_path:?}"
   fi
 }
 
@@ -233,14 +255,16 @@ if test "${ENV_RESETTED:-false}" = 'false'; then
 
   if test "${#}" -eq 0; then fail_with_msg 'You must pass the filename of the flashable ZIP as parameter'; fi
 
-  THIS_SCRIPT="$(realpath 2> /dev/null "${0:?}")" || fail_with_msg 'Failed to get script filename'
+  SHELL="${BASH:-${SHELL-}}"
+  if test -z "${SHELL?}"; then SHELL="$(command -v 'bash')" || fail_with_msg 'Unable to find current shell path'; fi
+  THIS_SCRIPT="$(realpath 2> /dev/null "${0:?}")" || fail_with_msg 'Unable to resolve current script name'
 
   reset_env_and_rerun_myself()
   {
     if test "${COVERAGE:-false}" = 'false'; then
-      exec env -i -- ENV_RESETTED=true PATH="${PATH:?}" BB_GLOBBING='0' THIS_SCRIPT="${THIS_SCRIPT:?}" TMPDIR="${TMPDIR:-${RUNNER_TEMP:-${TMP:-${TEMP:-/tmp}}}}" DEBUG_LOG="${DEBUG_LOG-}" LIVE_SETUP_ALLOWED="${LIVE_SETUP_ALLOWED-}" FORCE_HW_BUTTONS="${FORCE_HW_BUTTONS-}" CI="${CI-}" bash -- "${THIS_SCRIPT:?}" "${@}"
+      exec env -i -- ENV_RESETTED=true PATH="${PATH:?}" BB_GLOBBING='0' SHELL="${SHELL:?}" THIS_SCRIPT="${THIS_SCRIPT:?}" TMPDIR="${TMPDIR:-${RUNNER_TEMP:-${TMP:-${TEMP:-/tmp}}}}" DEBUG_LOG="${DEBUG_LOG-}" LIVE_SETUP_ALLOWED="${LIVE_SETUP_ALLOWED-}" FORCE_HW_BUTTONS="${FORCE_HW_BUTTONS-}" CI="${CI-}" "${SHELL:?}" -- "${THIS_SCRIPT:?}" "${@}"
     else
-      exec env -i -- ENV_RESETTED=true PATH="${PATH:?}" BB_GLOBBING='0' THIS_SCRIPT="${THIS_SCRIPT:?}" TMPDIR="${TMPDIR:-${RUNNER_TEMP:-${TMP:-${TEMP:-/tmp}}}}" DEBUG_LOG="${DEBUG_LOG-}" LIVE_SETUP_ALLOWED="${LIVE_SETUP_ALLOWED-}" FORCE_HW_BUTTONS="${FORCE_HW_BUTTONS-}" CI="${CI-}" BASH_XTRACEFD="${BASH_XTRACEFD-}" BASH_ENV="${BASH_ENV-}" OLDPWD="${OLDPWD-}" SHELLOPTS="${SHELLOPTS-}" PS4="${PS4-}" bash -x -- "${THIS_SCRIPT:?}" "${@}"
+      exec env -i -- ENV_RESETTED=true PATH="${PATH:?}" BB_GLOBBING='0' SHELL="${SHELL:?}" THIS_SCRIPT="${THIS_SCRIPT:?}" TMPDIR="${TMPDIR:-${RUNNER_TEMP:-${TMP:-${TEMP:-/tmp}}}}" DEBUG_LOG="${DEBUG_LOG-}" LIVE_SETUP_ALLOWED="${LIVE_SETUP_ALLOWED-}" FORCE_HW_BUTTONS="${FORCE_HW_BUTTONS-}" CI="${CI-}" BASH_XTRACEFD="${BASH_XTRACEFD-}" BASH_ENV="${BASH_ENV-}" OLDPWD="${OLDPWD-}" SHELLOPTS="${SHELLOPTS-}" PS4="${PS4-}" "${SHELL:?}" -x -- "${THIS_SCRIPT:?}" "${@}"
     fi
   }
 
@@ -256,10 +280,15 @@ if test -z "${CI-}"; then unset CI; fi
 if test -z "${SHELLOPTS-}"; then unset SHELLOPTS; fi
 
 detect_os_and_other_things
+unset SHELL
+
+if test "${COVERAGE:-false}" != 'false'; then
+  test -n "${SHELL_CMD?}" || fail_with_msg 'Unable to find current shell path'
+fi
 
 if test -n "${CYGPATH?}"; then
   # Only on Bash under Windows
-  THIS_SCRIPT="$("${CYGPATH:?}" -m -l -- "${THIS_SCRIPT:?}")" || ui_error 'Unable to convert our script path'
+  THIS_SCRIPT="$("${CYGPATH:?}" -m -l -- "${THIS_SCRIPT:?}")" || fail_with_msg 'Unable to convert our script path'
   if test "${TMPDIR?}" = '/tmp'; then TMPDIR="$("${CYGPATH:?}" -m -l -- '/tmp')" || fail_with_msg 'Unable to convert the temp directory'; fi
 fi
 
@@ -284,14 +313,9 @@ _our_busybox="$(env -- which -- busybox)" || fail_with_msg 'BusyBox is missing'
 _tee_cmd="$(command -v tee)" || fail_with_msg 'tee is missing'
 if test -n "${CYGPATH?}"; then
   # Only on Bash under Windows
-  _our_busybox="$("${CYGPATH:?}" -m -a -l -- "${_our_busybox:?}")" || ui_error 'Unable to convert our busybox path'
+  _our_busybox="$("${CYGPATH:?}" -m -a -l -- "${_our_busybox:?}")" || fail_with_msg 'Unable to convert our busybox path'
 fi
 readonly _our_busybox _tee_cmd
-
-if test "${COVERAGE:-false}" != 'false'; then
-  _bash_cmd="$(command -v bash)" || fail_with_msg 'bash is missing'
-  readonly _bash_cmd
-fi
 
 case "${*}" in
   *'*.zip') fail_with_msg 'The flashable ZIP is missing, you have to build it before being able to test it' ;;
@@ -510,7 +534,7 @@ flash_zips()
     if test "${COVERAGE:-false}" = 'false'; then
       "${_android_busybox:?}" sh -- "${_android_tmp:?}/updater" 3 "${recovery_fd:?}" "${_android_sec_stor:?}/${FLASHABLE_ZIP_NAME:?}" 1> >("${_tee_cmd:?}" -a "${recovery_logs_dir:?}/recovery-raw.log" "${recovery_logs_dir:?}/recovery-stdout.log" || true) 2> >("${_tee_cmd:?}" -a "${recovery_logs_dir:?}/recovery-raw.log" "${recovery_logs_dir:?}/recovery-stderr.log" 1>&2 || true)
     else
-      COVERAGE_SHELL="${_bash_cmd:?}" "${_bash_cmd:?}" -x -- "${THIS_SCRIPT_DIR:?}/updater.sh" 3 "${recovery_fd:?}" "${_android_sec_stor:?}/${FLASHABLE_ZIP_NAME:?}" 1> >("${_tee_cmd:?}" -a "${recovery_logs_dir:?}/recovery-raw.log" "${recovery_logs_dir:?}/recovery-stdout.log" || true) 2> >("${_tee_cmd:?}" -a "${recovery_logs_dir:?}/recovery-raw.log" "${recovery_logs_dir:?}/recovery-stderr.log" 1>&2 || true)
+      COVERAGE_SHELL="${SHELL_CMD:?}" "${SHELL_CMD:?}" -x -- "${THIS_SCRIPT_DIR:?}/updater.sh" 3 "${recovery_fd:?}" "${_android_sec_stor:?}/${FLASHABLE_ZIP_NAME:?}" 1> >("${_tee_cmd:?}" -a "${recovery_logs_dir:?}/recovery-raw.log" "${recovery_logs_dir:?}/recovery-stdout.log" || true) 2> >("${_tee_cmd:?}" -a "${recovery_logs_dir:?}/recovery-raw.log" "${recovery_logs_dir:?}/recovery-stderr.log" 1>&2 || true)
     fi
     STATUS="${?}"
     set -e
