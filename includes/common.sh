@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
+
 # SPDX-FileCopyrightText: (c) 2016 ale5000
 # SPDX-License-Identifier: GPL-3.0-or-later
-
 # shellcheck enable=all
 # shellcheck disable=SC3043 # In POSIX sh, local is undefined
 
@@ -33,7 +33,7 @@ readonly NL='
 pause_if_needed()
 {
   # shellcheck disable=SC3028 # In POSIX sh, SHLVL is undefined
-  if test "${CI:-false}" = 'false' && test "${TERM_PROGRAM-}" != 'vscode' && test "${APP_BASE_NAME-}" != 'gradlew' && test "${SHLVL:-1}" = '1' && test -t 0 && test -t 2; then
+  if test "${NO_PAUSE:-0}" = '0' && test "${CI:-false}" = 'false' && test "${TERM_PROGRAM-}" != 'vscode' && test "${SHLVL:-1}" = '1' && test -t 0 && test -t 1 && test -t 2; then
     printf 1>&2 '\n\033[1;32m%s\033[0m' 'Press any key to exit...' || true
     # shellcheck disable=SC3045
     IFS='' read 1>&2 -r -s -n 1 _ || true
@@ -88,7 +88,10 @@ export ftp_proxy="${ftp_proxy-}"
 
 detect_os_and_other_things()
 {
-  if test -n "${PLATFORM-}" && test -n "${IS_BUSYBOX-}" && test -n "${PATHSEP-}"; then return 0; fi
+  if test -n "${PLATFORM-}" && test -n "${IS_BUSYBOX-}" && test -n "${PATHSEP-}"; then
+    readonly PLATFORM IS_BUSYBOX PATHSEP CYGPATH SHELL_CMD
+    return 0
+  fi
 
   PLATFORM="$(uname | tr -- '[:upper:]' '[:lower:]')"
   IS_BUSYBOX='false'
@@ -151,10 +154,13 @@ detect_os_and_other_things()
 
 change_title()
 {
+  test "${NO_TITLE:-0}" = '0' || return 0
   test "${CI:-false}" = 'false' || return 0
+  test -t 2 || return 0
+
   A5K_TITLE_IS_DEFAULT='false'
   A5K_LAST_TITLE="${1:?}"
-  printf '\033]0;%s - %s\007\r' "${1:?}" "${MODULE_NAME:?}" && printf '       %*s   %*s    \r' "${#1}" '' "${#MODULE_NAME}" ''
+  printf 1>&2 '\033]0;%s - %s\007\r' "${1:?}" "${MODULE_NAME:?}" && printf 1>&2 '    %*s   %*s \r' "${#1}" '' "${#MODULE_NAME}" ''
 }
 
 set_default_title()
@@ -180,17 +186,16 @@ restore_saved_title_if_exist()
 {
   if test "${A5K_SAVED_TITLE-}" = 'default'; then
     set_default_title
-    A5K_SAVED_TITLE=''
   elif test -n "${A5K_SAVED_TITLE-}"; then
     change_title "${A5K_SAVED_TITLE:?}"
-    A5K_SAVED_TITLE=''
   fi
+  A5K_SAVED_TITLE=''
 }
 
 __update_title_and_ps1()
 {
   local _title
-  _title="Command-line: ${__TITLE_CMD_PREFIX-}$(basename "${0-}" || true)${__TITLE_CMD_PARAMS-} (${SHLVL-}) - ${MODULE_NAME-}"
+  _title="Command-line: ${__TITLE_CMD_PREFIX-}$(basename "${0:--}" || true)$(test "${#}" -eq 0 || printf ' "%s"' "${@}" || true) (${SHLVL-}) - ${MODULE_NAME-}"
   PS1="${__DEFAULT_PS1-}"
 
   if is_root; then
@@ -198,6 +203,7 @@ __update_title_and_ps1()
     test -z "${__DEFAULT_PS1_AS_ROOT-}" || PS1="${__DEFAULT_PS1_AS_ROOT-}"
   fi
 
+  test "${NO_TITLE:-0}" = '0' || return 0
   test "${A5K_TITLE_IS_DEFAULT-}" = 'true' || return 0
   test -t 2 || return 0
   printf 1>&2 '\033]0;%s\007\r' "${_title}" && printf 1>&2 '    %*s \r' "${#_title}" ''
@@ -988,7 +994,7 @@ dropme()
 
   if test "${IS_BUSYBOX:?}" = 'true'; then
     # shellcheck disable=SC2016 # Ignore: Expressions don't expand in single quotes
-    drop -c "${MAIN_DIR:?}"'/cmdline.bat "${@}"' -- "${0-}" "${@}"
+    drop -c "${MAIN_DIR:?}"'/cmdline.sh "${@}"' -- "${0-}" "${@}"
   elif test -n "${BB_CMD?}" && test -n "${SHELL_CMD?}"; then
     # shellcheck disable=SC2016 # Ignore: Expressions don't expand in single quotes
     "${BB_CMD:?}" drop -s "${SHELL_CMD:?}" -c "${MAIN_DIR:?}"'/cmdline.sh "${@}"' -- "${0-}" "${@}"
@@ -1164,15 +1170,22 @@ init_cmdline()
   alias 'cd..'='cd ..'
   alias 'cd.'='cd .'
   alias 'cls'='reset'
-  alias 'clear-prev'="printf '\033[A\33[2K\033[A\33[2K\r'"
 
   if test -f "${MAIN_DIR:?}/includes/custom-aliases.sh"; then
     # shellcheck source=/dev/null
     . "${MAIN_DIR:?}/includes/custom-aliases.sh" || ui_error 'Unable to source includes/custom-aliases.sh'
   fi
 
-  alias build='build.sh'
-  if test "${PLATFORM:?}" = 'win' && test "${IS_BUSYBOX:?}" = 'true'; then alias cmdline='cmdline.bat'; else alias cmdline='cmdline.sh'; fi
+  alias 'build'='build.sh'
+  alias 'cmdline'='cmdline.sh'
+  alias 'clear-prev'="printf '\033[A\33[2K\033[A\33[2K\r'"
+
+  if test -n "${BB_CMD?}"; then
+    if ! command 1> /dev/null -v 'ts'; then alias 'ts'='busybox ts'; fi
+    if ! command 1> /dev/null -v 'su'; then alias 'su'='busybox su'; fi
+    if ! command 1> /dev/null -v 'drop'; then alias 'drop'='busybox drop'; fi
+    if ! command 1> /dev/null -v 'make'; then alias 'make'='busybox make'; fi
+  fi
 
   export A5K_TITLE_IS_DEFAULT
   export A5K_LAST_TITLE
@@ -1199,11 +1212,12 @@ init_cmdline()
 
   if test "${CI:-false}" = 'false'; then
     PS1="${__DEFAULT_PS1:?}"
-    PROMPT_COMMAND='__update_title_and_ps1'
+    PROMPT_COMMAND='__update_title_and_ps1 "${@}" || true'
   fi
 }
 
 if test "${DO_INIT_CMDLINE:-0}" != '0'; then
+  set -u
   # shellcheck disable=SC3040,SC3041,SC2015 # Ignore: In POSIX sh, set option xxx is undefined. / In POSIX sh, set flag -X is undefined. / C may run when A is true.
   {
     # Unsupported set options may cause the shell to exit (even without set -e), so first try them in a subshell to avoid this issue
@@ -1223,9 +1237,20 @@ init_vars
 detect_bb_and_id
 
 if test "${DO_INIT_CMDLINE:-0}" != '0'; then
-  if test -n "${QUOTED_PARAMS-}" && test "${#}" -eq 0; then eval ' \set' '--' "${QUOTED_PARAMS:?} " || exit 100; fi
+  if test -n "${__QUOTED_PARAMS-}" && test "${#}" -eq 0; then
+    _newline='
+'
+    _backup_ifs="${IFS-}"
+    IFS="${_newline:?}"
+    for _param in ${__QUOTED_PARAMS:?}; do
+      set -- "${@}" "${_param?}"
+    done
+    IFS="${_backup_ifs?}"
+    unset _newline _backup_ifs _param
+  fi
+
   unset DO_INIT_CMDLINE
-  unset QUOTED_PARAMS
+  unset __QUOTED_PARAMS
   if test "${#}" -eq 0; then init_cmdline; else init_cmdline "${@}"; fi
 fi
 
