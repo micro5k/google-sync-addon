@@ -53,7 +53,7 @@ ui_error()
   echo 1>&2 "ERROR: $1"
   pause_if_needed
   restore_saved_title_if_exist
-  test -n "$2" && exit "$2"
+  test -n "${2-}" && exit "$2"
   exit 1
 }
 
@@ -166,9 +166,9 @@ change_title()
 set_default_title()
 {
   if is_root; then
-    change_title "[root] Command-line: ${__TITLE_CMD_PREFIX-}$(basename "${0-}" || true)${__TITLE_CMD_PARAMS-}"
+    change_title "[root] Command-line: ${__TITLE_CMD_PREFIX-}${__TITLE_CMD_0-}${__TITLE_CMD_PARAMS-}"
   else
-    change_title "Command-line: ${__TITLE_CMD_PREFIX-}$(basename "${0-}" || true)${__TITLE_CMD_PARAMS-}"
+    change_title "Command-line: ${__TITLE_CMD_PREFIX-}${__TITLE_CMD_0-}${__TITLE_CMD_PARAMS-}"
   fi
   A5K_TITLE_IS_DEFAULT='true'
 }
@@ -876,6 +876,21 @@ dl_list()
   IFS="${_backup_ifs:-}"
 }
 
+get_32bit_programfiles()
+{
+  local _dir
+
+  _dir="${PROGRAMFILES_X86_-}" # On 64-bit Windows (only on BusyBox)
+  if test -z "${_dir?}"; then
+    _dir="$(env | grep -w -m 1 -e '^ProgramFiles(x86)' | cut -d '=' -f '2-' -s || true)" # On 64-bit Windows
+    if test -z "${_dir?}"; then
+      _dir="${PROGRAMFILES-}" # On 32-bit Windows
+    fi
+  fi
+
+  printf '%s\n' "${_dir?}"
+}
+
 _is_in_path_env_internal()
 {
   case "${PATHSEP:?}${PATH-}${PATHSEP:?}" in
@@ -963,7 +978,8 @@ remove_duplicates_from_path_env()
 
 sume()
 {
-  local _fix_pwd
+  local _set_env_vars=''
+  local _fix_pwd=''
 
   if test "${PLATFORM:?}" != 'win'; then
     ui_warning 'sume not supported!!!'
@@ -971,13 +987,17 @@ sume()
   fi
   ! is_root || return 0
 
+  if test "${PLATFORM:?}" = 'win'; then
+    _set_env_vars="export HOME='${HOME-}'; export USER_HOME='${USER_HOME-}'; export MAIN_DIR='${MAIN_DIR:?}'; export PLATFORM='${PLATFORM:?}'; export IS_BUSYBOX='${IS_BUSYBOX:?}';"
+  fi
+
   if test "${IS_BUSYBOX:?}" = 'true'; then
     # shellcheck disable=SC2016 # Ignore: Expressions don't expand in single quotes
-    su -c "${MAIN_DIR:?}"'/cmdline.bat "${@}"' -- root "${0-}" "${@}"
+    su -c "${_set_env_vars?} ${MAIN_DIR:?}"'/cmdline.sh "${@}"' -- root "${0-}" "${@}"
   elif test -n "${BB_CMD?}" && test -n "${SHELL_CMD?}"; then
-    _fix_pwd="cd '${PWD:?}'"
+    _fix_pwd="cd '${PWD:?}';"
     # shellcheck disable=SC2016 # Ignore: Expressions don't expand in single quotes
-    "${BB_CMD:?}" su -s "${SHELL_CMD:?}" -c "${_fix_pwd:?}; ${MAIN_DIR:?}"'/cmdline.sh "${@}"' -- root "${0-}" "${@}"
+    "${BB_CMD:?}" su -s "${SHELL_CMD:?}" -c "${_set_env_vars?} ${_fix_pwd?} ${MAIN_DIR:?}"'/cmdline.sh "${@}"' -- root "${0-}" "${@}"
   else
     ui_warning 'sume failed!!!'
     return 125
@@ -1002,6 +1022,12 @@ dropme()
     ui_warning 'dropme failed!!!'
     return 125
   fi
+}
+
+alias_cmd_if_missing()
+{
+  # shellcheck disable=SC2139 # Ignore: This expands when defined, not when used
+  if ! command 1> /dev/null -v "${1:?}"; then alias "${1:?}"="busybox '${1:?}'"; fi
 }
 
 init_base()
@@ -1046,9 +1072,25 @@ init_path()
   if is_in_path_env "${TOOLS_DIR:?}"; then return; fi
 
   if test -n "${PATH-}"; then PATH="${PATH%"${PATHSEP:?}"}"; fi
-  # On Bash under Windows (for example the one included inside Git for Windows) we need to move '/usr/bin'
-  # before 'C:/Windows/System32' otherwise it will use the find/sort/etc. of Windows instead of the Unix compatible ones.
-  if test "${PLATFORM:?}" = 'win' && test "${IS_BUSYBOX:?}" = 'false'; then move_to_begin_of_path_env '/usr/bin'; fi
+
+  if test "${PLATFORM:?}" = 'win'; then
+    # On Bash under Windows (for example the one included inside Git for Windows) we need to have '/usr/bin'
+    # before 'C:/Windows/System32' otherwise it will use the find/sort/etc. of Windows instead of the Unix compatible ones.
+    # ADDITIONAL NOTE: We have to do this even under BusyBox otherwise every external bash/make executed as subshell of BusyBox will be broken.
+    if test -z "${PATH-}"; then
+      ui_warning 'PATH env is empty'
+      PATH='/usr/bin'
+    else
+      PATH="/usr/bin${PATHSEP:?}${PATH:?}"
+    fi
+
+    # Make some GNU tools available
+    local _program_dir_32
+    _program_dir_32="$(get_32bit_programfiles)"
+    if test -n "${_program_dir_32?}"; then
+      add_to_path_env "${_program_dir_32:?}/GnuWin32/bin"
+    fi
+  fi
 
   if test "${DO_INIT_CMDLINE:-0}" != '0'; then remove_duplicates_from_path_env; fi
   add_to_path_env "${TOOLS_DIR:?}"
@@ -1096,14 +1138,17 @@ is_root()
 
 init_cmdline()
 {
-  unset PROMPT_COMMAND PS1 A5K_SAVED_TITLE
-  unset __TITLE_CMD_PREFIX __TITLE_CMD_PARAMS __DEFAULT_PS1 __DEFAULT_PS1_AS_ROOT
+  unset PROMPT_COMMAND PS1 PROMPT A5K_SAVED_TITLE
+  unset __DEFAULT_PS1 __DEFAULT_PS1_AS_ROOT
 
-  __TITLE_CMD_PREFIX=''
-  __TITLE_CMD_PARAMS=''
+  export __TITLE_CMD_PREFIX=''
+  export __TITLE_CMD_0=''
+  export __TITLE_CMD_PARAMS=''
+
   test "${IS_BUSYBOX:?}" = 'false' || __TITLE_CMD_PREFIX='busybox '
+  __TITLE_CMD_0="$(basename "${0:--}" || printf '%s' "${0:--}")"
   test "${#}" -eq 0 || __TITLE_CMD_PARAMS="$(printf ' "%s"' "${@}")"
-  readonly __TITLE_CMD_PREFIX __TITLE_CMD_PARAMS
+  readonly __TITLE_CMD_PREFIX __TITLE_CMD_0 __TITLE_CMD_PARAMS
 
   A5K_LAST_TITLE="${A5K_LAST_TITLE-}"
   if test "${A5K_TITLE_IS_DEFAULT-}" != 'false'; then set_default_title; fi
@@ -1179,12 +1224,18 @@ init_cmdline()
   alias 'build'='build.sh'
   alias 'cmdline'='cmdline.sh'
   alias 'clear-prev'="printf '\033[A\33[2K\033[A\33[2K\r'"
+  if test "${PLATFORM:?}" = 'win'; then
+    alias 'gradlew'='gradlew.bat'
+  fi
 
   if test -n "${BB_CMD?}"; then
-    if ! command 1> /dev/null -v 'ts'; then alias 'ts'='busybox ts'; fi
-    if ! command 1> /dev/null -v 'su'; then alias 'su'='busybox su'; fi
-    if ! command 1> /dev/null -v 'drop'; then alias 'drop'='busybox drop'; fi
-    if ! command 1> /dev/null -v 'make'; then alias 'make'='busybox make'; fi
+    alias_cmd_if_missing 'su'
+    alias_cmd_if_missing 'ts'
+    if test "${PLATFORM:?}" = 'win'; then
+      alias_cmd_if_missing 'drop'
+      alias_cmd_if_missing 'make'
+      alias_cmd_if_missing 'pdpmake'
+    fi
   fi
 
   export A5K_TITLE_IS_DEFAULT
@@ -1199,6 +1250,7 @@ init_cmdline()
   export PATH_SEPARATOR="${PATHSEP:?}"
   export DIRECTORY_SEPARATOR='/'
 
+  export NO_PAUSE=1
   export GRADLE_OPTS="${GRADLE_OPTS:--Dorg.gradle.daemon=false}"
 
   # Escape the colors with \[ \] => https://mywiki.wooledge.org/BashFAQ/053
