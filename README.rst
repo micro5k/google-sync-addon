@@ -51,6 +51,6 @@ Code analysis
    :alt: CodeFactor Badge
    :target: https://www.codefactor.io/repository/github/micro5k/google-sync-addon
 
-.. image:: https://app.codacy.com/project/badge/Grade/a490a45291bb45208c025b26421402f5
+.. image:: https://app.codacy.com/project/badge/Grade/0a3cd4857c224c59afa38e4cdfeb9486
    :alt: Codacy Badge
    :target: https://app.codacy.com/gh/micro5k/google-sync-addon/dashboard
