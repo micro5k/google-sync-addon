@@ -880,9 +880,12 @@ get_32bit_programfiles()
 {
   local _dir
 
-  _dir="${PROGRAMFILES_X86_-}" # On 64-bit Windows (only on BusyBox)
+  _dir="${PROGRAMFILES_X86_-}" # On 64-bit Windows (on BusyBox)
+
   if test -z "${_dir?}"; then
-    _dir="$(env | grep -w -m 1 -e '^ProgramFiles(x86)' | cut -d '=' -f '2-' -s || true)" # On 64-bit Windows
+    if test "${IS_BUSYBOX:?}" = 'false'; then
+      _dir="$(env | grep -w -m 1 -e '^ProgramFiles(x86)' | cut -d '=' -f '2-' -s || true)" # On 64-bit Windows (on Bash)
+    fi
     if test -z "${_dir?}"; then
       _dir="${PROGRAMFILES-}" # On 32-bit Windows
     fi
@@ -1024,7 +1027,13 @@ dropme()
   fi
 }
 
-alias_cmd_if_missing()
+create_bb_alias_if_not_applet()
+{
+  # shellcheck disable=SC2139 # Ignore: This expands when defined, not when used
+  if test "$(command -v "${1:?}" || true)" != "${1:?}"; then alias "${1:?}"="busybox '${1:?}'"; fi
+}
+
+create_bb_alias_if_missing()
 {
   # shellcheck disable=SC2139 # Ignore: This expands when defined, not when used
   if ! command 1> /dev/null -v "${1:?}"; then alias "${1:?}"="busybox '${1:?}'"; fi
@@ -1136,6 +1145,11 @@ is_root()
   return 0                                         # Return true
 }
 
+shellhelp()
+{
+  PATH='' \help "${@}"
+}
+
 init_cmdline()
 {
   unset PROMPT_COMMAND PS1 PROMPT A5K_SAVED_TITLE
@@ -1208,13 +1222,15 @@ init_cmdline()
     fi
   fi
 
-  add_to_path_env "${UTILS_DIR:?}"
-  add_to_path_env "${MAIN_DIR:?}"
+  if test "${PLATFORM:?}" = 'win'; then
+    export BB_OVERRIDE_APPLETS='; make'
+  fi
 
   alias 'dir'='ls'
   alias 'cd..'='cd ..'
   alias 'cd.'='cd .'
   alias 'cls'='reset'
+  alias 'clear-prev'="printf '\033[A\33[2K\033[A\33[2K\r'"
 
   if test -f "${MAIN_DIR:?}/includes/custom-aliases.sh"; then
     # shellcheck source=/dev/null
@@ -1223,18 +1239,23 @@ init_cmdline()
 
   alias 'build'='build.sh'
   alias 'cmdline'='cmdline.sh'
-  alias 'clear-prev'="printf '\033[A\33[2K\033[A\33[2K\r'"
   if test "${PLATFORM:?}" = 'win'; then
     alias 'gradlew'='gradlew.bat'
   fi
 
+  alias 'help'='help.sh'
+
+  add_to_path_env "${UTILS_DIR:?}"
+  PATH="%builtin${PATHSEP:?}${PATH-}"
+  add_to_path_env "${MAIN_DIR:?}"
+
   if test -n "${BB_CMD?}"; then
-    alias_cmd_if_missing 'su'
-    alias_cmd_if_missing 'ts'
+    create_bb_alias_if_missing 'su'
+    create_bb_alias_if_missing 'ts'
     if test "${PLATFORM:?}" = 'win'; then
-      alias_cmd_if_missing 'drop'
-      alias_cmd_if_missing 'make'
-      alias_cmd_if_missing 'pdpmake'
+      create_bb_alias_if_missing 'drop'
+      create_bb_alias_if_missing 'make'
+      create_bb_alias_if_not_applet 'pdpmake'
     fi
   fi
 
