@@ -89,7 +89,7 @@ export ftp_proxy="${ftp_proxy-}"
 detect_os_and_other_things()
 {
   if test -n "${PLATFORM-}" && test -n "${IS_BUSYBOX-}" && test -n "${PATHSEP-}"; then
-    readonly PLATFORM IS_BUSYBOX PATHSEP CYGPATH SHELL_CMD
+    readonly PLATFORM IS_BUSYBOX PATHSEP CYGPATH SHELL_CMD SHELL_APPLET
     return 0
   fi
 
@@ -97,7 +97,8 @@ detect_os_and_other_things()
   IS_BUSYBOX='false'
   PATHSEP=':'
   CYGPATH=''
-  SHELL_CMD="${BASH:-${SHELL-}}"
+  SHELL_CMD=''
+  SHELL_APPLET=''
 
   case "${PLATFORM?}" in
     'linux') ;;   # Returned by both Linux and Android, Android will be identified later in the function
@@ -129,27 +130,37 @@ detect_os_and_other_things()
       ;;
   esac
 
-  # Android identify itself as Linux
   if test "${PLATFORM?}" = 'linux'; then
+    # Android identify itself as Linux
     case "$(uname 2> /dev/null -a | tr -- '[:upper:]' '[:lower:]')" in
       *' android'* | *'-lineage-'* | *'-leapdroid-'*) PLATFORM='android' ;;
       *) ;;
     esac
   fi
 
+  if test -n "${__SHELL_EXE-}" && test "${__SHELL_EXE:?}" != 'bash' && SHELL_CMD="${__SHELL_EXE:?}"; then
+    :
+  elif SHELL_CMD="$(readlink 2> /dev/null "/proc/${$}/exe")" && test -n "${SHELL_CMD?}"; then
+    :
+  else
+    SHELL_CMD="${SHELL:?}"
+  fi
+  unset __SHELL_EXE
+
   if test "${PLATFORM:?}" = 'win'; then
     if test "${IS_BUSYBOX:?}" = 'true'; then
       PATHSEP=';'
-      SHELL_CMD=''
-    fi
-
-    if test "${IS_BUSYBOX:?}" = 'false' && PATH="/usr/bin${PATHSEP:?}${PATH-}" command 1> /dev/null -v 'cygpath'; then
-      CYGPATH="$(PATH="/usr/bin${PATHSEP:?}${PATH-}" command -v cygpath)" || ui_error 'Unable to find the path of cygpath'
-      SHELL_CMD="$("${CYGPATH:?}" -m -a -l -- "${SHELL_CMD:?}")" || ui_error 'Unable to convert the path of the shell'
+      SHELL_APPLET="${0:-ash}"
+    else
+      if CYGPATH="$(PATH="/usr/bin${PATHSEP:?}${PATH-}" command -v cygpath)"; then
+        SHELL_CMD="$("${CYGPATH:?}" -m -a -l -- "${SHELL_CMD:?}")" || ui_error 'Unable to convert the path of the shell'
+      else
+        CYGPATH=''
+      fi
     fi
   fi
 
-  readonly PLATFORM IS_BUSYBOX PATHSEP CYGPATH SHELL_CMD
+  readonly PLATFORM IS_BUSYBOX PATHSEP CYGPATH SHELL_CMD SHELL_APPLET
 }
 
 change_title()
@@ -884,7 +895,7 @@ get_32bit_programfiles()
 
   if test -z "${_dir?}"; then
     if test "${IS_BUSYBOX:?}" = 'false'; then
-      _dir="$(env | grep -w -m 1 -e '^ProgramFiles(x86)' | cut -d '=' -f '2-' -s || true)" # On 64-bit Windows (on Bash)
+      _dir="$(env | grep -m 1 -w -i -e '^ProgramFiles(x86)' | cut -d '=' -f '2-' -s || true)" # On 64-bit Windows (on Bash)
     fi
     if test -z "${_dir?}"; then
       _dir="${PROGRAMFILES-}" # On 32-bit Windows
@@ -1117,8 +1128,10 @@ detect_bb_and_id()
   BB_CMD=''
   ID_CMD=''
 
-  if command 1> /dev/null -v 'busybox'; then
-    BB_CMD="$(command -v busybox)" || ui_error 'Unable to get the path of BusyBox'
+  if test "${PLATFORM:?}" = 'win' && test "${IS_BUSYBOX:?}" = 'true' && test -n "${SHELL_CMD?}" && test "${SHELL_CMD:?}" != '/bin/sh'; then
+    BB_CMD="${SHELL_CMD:?}"
+  elif BB_CMD="$(command -v busybox)"; then
+    :
   fi
 
   if test "${PLATFORM:?}" = 'win' && test -n "${BB_CMD?}"; then
@@ -1248,6 +1261,12 @@ init_cmdline()
     alias 'gradlew'='gradlew.bat'
   fi
 
+  # shellcheck disable=SC2139 # It is intended: This expands when defined, not when used
+  {
+    alias 'bits-info'="'${MAIN_DIR:?}/tools/bits-info.sh'"
+    alias 'bits-info.sh'="'${MAIN_DIR:?}/tools/bits-info.sh'"
+  }
+
   alias 'help'='help.sh'
 
   add_to_path_env "${UTILS_DIR:?}"
@@ -1307,7 +1326,7 @@ fi
 
 # Set environment variables
 detect_os_and_other_things
-export PLATFORM IS_BUSYBOX PATHSEP CYGPATH SHELL_CMD
+export PLATFORM IS_BUSYBOX PATHSEP CYGPATH SHELL_CMD SHELL_APPLET
 init_base
 export MAIN_DIR TOOLS_DIR
 init_path
