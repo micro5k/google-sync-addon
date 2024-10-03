@@ -895,7 +895,7 @@ get_32bit_programfiles()
 
   if test -z "${_dir?}"; then
     if test "${IS_BUSYBOX:?}" = 'false'; then
-      _dir="$(env | grep -m 1 -w -i -e '^ProgramFiles(x86)' | cut -d '=' -f '2-' -s || true)" # On 64-bit Windows (on Bash)
+      _dir="$(env | grep -m 1 -i -e '^ProgramFiles(x86)=' | cut -d '=' -f '2-' -s || true)" # On 64-bit Windows (on Bash)
     fi
     if test -z "${_dir?}"; then
       _dir="${PROGRAMFILES-}" # On 32-bit Windows
@@ -1197,7 +1197,6 @@ init_cmdline()
 
   # Clean useless directories from the $PATH env
   if test "${PLATFORM?}" = 'win'; then
-    remove_from_path_env "${SYSTEMDRIVE-}/Windows/System32/Wbem"
     remove_from_path_env "${LOCALAPPDATA-}/Microsoft/WindowsApps"
   fi
 
@@ -1261,17 +1260,13 @@ init_cmdline()
     alias 'gradlew'='gradlew.bat'
   fi
 
-  # shellcheck disable=SC2139 # It is intended: This expands when defined, not when used
-  {
-    alias 'bits-info'="'${MAIN_DIR:?}/tools/bits-info.sh'"
-    alias 'bits-info.sh'="'${MAIN_DIR:?}/tools/bits-info.sh'"
-  }
-
+  alias 'bits-info'="bits-info.sh"
   alias 'help'='help.sh'
 
   add_to_path_env "${UTILS_DIR:?}"
-  PATH="%builtin${PATHSEP:?}${PATH-}"
   add_to_path_env "${MAIN_DIR:?}"
+  PATH="%builtin${PATHSEP:?}${PATH-}"
+  add_to_path_env "${MAIN_DIR:?}/tools"
 
   if test -n "${BB_CMD?}"; then
     create_bb_alias_if_missing 'su'
