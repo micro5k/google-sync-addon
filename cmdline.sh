@@ -7,46 +7,88 @@
 if test "${A5K_FUNCTIONS_INCLUDED:-false}" = 'false'; then
   main()
   {
-    local _newline _main_dir
+    local _main_dir _shell_info_line _is_busybox _newline
+
+    _newline='
+'
 
     # Execute only if the first initialization has not already been done
     if test -z "${MAIN_DIR-}" || test -z "${USER_HOME-}"; then
 
-      if test -d '/usr/bin'; then PATH="/usr/bin:${PATH:-/usr/bin}"; fi
+      # Avoid picturesque bugs on Bash under Windows
+      if test -e '/usr/bin/uname' && test "$(/usr/bin/uname 2> /dev/null -o || :)" = 'Msys'; then PATH="/usr/bin:${PATH:-/usr/bin}"; fi
 
       if test -z "${MAIN_DIR-}"; then
-        # shellcheck disable=SC3028 # Ignore: In POSIX sh, BASH_SOURCE is undefined.
-        if test -n "${BASH_SOURCE-}" && MAIN_DIR="$(dirname "${BASH_SOURCE:?}")" && MAIN_DIR="$(realpath "${MAIN_DIR:?}")"; then
+        # shellcheck disable=SC3028,SC2128 # Intended: In POSIX sh, BASH_SOURCE is undefined / Expanding an array without an index only gives the first element
+        if MAIN_DIR="${BASH_SOURCE-}" && test -n "${MAIN_DIR}"; then
+          :
+        elif printf '%s\n' "${0-}" | grep -q -m 1 -- 'cmdline.sh$' && MAIN_DIR="${0}"; then
+          :
+        else MAIN_DIR=''; fi
+
+        if test -n "${MAIN_DIR}" && MAIN_DIR="$(dirname "${MAIN_DIR}")" && MAIN_DIR="$(realpath "${MAIN_DIR}")"; then
           export MAIN_DIR
-        else
-          unset MAIN_DIR
-        fi
+        else unset MAIN_DIR; fi
       fi
 
       if test -n "${MAIN_DIR-}" && test -z "${USER_HOME-}"; then
         if test "${TERM_PROGRAM-}" = 'mintty'; then unset TERM_PROGRAM; fi
         export USER_HOME="${HOME-}"
-        export HOME="${MAIN_DIR:?}"
+        export HOME="${MAIN_DIR}"
       fi
 
     fi
+
+    get_shell_exe()
+    {
+      local _gse_shell_exe _gse_tmp_var
+
+      if _gse_shell_exe="$(readlink 2> /dev/null "/proc/${$}/exe")" && test -n "${_gse_shell_exe}"; then
+        # On Linux / Android / Windows (on Windows only some shells support it)
+        :
+      elif _gse_tmp_var="$(ps 2> /dev/null -p "${$}" -o 'comm=')" && test -n "${_gse_tmp_var}" && _gse_tmp_var="$(command 2> /dev/null -v "${_gse_tmp_var}")"; then
+        # On Linux / macOS
+        # shellcheck disable=SC2230 # Ignore: 'which' is non-standard
+        test "${_gse_tmp_var}" != 'osh' || _gse_tmp_var="$(which 2> /dev/null "${_gse_tmp_var}")" || return 3 # We may not get the full path with "command -v" on osh
+        _gse_shell_exe="$(readlink 2> /dev/null -f "${_gse_tmp_var}" || realpath 2> /dev/null "${_gse_tmp_var}")" || _gse_shell_exe="${_gse_tmp_var}"
+      elif _gse_tmp_var="${BASH:-${SHELL-}}" && test -n "${_gse_tmp_var}"; then
+        if test ! -e "${_gse_tmp_var}" && test -e "${_gse_tmp_var}.exe"; then _gse_tmp_var="${_gse_tmp_var}.exe"; fi # Special fix for broken versions of Bash under Windows
+        _gse_shell_exe="$(readlink 2> /dev/null -f "${_gse_tmp_var}" || realpath 2> /dev/null "${_gse_tmp_var}")" || _gse_shell_exe="${_gse_tmp_var}"
+        _gse_shell_exe="$(command 2> /dev/null -v "${_gse_shell_exe}")" || return 2
+      else
+        return 1
+      fi
+
+      printf '%s\n' "${_gse_shell_exe}"
+    }
+
+    __SHELL_EXE="$(get_shell_exe)" || __SHELL_EXE='bash'
+    export __SHELL_EXE
+
+    _shell_info_line="$("${__SHELL_EXE}" 2>&1 --help | head -n 1 || :)"
+    _is_busybox='false'
+    case "${_shell_info_line}" in
+      *'BusyBox'*) _is_busybox='true' ;;
+      *) ;;
+    esac
 
     export DO_INIT_CMDLINE=1
     unset STARTED_FROM_BATCH_FILE
     unset IS_PATH_INITIALIZED
     unset __QUOTED_PARAMS
 
-    if test -n "${MAIN_DIR-}"; then _main_dir="${MAIN_DIR:?}"; else _main_dir='.'; fi
+    if test -n "${MAIN_DIR-}"; then _main_dir="${MAIN_DIR}"; else _main_dir='.'; fi
 
-    if test "${PLATFORM-}" = 'win' && test "${IS_BUSYBOX-}" = 'true'; then
-      exec ash -s -c ". '${_main_dir:?}/includes/common.sh' || exit \${?}" 'ash' "${@}"
+    if test "${ONLY_FOR_TESTING-}" = 'true'; then
+      printf '%s\n' "${__SHELL_EXE}"
+      printf '%s\n' "${_main_dir}"
+      exec "${__SHELL_EXE}" -c ". '${_main_dir}/includes/common.sh' || exit \${?}" "${__SHELL_EXE}" "${@}"
+    elif test "${_is_busybox}" = 'true'; then
+      exec ash -s -c ". '${_main_dir}/includes/common.sh' || exit \${?}" 'ash' "${@}"
     else
       if test "${#}" -gt 0; then
-        _newline='
-'
-
         case "${*}" in
-          *"${_newline:?}"*)
+          *"${_newline}"*)
             printf 'WARNING: Newline character found, parameters dropped\n'
             ;;
           *)
@@ -56,14 +98,7 @@ if test "${A5K_FUNCTIONS_INCLUDED:-false}" = 'false'; then
         esac
       fi
 
-      if __SHELL_EXE="$(readlink 2> /dev/null "/proc/${$}/exe")" && test -n "${__SHELL_EXE?}"; then
-        :
-      else
-        __SHELL_EXE="${SHELL:-bash}"
-      fi
-      export __SHELL_EXE
-
-      exec "${__SHELL_EXE:?}" --init-file "${_main_dir:?}/includes/common.sh"
+      exec "${__SHELL_EXE}" --init-file "${_main_dir}/includes/common.sh"
     fi
   }
 
