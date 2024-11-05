@@ -1107,6 +1107,83 @@ _is_free_space_error()
   return 1 # NOT found
 }
 
+get_disk_space_usage_of_file_or_folder()
+{
+  local _result
+
+  if _result="$(du 2> /dev/null -s -B 1 -- "${1:?}" | cut -f 1 -s)" && test -n "${_result?}"; then
+    printf '%u\n' "${_result:?}"
+  elif _result="$(du -s -k -- "${1:?}" | cut -f 1 -s)" && test -n "${_result?}"; then
+    printf '%u\n' "$((_result * 1024))"
+  else
+    printf '%d\n' '-1'
+    return 1
+  fi
+}
+
+convert_bytes_to_mb()
+{
+  awk -v n="${1:?}" -- 'BEGIN{printf "%.2f\n", n/1048576.0}'
+}
+
+convert_bytes_to_human_readable_format()
+{
+  local _skip_tb='false'
+  local _fallback_to_gb='false'
+
+  case "${1:?}" in
+    *[!0-9]*)
+      printf '%s\n' 'invalid number'
+      return 1
+      ;;
+    *) ;;
+  esac
+
+  # In old shells the number 1099511627776 will overflow, so we check if it has overflowed before doing the real check
+  if ! test 2> /dev/null 1099511627776 -gt 0; then
+    _skip_tb='true'
+    if awk -v n="${1:?}" -- 'BEGIN { if ( n < 1073741824 ) exit 1 }'; then _fallback_to_gb='true'; fi
+  fi
+
+  if test "${_skip_tb:?}" = 'false' && test "${1:?}" -ge 1099511627776; then
+    awk -v n="${1:?}" -- 'BEGIN{printf "%.2f TB\n", n/1099511627776.0}'
+  elif test "${_fallback_to_gb:?}" = 'true' || test "${1:?}" -ge 1073741824; then
+    awk -v n="${1:?}" -- 'BEGIN{printf "%.2f GB\n", n/1073741824.0}'
+  elif test "${1:?}" -ge 1048576; then
+    awk -v n="${1:?}" -- 'BEGIN{printf "%.2f MB\n", n/1048576.0}'
+  elif test "${1:?}" -ge 1024; then
+    awk -v n="${1:?}" -- 'BEGIN{printf "%.2f KB\n", n/1024.0}'
+  elif test "${1:?}" -eq 1; then
+    printf '%u byte\n' "${1:?}"
+  elif test "${1:?}" -ge 0; then
+    printf '%u bytes\n' "${1:?}"
+  else
+    printf '%s\n' 'invalid number'
+    return 1
+  fi
+}
+
+verify_disk_space()
+{
+  local _needed_space_bytes _free_space_bytes
+
+  _needed_space_bytes="$(get_disk_space_usage_of_file_or_folder "${TMP_PATH:?}/files")" || _needed_space_bytes='-1'
+  _free_space_bytes="$(($(stat -f -c '%f * %S' -- "${1:?}")))" || _free_space_bytes='-1'
+
+  ui_msg "Disk space required: $(convert_bytes_to_mb "${_needed_space_bytes:?}" || true) MB"
+  ui_msg "Free disk space: $(convert_bytes_to_mb "${_free_space_bytes:?}" || true) MB ($(convert_bytes_to_human_readable_format "${_free_space_bytes:?}" || true))"
+
+  if test "${_needed_space_bytes:?}" -lt 0 || test "${_free_space_bytes:?}" -lt 0; then
+    ui_msg_empty_line
+    ui_warning "Unable to verify needed space, continuing anyway"
+    return 0
+  fi
+
+  if test "${_needed_space_bytes:?}" -ge "${_free_space_bytes:?}"; then return 1; fi
+
+  return 0
+}
+
 perform_secure_copy_to_device()
 {
   if test ! -e "${TMP_PATH:?}/files/${1:?}"; then return 0; fi
@@ -1148,7 +1225,12 @@ perform_secure_copy_to_device()
 perform_installation()
 {
   ui_msg_empty_line
-  ui_msg "Disk space required: $(du -s -h -- "${TMP_PATH:?}/files" | cut -f 1 -s || true)"
+
+  if ! verify_disk_space "${SYS_PATH:?}"; then
+    ui_msg_empty_line
+    ui_warning "There is NOT enough free space available, but let's try anyway"
+  fi
+
   ui_msg_empty_line
 
   ui_msg 'Installing...'
@@ -2548,7 +2630,7 @@ parse_busybox_version()
 
 numerically_comparable_version()
 {
-  echo "${@}" | awk -F. '{ printf("%d%03d%03d%03d\n", $1, $2, $3, $4); }'
+  echo "${@}" | awk -F. '{ printf("%u%03u%03u%03u\n", $1, $2, $3, $4); }'
 }
 
 remove_ext()

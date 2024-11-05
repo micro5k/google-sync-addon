@@ -23,36 +23,228 @@ jobs:
   base:
     strategy:
       matrix:
-        os:
-          - ubuntu-latest
-          - windows-latest
-          - macos-latest
-          - macos-13
+        os: [ubuntu-latest, windows-latest, macos-latest, macos-13]
+      fail-fast: false
     name: "${{ matrix.os }}"
     runs-on: "${{ matrix.os }}"
+    env:
+      cache-key: "shells"
+
+    permissions:
+      actions: write # Needed to delete a cache
 
     steps:
       - name: "Checkout sources"
         uses: actions/checkout@v4
-      - name: "Test scripts on Bash"
+      - name: "Prepare cache"
+        id: cache-action
+        if: "${{ runner.os == 'Linux' }}"
+        uses: actions/cache@v4
+        with:
+          path: "cache/shells"
+          key: "${{ runner.os }}-${{ env.cache-key }}"
+      - name: "Prepare shells"
+        id: prepare-shells
+        if: "${{ steps.cache-action.outcome != 'skipped' }}"
         shell: bash
         run: |
-          # Testing scripts on Bash...
-          bash --version | head -n 1
+          # Preparing shells...
+          CACHE_IS_OUTDATED='false'
           # shellcheck disable=SC2016 # Intended: Expressions don't expand in single quotes
-          readonly workspace_dir='${{ github.workspace }}'
-          export ONLY_FOR_TESTING='true'
-          for _script in 'tools/bits-info.sh' 'cmdline.sh'; do
-            printf '\nSCRIPT "%s":\n\n' "${_script}"
-            bash "${workspace_dir}/${_script}"
-            printf '\nRETURN CODE:%s\n' "${?}"
-          done
-      - name: "Test script on Oils (only under macOS-latest)"
-        if: "${{ matrix.os == 'macos-latest' }}"
+          {
+            readonly current_os='${{ runner.os }}'
+            readonly shells_dir='${{ github.workspace }}/cache/shells'
+          }
+          prepare_shell()
+          {
+            if test ! -s "${shells_dir:?}/${1:?}.${2:?}"; then
+              printf '%s\n' "Downloading '${1?}'..."
+              if wget -q -O "${shells_dir:?}/${1:?}.${2:?}" -- "${3:?}" && test -s "${shells_dir:?}/${1:?}.${2:?}"; then
+                : # OK
+              else
+                rm -f -- "${shells_dir:?}/${1:?}.${2:?}" || :
+                return 1
+              fi
+              CACHE_IS_OUTDATED='true'
+            fi
+            mkdir -p -- "${shells_dir:?}/extracted/${1:?}" || return "${?}"
+            if test "${2:?}" = 'bin'; then
+              cp -f -p -- "${shells_dir:?}/${1:?}.${2:?}" "${shells_dir:?}/extracted/${1:?}/${1:?}" || return "${?}"
+              chmod +x -- "${shells_dir:?}/extracted/${1:?}/${1:?}" || return "${?}"
+            else
+              tar -x -f "${shells_dir:?}/${1:?}.${2:?}" -C "${shells_dir:?}/extracted/${1:?}" || return "${?}"
+            fi
+            printf '%s\n' "${shells_dir:?}/extracted/${1:?}" 1>> "${shells_dir:?}/extracted/list.dat" || return "${?}"
+          }
+          if command 1> /dev/null -v 'sudo' && legacy_bb="$(command -v 'busybox')" && legacy_bb_dir="$(dirname "${legacy_bb:?}")"; then
+            sudo mv -f -- "${legacy_bb:?}" "${legacy_bb_dir:?}/busybox-preinstalled" || exit "${?}"
+          fi
+          mkdir -p -- "${shells_dir:?}/extracted" || exit "${?}"
+          rm -f -- "${shells_dir:?}/extracted/list.dat" || exit "${?}"
+          touch -- "${shells_dir:?}/extracted/list.dat" || exit "${?}"
+          if test "${current_os:?}" = 'Linux'; then
+            prepare_shell 'busybox' 'bin' 'https://busybox.net/downloads/binaries/1.35.0-x86_64-linux-musl/busybox'
+            prepare_shell 'busybox-x86' 'bin' 'https://busybox.net/downloads/binaries/1.35.0-i686-linux-musl/busybox'
+            prepare_shell 'busybox-x86-legacy' 'bin' 'https://busybox.net/downloads/binaries/1.30.0-i686/busybox'
+            prepare_shell 'bosh' 'tar.xz' 'http://fuz.su/pub/schilytools/bin/schily-2024-03-21-x86_64-linux-gcc.tar.xz'
+          fi
+          printf 'cache_is_outdated=%s\n' "${CACHE_IS_OUTDATED:?}" >> "${GITHUB_OUTPUT:?}"
+      - name: "Delete outdated cache"
+        if: "${{ steps.cache-action.outputs.cache-hit && steps.prepare-shells.outputs.cache_is_outdated == 'true' }}"
         shell: bash
         run: |
-          # Testing script...
-          brew 1> /dev/null install --quiet oils-for-unix
-          osh --version | head -n 1
-          printf '\n%s\n\n' 'bits-info.sh:'
-          osh '${{ github.workspace }}/tools/bits-info.sh'
+          # Deleting outdated cache...
+          gh extension install 'actions/gh-actions-cache' || exit "${?}"
+          gh actions-cache delete '${{ runner.os }}-${{ env.cache-key }}' --confirm || exit "${?}"
+          printf '%s\n' 'Cache deleted.'
+        env:
+          GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+      - name: "Test scripts"
+        shell: bash
+        run: |
+          # Testing scripts...
+          EXIT_CODE='0'
+          SH_IS_BASH='false'
+          ORIGINAL_KSH="$(command -v 'ksh' || :)"
+          # shellcheck disable=SC2016 # Intended: Expressions don't expand in single quotes
+          {
+            readonly current_os='${{ runner.os }}'
+            readonly workspace_dir='${{ github.workspace }}'
+            readonly shells_dir='${{ github.workspace }}/cache/shells'
+          }
+          if test -f "${shells_dir:?}/extracted/list.dat" && dl_shells="$(tr -- '\n' ':' 0< "${shells_dir:?}/extracted/list.dat")" && dl_shells="${dl_shells%':'}" && test -n "${dl_shells?}"; then
+            PATH="${PATH:-/usr/bin}:${dl_shells:?}" || exit "${?}"
+          fi
+          if test "${current_os:?}" = 'Linux'; then PATH="${PATH:-/usr/bin}:${workspace_dir:?}/cache/shells/extracted/bosh/opt/schily/bin" || exit "${?}"; fi
+          if diff 1> /dev/null 2>&1 -- "$(command -v 'sh' || :)" "$(command -v 'bash' || :)"; then SH_IS_BASH='true'; fi
+          if test "${current_os:?}" = 'Linux'; then
+            sudo apt-get -y -qq install 'mksh' 'yash' 'posh' 1> /dev/null
+          elif test "${current_os:?}" = 'macOS'; then
+            brew 1> /dev/null install --quiet 'mksh' 'oksh' 'ksh93' 'yash'
+            brew 1> /dev/null install --quiet 'oils-for-unix'
+          else
+            choco 1> /dev/null install 'busybox' -y --no-progress
+            #choco install 'schily-cdrtools' --pre -y --no-progress
+          fi
+          #
+          resolve_base()
+          {
+            local _rb_shell
+            _rb_shell="$(command -v "${1:?}")" || return "${?}"
+            _rb_shell="$(realpath "${_rb_shell:?}")" || return "${?}"
+            basename "${_rb_shell:?}" || return "${?}"
+          }
+          not_already_excuted()
+          {
+            local _shell
+            _shell="$(realpath "${1:?}")" || return 2
+            case "${EXECUTED_LIST?}|" in
+              *"|${_shell:?} ${2?}|"*) return 1 ;; # Already executed
+              *) ;;
+            esac
+            EXECUTED_LIST="${EXECUTED_LIST?}|${_shell:?} ${2?}"
+            return 0 # NOT already executed
+          }
+          skip()
+          {
+            local _s_shell
+            _s_shell=''
+            if test "${SH_IS_BASH:?}" = 'true'; then 
+              case "${2:?}" in
+                bash) return 0 ;;      # Skip
+                sh) _s_shell='bash' ;; # Evaluate as bash
+                *) ;;
+              esac
+            fi
+            if test -n "${_s_shell?}"; then
+              :
+            elif test "${2:?}" = 'osh' || test "${2:?}" = 'bosh'; then
+              _s_shell="${2:?}"
+            else
+              _s_shell="$(resolve_base "${2:?}")" || _s_shell="${2:?}"
+            fi
+            if test "${1:?}" = 'cmdline.sh'; then
+              case "${_s_shell?}" in
+                'obosh') return 0 ;;                                       # Skip
+                'busybox'*) if test "${3?}" = 'hush'; then return 0; fi ;; # Skip if hush
+                *) ;;
+              esac
+            else
+              case "${_s_shell?}" in
+                'osh') return 0 ;; # Skip until is fixed
+                'obosh') return 0 ;; # Skip
+                *) ;;
+              esac
+            fi
+            return 1 # Execute
+          }
+          set_applet()
+          {
+            case "${1:?}" in
+              'busybox'*)
+                if test "${CURRENT_SHELL:-none}" != "${2:?}"; then
+                  CURRENT_APPLET=''
+                  CURRENT_SHELL="${2:?}"
+                fi
+                case "${CURRENT_APPLET?}" in
+                  ash) CURRENT_APPLET='hush' ;;
+                  *) CURRENT_APPLET='ash' ;;
+                esac
+                ;;
+              'osh' | 'ysh')
+                CURRENT_APPLET="${1:?}"
+                CURRENT_SHELL="${2:?}"
+                ;;
+              *)
+                CURRENT_APPLET=''
+                CURRENT_SHELL=''
+                ;;
+            esac
+          }
+          test_on_all_shells()
+          {
+            local _shell _shell_cmd _status
+            EXECUTED_LIST=''
+            for _shell in sh dash bash busybox busybox-x86 busybox-x86 busybox-x86-legacy busybox-x86-legacy ash hush mksh pdksh oksh ksh88 ksh93 ksh zsh yash posh osh bosh pbosh obosh; do
+              if test "${_shell:?}" = 'ksh' && test -n "${ORIGINAL_KSH?}"; then _shell="${ORIGINAL_KSH:?}"; fi
+              if ! _shell_cmd="$(command -v "${_shell:?}")"; then continue; fi
+              set_applet "${_shell:?}" "${_shell_cmd:?}"
+              if skip "${1:?}" "${_shell:?}" "${CURRENT_APPLET?}" || ! not_already_excuted "${_shell_cmd:?}" "${CURRENT_APPLET?}"; then continue; fi
+              printf 'SHELL: %s - SCRIPT: %s\n\n' "${_shell_cmd:?}" "${1:?}"
+              _status='0'
+              case "${_shell:?}" in
+                'busybox'*) "${_shell_cmd:?}" "${CURRENT_APPLET:?}" "${workspace_dir:?}/${1:?}" ${2-} || _status="${?}" ;;
+                *) "${_shell_cmd:?}" "${workspace_dir:?}/${1:?}" ${2-} || _status="${?}" ;;
+              esac
+              test "${_status:?}" = 0 || EXIT_CODE="${_status:?}"
+              printf '\nRETURN CODE: %s\n\n' "${_status:?}"
+            done
+            unset EXECUTED_LIST CURRENT_SHELL CURRENT_APPLET
+          }
+          list_scripts()
+          {
+            printf '%s|%s\n' 'tools/bits-info.sh' '-i'
+            printf '%s\n' 'cmdline.sh'
+          }
+          main()
+          {
+            local backup_ifs _script
+            export ONLY_FOR_TESTING='true'
+            backup_ifs="${IFS-}"
+            IFS=$'\n'
+            set -- $(list_scripts) || exit "${?}"
+            IFS="${backup_ifs}"
+            for _script in "${@}"; do
+              test_on_all_shells "$(printf '%s\n' "${_script:?}" | cut -d '|' -f '1' || :)" "$(printf '%s\n' "${_script:?}" | cut -d '|' -f '2-' -s || :)"
+              printf '%s\n' "---"
+            done
+          }
+          main
+          exit "${EXIT_CODE:?}"
+      - name: "Clean extracted files"
+        if: "${{ always() && steps.cache-action.outcome != 'skipped' }}"
+        shell: bash
+        run: |
+          # Cleaning extracted files...
+          readonly shells_dir='${{ github.workspace }}/cache/shells'
+          rm -f -r -- "${shells_dir:?}/extracted" || exit $?

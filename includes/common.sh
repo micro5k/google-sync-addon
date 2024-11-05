@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/env sh
 
 # SPDX-FileCopyrightText: (c) 2016 ale5000
 # SPDX-License-Identifier: GPL-3.0-or-later
@@ -34,10 +34,10 @@ pause_if_needed()
 {
   # shellcheck disable=SC3028 # In POSIX sh, SHLVL is undefined
   if test "${NO_PAUSE:-0}" = '0' && test "${CI:-false}" = 'false' && test "${TERM_PROGRAM-}" != 'vscode' && test "${SHLVL:-1}" = '1' && test -t 0 && test -t 1 && test -t 2; then
-    printf 1>&2 '\n\033[1;32m%s\033[0m' 'Press any key to exit...' || true
+    printf 1>&2 '\n\033[1;32m%s\033[0m' 'Press any key to exit...' || :
     # shellcheck disable=SC3045
-    IFS='' read 1>&2 -r -s -n 1 _ || true
-    printf 1>&2 '\n' || true
+    IFS='' read 1> /dev/null 2>&1 -r -s -n 1 _ || IFS='' read 1>&2 -r _ || :
+    printf 1>&2 '\n' || :
   fi
 }
 
@@ -92,21 +92,22 @@ get_shell_exe()
 
   if _gse_shell_exe="$(readlink 2> /dev/null "/proc/${$}/exe")" && test -n "${_gse_shell_exe}"; then
     # On Linux / Android / Windows (on Windows only some shells support it)
-    :
+    printf '%s\n' "${_gse_shell_exe}"
+    return 0
   elif _gse_tmp_var="$(ps 2> /dev/null -p "${$}" -o 'comm=')" && test -n "${_gse_tmp_var}" && _gse_tmp_var="$(command 2> /dev/null -v "${_gse_tmp_var}")"; then
     # On Linux / macOS
     # shellcheck disable=SC2230 # Ignore: 'which' is non-standard
-    test "${_gse_tmp_var}" != 'osh' || _gse_tmp_var="$(which 2> /dev/null "${_gse_tmp_var}")" || return 3 # We may not get the full path with "command -v" on osh
-    _gse_shell_exe="$(readlink 2> /dev/null -f "${_gse_tmp_var}" || realpath 2> /dev/null "${_gse_tmp_var}")" || _gse_shell_exe="${_gse_tmp_var}"
+    case "${_gse_tmp_var}" in *'/'* | *"\\"*) ;; *) _gse_tmp_var="$(which 2> /dev/null "${_gse_tmp_var}")" || return 3 ;; esac # We may not get the full path with "command -v" on osh
   elif _gse_tmp_var="${BASH:-${SHELL-}}" && test -n "${_gse_tmp_var}"; then
+    if test "${_gse_tmp_var}" = '/bin/sh' && test "$(uname 2> /dev/null || :)" = 'Windows_NT'; then _gse_tmp_var="$(command 2> /dev/null -v 'busybox')" || return 2; fi
     if test ! -e "${_gse_tmp_var}" && test -e "${_gse_tmp_var}.exe"; then _gse_tmp_var="${_gse_tmp_var}.exe"; fi # Special fix for broken versions of Bash under Windows
-    _gse_shell_exe="$(readlink 2> /dev/null -f "${_gse_tmp_var}" || realpath 2> /dev/null "${_gse_tmp_var}")" || _gse_shell_exe="${_gse_tmp_var}"
-    _gse_shell_exe="$(command 2> /dev/null -v "${_gse_shell_exe}")" || return 2
   else
     return 1
   fi
 
+  _gse_shell_exe="$(readlink 2> /dev/null -f "${_gse_tmp_var}" || realpath 2> /dev/null "${_gse_tmp_var}")" || _gse_shell_exe="${_gse_tmp_var}"
   printf '%s\n' "${_gse_shell_exe}"
+  return 0
 }
 
 detect_os_and_other_things()
@@ -174,7 +175,6 @@ detect_os_and_other_things()
     if test "${IS_BUSYBOX:?}" = 'true'; then
       PATHSEP=';'
       SHELL_APPLET="${0:-ash}"
-      test "${SHELL_EXE:?}" != 'sh' || SHELL_EXE="$(command -v busybox)"
     else
       if CYGPATH="$(PATH="/usr/bin${PATHSEP:?}${PATH-}" command -v cygpath)"; then
         SHELL_EXE="$("${CYGPATH:?}" -m -a -l -- "${SHELL_EXE:?}")" || ui_error 'Unable to convert the path of the shell'
@@ -184,12 +184,12 @@ detect_os_and_other_things()
     fi
   fi
 
-  if test "${SHELL_EXE:?}" = 'sh' || test "${SHELL_EXE:?}" = 'bash'; then ui_error 'Shell executable must have the full path'; fi
+  if test "${SHELL_EXE:?}" = 'bash'; then ui_error 'Shell executable must have the full path'; fi
 
   readonly PLATFORM IS_BUSYBOX PATHSEP CYGPATH SHELL_EXE SHELL_APPLET
 }
 
-change_title()
+set_title()
 {
   test "${NO_TITLE:-0}" = '0' || return 0
   test "${CI:-false}" = 'false' || return 0
@@ -203,9 +203,9 @@ change_title()
 set_default_title()
 {
   if is_root; then
-    change_title "[root] Command-line: ${__TITLE_CMD_PREFIX-}${__TITLE_CMD_0-}${__TITLE_CMD_PARAMS-}"
+    set_title "[root] Command-line: ${__TITLE_CMD_PREFIX-}${__TITLE_CMD_0-}${__TITLE_CMD_PARAMS-}"
   else
-    change_title "Command-line: ${__TITLE_CMD_PREFIX-}${__TITLE_CMD_0-}${__TITLE_CMD_PARAMS-}"
+    set_title "Command-line: ${__TITLE_CMD_PREFIX-}${__TITLE_CMD_0-}${__TITLE_CMD_PARAMS-}"
   fi
   A5K_TITLE_IS_DEFAULT='true'
 }
@@ -224,7 +224,7 @@ restore_saved_title_if_exist()
   if test "${A5K_SAVED_TITLE-}" = 'default'; then
     set_default_title
   elif test -n "${A5K_SAVED_TITLE-}"; then
-    change_title "${A5K_SAVED_TITLE:?}"
+    set_title "${A5K_SAVED_TITLE:?}"
   fi
   A5K_SAVED_TITLE=''
 }
@@ -232,6 +232,7 @@ restore_saved_title_if_exist()
 __update_title_and_ps1()
 {
   local _title
+  # shellcheck disable=SC3028 # Ignore: In POSIX sh, SHLVL is undefined
   _title="Command-line: ${__TITLE_CMD_PREFIX-}$(basename 2> /dev/null "${0:--}" || printf '%s' "${0:--}" || :)$(test "${#}" -eq 0 || printf ' "%s"' "${@}" || :) (${SHLVL-}) - ${MODULE_NAME-}"
   PS1="${__DEFAULT_PS1-}"
 
@@ -278,7 +279,7 @@ _clear_cookies()
 
 _parse_and_store_cookie()
 {
-  local IFS _line_no _cookie_file _elem
+  local IFS _line_no _cookie_file _elem _psc_cookie_name _psc_cookie_val
 
   if test ! -e "${MAIN_DIR:?}/cache/temp/cookies"; then mkdir -p "${MAIN_DIR:?}/cache/temp/cookies" || return "${?}"; fi
 
@@ -291,12 +292,17 @@ _parse_and_store_cookie()
   IFS=';'
   for _elem in ${2:?}; do
     _elem="${_elem# }"
-    IFS='=' read -r name val 0< <(printf '%s\n' "${_elem?}") || return "${?}"
-    if test -n "${name?}"; then
-      if test -e "${_cookie_file:?}" && _line_no="$(grep -n -F -m 1 -e "${name:?}=" -- "${_cookie_file:?}")" && _line_no="$(printf '%s\n' "${_line_no?}" | cut -d ':' -f '1' -s)" && test -n "${_line_no?}"; then
+    _psc_cookie_name="${_elem%%=*}"
+    case "${_elem}" in
+      *'='*) _psc_cookie_val="${_elem#*=}" ;;
+      *) _psc_cookie_val='' ;;
+    esac
+
+    if test -n "${_psc_cookie_name?}"; then
+      if test -e "${_cookie_file:?}" && _line_no="$(grep -n -F -m 1 -e "${_psc_cookie_name:?}=" -- "${_cookie_file:?}")" && _line_no="$(printf '%s\n' "${_line_no?}" | cut -d ':' -f '1' -s)" && test -n "${_line_no?}"; then
         sed -i -e "${_line_no:?}d" -- "${_cookie_file:?}" || return "${?}"
       fi
-      printf '%s\n' "${name:?}=${val?}" >> "${_cookie_file:?}" || return "${?}"
+      printf '%s\n' "${_psc_cookie_name:?}=${_psc_cookie_val?}" 1>> "${_cookie_file:?}" || return "${?}"
     fi
     break
   done || return "${?}"
@@ -362,6 +368,7 @@ _parse_webpage_and_get_url()
 {
   local _url _referrer _search_pattern
   local _domain _cookies _parsed_code _parsed_url _status
+  local _headers_file
 
   _url="${1:?}"
   _referrer="${2?}"
@@ -393,9 +400,14 @@ _parse_webpage_and_get_url()
     ui_debug ''
   fi
 
-  # shellcheck disable=SC2312
+  _headers_file="${MAIN_DIR:?}/cache/temp/headers/${_domain:?}.dat"
+  if test ! -e "${MAIN_DIR:?}/cache/temp/headers"; then mkdir -p "${MAIN_DIR:?}/cache/temp/headers" || return "${?}"; fi
+
   {
-    _parsed_code="$(grep -o -m 1 -e "${_search_pattern:?}")" || _status="${?}"
+    _parsed_code="$("${WGET_CMD:?}" -q -S -O '-' "${@}" -- "${_url:?}")" 2> "${_headers_file:?}" || _status="${?}"
+    _parsed_code="$({
+      printf '%s\n' "${_parsed_code?}" &
+    } | grep -o -m 1 -e "${_search_pattern:?}")" || _status="${?}"
     if test "${_status:?}" -eq 0; then
       _parsed_url="$(printf '%s\n' "${_parsed_code?}" | grep -o -m 1 -e 'href=".*' | cut -d '"' -f '2' | sed 's/\&amp;/\&/g')" || _status="${?}"
       if test "${DL_DEBUG:?}" = 'true'; then
@@ -410,10 +422,13 @@ _parse_webpage_and_get_url()
       fi
       return 1
     fi
-  } 0< <("${WGET_CMD:?}" -q -S -O '-' "${@}" -- "${_url:?}" 2> >(_parse_and_store_all_cookies "${_domain:?}" || {
+  }
+
+  _parse_and_store_all_cookies "${_domain:?}" 0< "${_headers_file:?}" || {
     ui_error_msg "Header parsing failed, error code => ${?}"
     return 2
-  }))
+  }
+  rm -f "${_headers_file:?}" || return "${?}"
 
   printf '%s\n' "${_parsed_url?}"
 }
@@ -896,21 +911,27 @@ dl_list()
   local local_filename local_path dl_hash dl_url dl_mirror
   local _backup_ifs _current_line
 
-  _backup_ifs="${IFS:-}"
-  IFS="${NL:?}"
+  _backup_ifs="${IFS-}"
+  IFS="${NL}"
+  # shellcheck disable=SC2086 # Ignore: Double quote to prevent globbing and word splitting
+  set -- ${1} || ui_error "Failed expanding DL info list inside dl_list()"
+  if test -n "${_backup_ifs}"; then IFS="${_backup_ifs}"; else unset IFS; fi
 
-  # shellcheck disable=SC3040,SC2015 # Ignore: In POSIX sh, set option xxx is undefined. / C may run when A is true.
-  (set 2> /dev/null +o posix) && set +o posix || true
+  for _current_line in "${@}"; do
+    _backup_ifs="${IFS-}"
+    IFS='|'
+    # shellcheck disable=SC2086 # Ignore: Double quote to prevent globbing and word splitting
+    set -- ${_current_line} || ui_error "Failed expanding DL info inside dl_list()"
+    if test -n "${_backup_ifs}"; then IFS="${_backup_ifs}"; else unset IFS; fi
 
-  for _current_line in ${1?}; do
-    IFS='|' read -r local_filename local_path _ _ _ _ dl_hash dl_url dl_mirror _ 0< <(printf '%s\n' "${_current_line:?}") || return "${?}"
+    local_filename="${1}"
+    local_path="${2}"
+    dl_hash="${7}"
+    dl_url="${8}"
+    dl_mirror="${9}"
+
     dl_file "${local_path:?}" "${local_filename:?}.apk" "${dl_hash:?}" "${dl_url:?}" "${dl_mirror?}" || return "${?}"
-  done || return "${?}"
-
-  # shellcheck disable=SC3040,SC2015 # Ignore: In POSIX sh, set option xxx is undefined. / C may run when A is true.
-  (set 2> /dev/null -o posix) && set -o posix || true
-
-  IFS="${_backup_ifs:-}"
+  done
 }
 
 get_32bit_programfiles()
@@ -1154,7 +1175,7 @@ detect_bb_and_id()
   if test "${PLATFORM:?}" = 'win' && test "${IS_BUSYBOX:?}" = 'true' && test -n "${SHELL_EXE?}"; then
     BB_CMD="${SHELL_EXE:?}"
   else
-    BB_CMD="$(command -v busybox)" || BB_CMD=''
+    BB_CMD="$(command 2> /dev/null -v busybox)" || BB_CMD=''
   fi
 
   if test "${PLATFORM:?}" = 'win' && test -n "${BB_CMD?}"; then
@@ -1216,6 +1237,14 @@ init_cmdline()
     HOME="$("${CYGPATH:?}" -u -- "${HOME:?}")" || ui_error 'Unable to convert the home dir'
   fi
 
+  # shellcheck disable=SC3028 # In POSIX sh, SHLVL is undefined
+  if test -n "${KILL_PPID-}" && test -z "${NO_KILL-}" && test "${PLATFORM:?}" = 'win' && test "${SHLVL:-1}" = '1' && test -n "${PPID-}" && test "${PPID}" -gt 1; then
+    if kill 2> /dev/null "${PPID}" || kill -9 "${PPID}"; then
+      PPID='1'
+    fi
+  fi
+  unset KILL_PPID
+
   if test "${PLATFORM:?}" = 'win'; then unset JAVA_HOME; fi
 
   # Clean useless directories from the $PATH env
@@ -1224,9 +1253,8 @@ init_cmdline()
   fi
 
   # Set environment variables
-  UTILS_DIR="${MAIN_DIR:?}/utils"
-  UTILS_DATA_DIR="${UTILS_DIR:?}/data"
-  readonly UTILS_DIR UTILS_DATA_DIR
+  readonly UTILS_DIR="${MAIN_DIR:?}/utils"
+  readonly UTILS_DATA_DIR="${UTILS_DIR:?}/data"
   export UTILS_DIR UTILS_DATA_DIR
 
   # Set the path of Android SDK if not already set
@@ -1254,8 +1282,10 @@ init_cmdline()
     if test -e "${ANDROID_SDK_ROOT:?}/build-tools"; then
       if AAPT2_PATH="$(find "${ANDROID_SDK_ROOT:?}/build-tools" -iname 'aapt2*' | LC_ALL=C sort -V -r | head -n 1)" && test -n "${AAPT2_PATH?}"; then
         export AAPT2_PATH
-        # shellcheck disable=SC2139
-        alias 'aapt2'="'${AAPT2_PATH:?}'"
+        if command 1> /dev/null 2>&1 -v 'alias'; then
+          # shellcheck disable=SC2139
+          alias 'aapt2'="'${AAPT2_PATH:?}'"
+        fi
       else
         unset AAPT2_PATH
       fi
@@ -1266,37 +1296,39 @@ init_cmdline()
     export BB_OVERRIDE_APPLETS='; make'
   fi
 
-  alias 'dir'='ls'
-  alias 'cd..'='cd ..'
-  alias 'cd.'='cd .'
-  if test "${IS_BUSYBOX:?}" = 'true'; then
-    alias 'cls'='reset'
-  else
-    alias 'cls'='clear'
-  fi
-  alias 'clear-prev'="printf '\033[A\33[2K\033[A\33[2K\r'"
+  if command 1> /dev/null 2>&1 -v 'alias'; then
+    alias 'dir'='ls'
+    alias 'cd..'='cd ..'
+    alias 'cd.'='cd .'
+    if test "${IS_BUSYBOX:?}" = 'true'; then
+      alias 'cls'='reset'
+    else
+      alias 'cls'='clear'
+    fi
+    alias 'clear-prev'="printf '\033[A\33[2K\033[A\33[2K\r'"
 
-  if test -f "${MAIN_DIR:?}/includes/custom-aliases.sh"; then
-    # shellcheck source=/dev/null
-    . "${MAIN_DIR:?}/includes/custom-aliases.sh" || ui_error 'Unable to source includes/custom-aliases.sh'
-  fi
+    if test -f "${MAIN_DIR:?}/includes/custom-aliases.sh"; then
+      # shellcheck source=/dev/null
+      . "${MAIN_DIR:?}/includes/custom-aliases.sh" || ui_error 'Unable to source includes/custom-aliases.sh'
+    fi
 
-  alias 'build'='build.sh'
-  alias 'cmdline'='cmdline.sh'
-  if test "${PLATFORM:?}" = 'win'; then
-    alias 'gradlew'='gradlew.bat'
-    alias 'start'='start.sh'
-  fi
+    alias 'build'='build.sh'
+    alias 'cmdline'='cmdline.sh'
+    if test "${PLATFORM:?}" = 'win'; then
+      alias 'gradlew'='gradlew.bat'
+      alias 'start'='start.sh'
+    fi
 
-  alias 'bits-info'="bits-info.sh"
-  alias 'help'='help.sh'
+    alias 'bits-info'="bits-info.sh"
+    alias 'help'='help.sh'
+  fi
 
   add_to_path_env "${UTILS_DIR:?}"
   add_to_path_env "${MAIN_DIR:?}"
   PATH="%builtin${PATHSEP:?}${PATH-}"
   add_to_path_env "${MAIN_DIR:?}/tools"
 
-  if test -n "${BB_CMD?}"; then
+  if test -n "${BB_CMD?}" && command 1> /dev/null 2>&1 -v 'alias'; then
     create_bb_alias_if_missing 'su'
     create_bb_alias_if_missing 'ts'
     if test "${PLATFORM:?}" = 'win'; then
@@ -1337,14 +1369,12 @@ init_cmdline()
 }
 
 if test "${DO_INIT_CMDLINE:-0}" != '0'; then
-  set -u
-  # shellcheck disable=SC3040,SC3041,SC2015 # Ignore: In POSIX sh, set option xxx is undefined. / In POSIX sh, set flag -X is undefined. / C may run when A is true.
-  {
-    # Unsupported set options may cause the shell to exit (even without set -e), so first try them in a subshell to avoid this issue
-    (set 2> /dev/null -o posix) && set -o posix || true
-    (set 2> /dev/null +H) && set +H || true
-    (set 2> /dev/null -o pipefail) && set -o pipefail || true
-  }
+  set -u 2> /dev/null || :
+
+  # shellcheck disable=SC3040 # Ignore: In POSIX sh, set option pipefail is undefined
+  case "$(set 2> /dev/null -o || set || :)" in *'pipefail'*) set -o pipefail || printf 1>&2 '%s\n' 'Failed: pipefail' ;; *) ;; esac
+  # shellcheck disable=SC3041,SC2015 # Ignore: In POSIX sh, set flag -H is undefined
+  (set +H 2> /dev/null) && set +H || :
 fi
 
 # Set environment variables

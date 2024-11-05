@@ -1,43 +1,61 @@
 #!/usr/bin/env sh
-
 # SPDX-FileCopyrightText: (c) 2024 ale5000
 # SPDX-License-Identifier: GPL-3.0-or-later
+
 # shellcheck enable=all
 # shellcheck disable=SC3043 # In POSIX sh, local is undefined
 
+SCRIPT_NAME='Bits info'
+SCRIPT_VERSION='1.5.23'
+
+### CONFIGURATION ###
+
 set -u 2> /dev/null || :
-setopt SH_WORD_SPLIT 2> /dev/null || :
-export POSIXLY_CORRECT='y'
 
-# shellcheck disable=all
-$(set -o pipefail 1> /dev/null 2>&1) && set -o pipefail || :
+# shellcheck disable=SC3040 # Ignore: In POSIX sh, set option pipefail is undefined
+case "$(set 2> /dev/null -o || set || :)" in *'pipefail'*) set -o pipefail || printf 1>&2 '%s\n' 'Failed: pipefail' ;; *) ;; esac
 
-readonly SCRIPT_NAME='Bits info'
-readonly SCRIPT_VERSION='1.0'
-
-readonly NL='
-'
-
-command 1> /dev/null 2>&1 -v 'local' || {
-  \eval ' \local() { :; } ' || : # Create a dummy "local" function for ksh shell
-  alias 'local'='typeset'        # On some versions of ksh this really works, but leave the function as dummy fallback
+# The "obosh" shell does NOT support "command" while the "posh" shell does NOT support "type"
+{
+  command 1> /dev/null -v ':'
+} 2> /dev/null || command()
+{
+  test "${1:-empty}" = '-v' || exit 255
+  shift
+  type "${@}"
 }
+
+# For "zsh" shell
+if command 1> /dev/null 2>&1 -v 'setopt'; then
+  setopt SH_WORD_SPLIT || printf 1>&2 '%s\n' 'Failed: setopt'
+fi
+
+# Workaround for shells without support for local (example: ksh pbosh obosh)
+command 1> /dev/null 2>&1 -v 'local' || {
+  eval ' local() { :; } ' || :
+  # On some variants of ksh this really works, but leave the function as dummy fallback
+  if command 1> /dev/null 2>&1 -v 'typeset'; then alias 'local'='typeset'; fi
+}
+
+### SCRIPT ###
 
 convert_max_signed_int_to_bit()
 {
   # More info: https://www.netmeister.org/blog/epoch.html
 
   case "${1}" in
-    '32767') printf '%s\n' "16-bit" ;;                                                      # Standard 16-bit limit
-    '2147480047') printf '%s\n' "32-bit - 3600" ;;                                          # Standard 32-bit limit - 3600 for timezone diff. on 'date'
-    '2147483647') printf '%s\n' "32-bit" ;;                                                 # Standard 32-bit limit
-    '32535215999') printf '%s\n' "64-bit (with limit: ${1})" ;;                             # 64-bit 'date' limited by the OS (likely under Windows)
-    '32535244799') printf '%s\n' "64-bit (limited by Windows localtime function)" ;;        # 64-bit 'date' limited by the OS (likely on BusyBox under Windows)
-    '67767976233529199') printf '%s\n' "64-bit (limited by tzcode bug - 3600)" ;;           # 64-bit 'date' limited by the OS - 3600 for timezone diff. (likely on Bash under Windows)
-    '67767976233532799') printf '%s\n' "64-bit (limited by tzcode bug)" ;;                  # 64-bit 'date' limited by the OS (likely on Bash under Windows)
-    '67768036191673199') printf '%s\n' "64-bit (limited by 32-bit tm_year of tm - 3600)" ;; # 64-bit 'date' limited by the OS - 3600 for timezone diff. (likely under Linux)
-    '67768036191676799') printf '%s\n' "64-bit (limited by 32-bit tm_year of tm)" ;;        # 64-bit 'date' limited by the OS (likely under Linux)
-    '9223372036854775807') printf '%s\n' "64-bit" ;;                                        # Standard 64-bit limit
+    '32767') printf '%s\n' '16-bit signed' ;;                                                      # Standard 16-bit limit
+    '2147480047') printf '%s\n' '32-bit signed - 3600' ;;                                          # Standard 32-bit limit - 3600 for timezone diff. on 'date'
+    '2147483647') printf '%s\n' '32-bit signed' ;;                                                 # Standard 32-bit limit
+    '32535215999') printf '%s\n' "64-bit signed (with limit: ${1})" ;;                             # 64-bit 'date' limited by the OS (likely under Windows)
+    '32535244799') printf '%s\n' '64-bit signed (limited by Windows localtime function)' ;;        # 64-bit 'date' limited by the OS (likely on BusyBox under Windows)
+    '67767976233529199') printf '%s\n' '64-bit signed (limited by tzcode bug - 3600)' ;;           # 64-bit 'date' limited by the OS - 3600 for timezone diff. (likely on Bash under Windows)
+    '67767976233532799') printf '%s\n' '64-bit signed (limited by tzcode bug)' ;;                  # 64-bit 'date' limited by the OS (likely on Bash under Windows)
+    '67768036191673199') printf '%s\n' '64-bit signed (limited by 32-bit tm_year of tm - 3600)' ;; # 64-bit 'date' limited by the OS - 3600 for timezone diff. (likely under Linux)
+    '67768036191676799') printf '%s\n' '64-bit signed (limited by 32-bit tm_year of tm)' ;;        # 64-bit 'date' limited by the OS (likely under Linux)
+    '9223372036854775807') printf '%s\n' '64-bit signed' ;;                                        # Standard 64-bit limit
+    '170141183460469231731687303715884105727') printf '%s\n' '128-bit signed' ;;
+
     *)
       printf '%s\n' 'unknown'
       return 1
@@ -49,15 +67,74 @@ convert_max_signed_int_to_bit()
 
 convert_max_unsigned_int_to_bit()
 {
+  local bug_suffix
+  bug_suffix=''
+  test "${2:-false}" = 'true' || bug_suffix=' BUG'
+
   case "${1}" in
-    '65535') printf '%s\n' "16-bit" ;;
-    '2147483647') printf '%s\n' "32-bit (with unsigned limit bug)" ;;         # Bugged unsigned 'printf' of awk (seen on some versions of Bash)
-    '2147483648') printf '%s\n' "32-bit (with BusyBox unsigned limit bug)" ;; # Bugged unsigned 'printf' of awk (likely on BusyBox under Windows / Android)
-    '4294967295') printf '%s\n' "32-bit" ;;
-    '18446744073709551615') printf '%s\n' "64-bit" ;;
+    '32767') printf '%s\n' "16-bit signed${bug_suffix}" ;;
+    '65535') printf '%s\n' "16-bit unsigned" ;;
+    '256446000') printf '%s\n' "32-bit BROKEN" ;;
+    '2147483647') printf '%s\n' "32-bit signed${bug_suffix}" ;; # Bugged unsigned 'printf' of awk (seen on some versions of Bash)
+    '2147483648') printf '%s\n' "32-bit signed + 1 BB BUG" ;;   # Bugged unsigned 'printf' of awk (likely on BusyBox)
+    '4294967295') printf '%s\n' "32-bit unsigned" ;;
+    '9223372036854775807') printf '%s\n' "64-bit signed${bug_suffix}" ;;     # Bugged unsigned 'printf' (seen on Ksh93 / Oils)
+    '9223372036854775808') printf '%s\n' "64-bit signed + 1${bug_suffix}" ;; # Bugged unsigned 'printf' (seen on Ksh93)
+    '18446744073709551614') printf '%s\n' "64-bit unsigned - 1" ;;
+    '18446744073709551615') printf '%s\n' "64-bit unsigned" ;;
+    '170141183460469231731687303715884105727') printf '%s\n' "128-bit signed${bug_suffix}" ;;
+    '340282366920938463463374607431768211455') printf '%s\n' "128-bit unsigned" ;;
+
+    'unsupported' | 'ignored')
+      printf '%s\n' "${1}"
+      return 2
+      ;;
     *)
       printf '%s\n' 'unknown'
       return 1
+      ;;
+  esac
+
+  return 0
+}
+
+warn_msg()
+{
+  if test -n "${NO_COLOR-}"; then
+    printf 1>&2 '%s\n' "WARNING: ${1}"
+  elif test "${CI:-false}" = 'false'; then
+    printf 1>&2 '\033[0;33m\r%s\n\033[0m\r    \r' "WARNING: ${1}"
+  else
+    printf 1>&2 '\033[0;33m%s\033[0m\n' "WARNING: ${1}"
+  fi
+}
+
+inc_num()
+{
+  # NOTE: We are going to test integers at (and over) the shell limit so we can NOT use shell arithmetic because it can overflow
+
+  case "${1}" in
+    '-1' | '256446000') return 1 ;;
+    '32767') printf '%s\n' '32768' ;;
+    '65535') printf '%s\n' '65536' ;;
+    '2147480047') printf '%s\n' '2147480048' ;;
+    '2147483647') printf '%s\n' '2147483648' ;;
+    '2147483648') printf '%s\n' '2147483649' ;;
+    '4294967295') printf '%s\n' '4294967296' ;;
+    '32535215999') printf '%s\n' '32535216000' ;;
+    '32535244799') printf '%s\n' '32535244800' ;;
+    '67767976233529199') printf '%s\n' '67767976233529200' ;;
+    '67767976233532799') printf '%s\n' '67767976233532800' ;;
+    '67768036191673199') printf '%s\n' '67768036191673200' ;;
+    '67768036191676799') printf '%s\n' '67768036191676800' ;;
+    '9223372036854775807') printf '%s\n' '9223372036854775808' ;;
+    '9223372036854775808') printf '%s\n' '9223372036854775809' ;;
+    '18446744073709551614') printf '%s\n' '18446744073709551615' ;;
+    '18446744073709551615') printf '%s\n' '18446744073709551616' ;;
+
+    *)
+      warn_msg "Unexpected number => ${1}"
+      return 2
       ;;
   esac
 
@@ -70,8 +147,9 @@ permissively_comparison()
 
   case "${2}" in
     '') return 1 ;;
-    '9223372036854775807') _comp_list="${2} 9223372036854775808" ;;
-    '18446744073709551615') _comp_list="${2} 1.84467e+19" ;;
+    '9223372036854775807') _comp_list="${2} 9223372036854775808 9.22337e+018" ;;
+    '9223372036854775808') _comp_list="${2} 9.22337e+018" ;;
+    '18446744073709551615') _comp_list="${2} 1.84467e+19 1.84467e+019" ;;
     *) _comp_list="${2}" ;;
   esac
 
@@ -84,6 +162,13 @@ permissively_comparison()
   return 1
 }
 
+is_shell_msys()
+{
+  local _uname_os
+
+  test -x '/usr/bin/uname' && _uname_os="$(/usr/bin/uname 2> /dev/null -o)" && test "${_uname_os}" = 'Msys'
+}
+
 file_getprop()
 {
   grep -m 1 -F -e "${1:?}=" -- "${2:?}" | cut -d '=' -f '2-' -s
@@ -93,8 +178,10 @@ detect_hex_dump_cmd()
 {
   if command 1> /dev/null 2>&1 -v 'xxd'; then
     printf '%s\n' 'xxd'
-  elif command 1> /dev/null 2>&1 -v 'hexdump'; then
+  elif command 1> /dev/null 2>&1 -v 'hexdump' && test "$(printf ' ' | hexdump 2> /dev/null -v -e '/1 "%02x"' || :)" = '20'; then
     printf '%s\n' 'hexdump'
+  elif command 1> /dev/null 2>&1 -v 'od'; then
+    printf '%s\n' 'od'
   else
     return 1
   fi
@@ -104,9 +191,11 @@ detect_hex_dump_cmd()
 dump_hex()
 {
   if test "${HEXDUMP_CMD:=$(detect_hex_dump_cmd || :)}" = 'xxd'; then
-    xxd -p -c "${3}" -s "${2}" -l "${3}" -- "${1}"
+    xxd -p -s "${2}" -c "${3}" -l "${3}" -- "${1}"
   elif test "${HEXDUMP_CMD?}" = 'hexdump'; then
     hexdump -v -e '/1 "%02x"' -s "${2}" -n "${3}" -- "${1}" && printf '\n'
+  elif test "${HEXDUMP_CMD?}" = 'od'; then
+    od -v -A 'n' -j "${2}" -N "${3}" -t 'x1' -- "${1}" | tr -d ' \n' && printf '\n'
   else
     return 1
   fi
@@ -138,7 +227,7 @@ hex_bytes_to_int()
 {
   test -n "${1?}" || return 1
 
-  if test "${3-}" = 'true'; then
+  if test "${3:-false}" = 'true'; then
     if test "${2:?}" -eq 2; then
       _hbti_num="$(switch_endianness_2 "${1}")" || return "${?}"
     elif test "${2:?}" -eq 4; then
@@ -159,8 +248,9 @@ hex_bytes_to_int()
 #  $4 Bytes to compare (hex)
 compare_hex_bytes()
 {
-  test "${3}" -gt 0 || return 1
-  test "$(printf '%s' "${1}" | cut -b "$((${2} * 2 + 1))-$(((${2} + ${3}) * 2))" || :)" = "${4}"
+  test "${3}" -gt 0 || return 2
+  set -- "${1}" "$((${2} * 2 + 1))" "$(((${2} + ${3}) * 2))" "${4}" || return 3
+  test "$(printf '%s' "${1}" | cut -b "${2}-${3}" || :)" = "${4}"
 }
 
 # Params:
@@ -169,8 +259,9 @@ compare_hex_bytes()
 #  $3 Length in bytes (int)
 extract_bytes()
 {
-  test "${3}" -gt 0 || return 1
-  printf '%s' "${1}" | cut -b "$((${2} * 2 + 1))-$(((${2} + ${3}) * 2))"
+  test "${3}" -gt 0 || return 2
+  set -- "${1}" "$((${2} * 2 + 1))" "$(((${2} + ${3}) * 2))" || return 3
+  printf '%s' "${1}" | cut -b "${2}-${3}"
 }
 
 # Params:
@@ -180,17 +271,17 @@ extract_bytes()
 #  $4 Need bytes swap (bool)
 extract_bytes_and_swap()
 {
-  test "${3}" -gt 0 || return 1
-  _ebas_bytes="$(printf '%s' "${1}" | cut -b "$((${2} * 2 + 1))-$(((${2} + ${3}) * 2))")" || return 2
+  test "${3}" -gt 0 || return 2
+  set -- "${1}" "$((${2} * 2 + 1))" "$(((${2} + ${3}) * 2))" "${3}" "${4:-false}" || return 3
 
-  if test "${4-}" = 'true'; then
-    if test "${3}" = 4; then
-      switch_endianness_4 "${_ebas_bytes}" || return "${?}"
+  if test "${5}" = 'true'; then
+    if test "${4}" = 4; then
+      switch_endianness_4 "$(printf '%s' "${1}" | cut -b "${2}-${3}" || :)" || return "${?}"
     else
-      return 3
+      return 4
     fi
   else
-    printf '%s' "${_ebas_bytes}"
+    printf '%s' "${1}" | cut -b "${2}-${3}"
   fi
 }
 
@@ -489,6 +580,22 @@ detect_bitness_of_single_file()
   return 2
 }
 
+detect_bitness_of_single_file_caller()
+{
+  local _dbsfc_ret_code _dbsfc_lcall
+
+  _dbsfc_lcall="${LC_ALL-unset}"
+  LC_ALL='C' # We only use bytes and not characters
+  export LC_ALL
+
+  _dbsfc_ret_code=0
+  detect_bitness_of_single_file "${1}" || _dbsfc_ret_code="${?}"
+
+  if test "${_dbsfc_lcall}" = 'unset'; then unset LC_ALL; else LC_ALL="${_dbsfc_lcall}"; fi
+
+  return "${_dbsfc_ret_code}"
+}
+
 detect_bitness_of_files()
 {
   local _dbof_ret_code _dbof_file_list _dbof_filename _dbof_lcall
@@ -497,12 +604,20 @@ detect_bitness_of_files()
   # If the number is greater than 125 then it returns 125.
   _dbof_ret_code=0
 
-  if test "${1-}" = '-' && test "${#}" -eq 1; then
+  if is_shell_msys; then
+    # We must do this in all cases with Bash under Windows using this POSIX layer otherwise we may run into freezes, obscure errors and unknown infinite loops!!!
+    PATH="/usr/bin:${PATH:-%empty}"
+  fi
+
+  # Detect usable utility
+  : "${HEXDUMP_CMD:=$(detect_hex_dump_cmd || :)}"
+
+  if test "${1:-empty}" = '-' && test "${#}" -eq 1; then
 
     (
       _dbof_file_list="$(cat | tr -- '\0' '\n')" || _dbof_file_list=''
 
-      IFS="${NL}"
+      IFS="$(printf '\nx')" IFS="${IFS%x}"
       # shellcheck disable=SC2030 # Intended: Modification of LC_ALL is local (to subshell)
       LC_ALL='C' # We only use bytes and not characters
       export LC_ALL
@@ -525,7 +640,7 @@ detect_bitness_of_files()
   else
 
     # shellcheck disable=SC2031
-    _dbof_lcall="${LC_ALL-}"
+    _dbof_lcall="${LC_ALL-unset}"
     LC_ALL='C' # We only use bytes and not characters
     export LC_ALL
 
@@ -541,7 +656,7 @@ detect_bitness_of_files()
       printf '\nUnidentified files: %s\n' "${_dbof_ret_code}"
     fi
 
-    if test -n "${_dbof_lcall}"; then LC_ALL="${_dbof_lcall}"; else unset LC_ALL; fi
+    if test "${_dbof_lcall}" = 'unset'; then unset LC_ALL; else LC_ALL="${_dbof_lcall}"; fi
 
   fi
 
@@ -555,21 +670,22 @@ get_shell_exe()
 
   if _gse_shell_exe="$(readlink 2> /dev/null "/proc/${$}/exe")" && test -n "${_gse_shell_exe}"; then
     # On Linux / Android / Windows (on Windows only some shells support it)
-    :
+    printf '%s\n' "${_gse_shell_exe}"
+    return 0
   elif _gse_tmp_var="$(ps 2> /dev/null -p "${$}" -o 'comm=')" && test -n "${_gse_tmp_var}" && _gse_tmp_var="$(command 2> /dev/null -v "${_gse_tmp_var}")"; then
     # On Linux / macOS
     # shellcheck disable=SC2230 # Ignore: 'which' is non-standard
-    test "${_gse_tmp_var}" != 'osh' || _gse_tmp_var="$(which 2> /dev/null "${_gse_tmp_var}")" || return 3 # We may not get the full path with "command -v" on osh
-    _gse_shell_exe="$(readlink 2> /dev/null -f "${_gse_tmp_var}" || realpath 2> /dev/null "${_gse_tmp_var}")" || _gse_shell_exe="${_gse_tmp_var}"
+    case "${_gse_tmp_var}" in *'/'* | *"\\"*) ;; *) _gse_tmp_var="$(which 2> /dev/null "${_gse_tmp_var}")" || return 3 ;; esac # We may not get the full path with "command -v" on some old versions of Oils
   elif _gse_tmp_var="${BASH:-${SHELL-}}" && test -n "${_gse_tmp_var}"; then
-    if test ! -e "${_gse_tmp_var}" && test -e "${_gse_tmp_var}.exe"; then _gse_tmp_var="${_gse_tmp_var}.exe"; fi # Special fix for broken versions of Bash under Windows
-    _gse_shell_exe="$(readlink 2> /dev/null -f "${_gse_tmp_var}" || realpath 2> /dev/null "${_gse_tmp_var}")" || _gse_shell_exe="${_gse_tmp_var}"
-    _gse_shell_exe="$(command 2> /dev/null -v "${_gse_shell_exe}")" || return 2
+    if test "${_gse_tmp_var}" = '/bin/sh' && test "$(uname 2> /dev/null || :)" = 'Windows_NT'; then _gse_tmp_var="$(command 2> /dev/null -v 'busybox')" || return 2; fi
+    if test ! -x "${_gse_tmp_var}" && test -x "${_gse_tmp_var}.exe"; then _gse_tmp_var="${_gse_tmp_var}.exe"; fi # Special fix for broken versions of Bash under Windows
   else
     return 1
   fi
 
+  _gse_shell_exe="$(readlink 2> /dev/null -f "${_gse_tmp_var}" || realpath 2> /dev/null "${_gse_tmp_var}")" || _gse_shell_exe="${_gse_tmp_var}"
   printf '%s\n' "${_gse_shell_exe}"
+  return 0
 }
 
 get_shell_info()
@@ -593,14 +709,18 @@ get_shell_info()
   fi
 
   case "${_shell_exe}" in
-    *'/bosh/'*'/sh') _shell_name='bosh' ;;
-    *'/oils-for-unix' | *'/oil.ovm') _shell_name='osh' ;;
+    *'/bosh/'*'/sh' | *'/bosh/sh') _shell_name='bosh' ;;
+    *'/oils-for-unix' | *'/oil.ovm') _shell_name='oils' ;;
     *) ;;
   esac
 
   case "${_shell_name}" in
     *'ksh'*) _shell_is_ksh='true' ;;
-    'zsh' | 'bosh' | 'osh' | 'yash' | 'tcsh' | 'fish') _shell_use_ver_opt='true' ;;
+    'bash' | 'zsh' | 'yash' | 'oils' | 'bosh' | 'pbosh' | 'obosh' | 'tcsh' | 'fish') _shell_use_ver_opt='true' ;;
+    *'\bash') # For bugged versions of Bash under Windows
+      _shell_use_ver_opt='true'
+      _shell_name='bash'
+      ;;
     *) ;;
   esac
 
@@ -618,16 +738,20 @@ get_shell_info()
   case "${_shell_version}" in
     '' | *'Usage'* | *'invalid option'* | *'unrecognized option'* | *[Uu]'nknown option'* | *[Ii]'llegal option'* | *'not an option'* | *'bad option'* | *'command not found'* | *'No such file or directory'*)
       if test "${_shell_is_ksh}" = 'true' && test -n "${KSH_VERSION-}" && _shell_version="${KSH_VERSION}"; then
-        : # Fallback for ksh
+        : # For ksh (include also variants like mksh)
       elif test "${_shell_name}" = 'dash' && test -n "${DASH_VERSION-}" && _shell_version="${DASH_VERSION}"; then
         : # For dash (possibly supported in the future)
       elif test "${_shell_name}" = 'dash' && command 1> /dev/null 2>&1 -v 'dpkg' && _shell_version="$(dpkg -s 'dash' | grep -m 1 -F -e 'Version:' | cut -d ':' -f '2-' -s)" && test -n "${_shell_version}"; then
-        : # For dash
+        : # For dash under Linux
+      elif test "${_shell_name}" = 'dash' && command 1> /dev/null 2>&1 -v 'brew' && _shell_version="$(NO_COLOR=1 brew 2> /dev/null info 'dash' | head -n 1 | grep -m 1 -F -e 'dash:' | cut -d ':' -f '2-' -s | cut -d ',' -f '1')" && test -n "${_shell_version}"; then
+        : # For dash under macOS
+        _shell_version="${_shell_version# }"
+        _shell_version="${_shell_version#stable }"
       elif test "${_shell_name}" = 'dash' && command 1> /dev/null 2>&1 -v 'apt-cache' && _shell_version="$(apt-cache policy 'dash' | grep -m 1 -F -e 'Installed:' | cut -d ':' -f '2-' -s)" && test -n "${_shell_version}"; then
-        : # For dash (it is slow)
+        : # For dash under Linux (it is slow)
       elif test "${_shell_name}" = 'posh' && test -n "${POSH_VERSION-}" && _shell_version="${POSH_VERSION}"; then
-        : # For posh (need test)
-      elif _shell_version="$(\eval 2> /dev/null ' \echo "${.sh.version-}" ' || :)" && test -n "${_shell_version}"; then
+        : # For posh
+      elif _shell_version="$(\eval 2> /dev/null ' echo "${.sh.version}" ' || :)" && test -n "${_shell_version}"; then
         : # Fallback for old ksh and bosh
       elif test -n "${version-}" && _shell_version="${version}"; then
         : # Fallback for tcsh and fish (NOTE: although this variable would show the version unfortunately the code cannot be run on tcsh and fish due to syntax difference)
@@ -638,48 +762,113 @@ get_shell_info()
     *) ;;
   esac
 
-  _shell_version="${_shell_version#[Vv]ersion }"
   case "${_shell_version}" in
     'BusyBox '*) _shell_name='busybox' ;;
-    *' bash,'*) _shell_name='bash' ;; # Sometimes it isn't just a symlink but it is really called "sh" so we have to correct this
-    *)
-      test -z "${_shell_name}" || _shell_version="${_shell_version#"${_shell_name}"}"
-      ;;
-  esac
-
-  case "${_shell_name}" in
-    'busybox') _shell_version="${_shell_version#BusyBox}" ;;
-    'osh') _shell_version="$(printf '%s\n' "${_shell_version}" | cut -f '1')" ;;
+    *' bash,'*) _shell_name='bash' ;; # Sometimes "sh" isn't just a symlink to "bash" but it is really called "sh" so we have to correct this
+    '93u+'* | *' 93u+'*) test "${_shell_name}" != 'ksh' || _shell_name='ksh93' ;;
     *) ;;
   esac
+
+  _shell_version="${_shell_version#*[Vv]ersion }"
+  case "${_shell_name}" in
+    'busybox') _shell_version="${_shell_version#BusyBox}" ;;
+    'mksh') _shell_version="${_shell_version#*MIRBSD KSH}" ;;
+    'pdksh' | 'oksh') _shell_version="${_shell_version#*PD KSH}" ;;
+    'oils') _shell_version="$(printf '%s\n' "${_shell_version#Oils}" | cut -f '1')" ;;
+    '') ;;
+    *) _shell_version="${_shell_version#"${_shell_name}"}" ;;
+  esac
   _shell_version="${_shell_version# }"
+  _shell_version="${_shell_version#v}"
 
   printf '%s %s\n' "${_shell_name:-unknown}" "${_shell_version:-unknown}"
 }
 
+prefer_included_utilities_if_requested()
+{
+  local _piu_applet _piu_pathsep _piu_dir
+  if test "${1}" = 0 || test -z "${2}"; then return 0; fi
+
+  _piu_pathsep=':'
+  if test "${3}" = 'busybox'; then
+    if test "$(uname 2> /dev/null -o || :)" = 'MS/Windows'; then _piu_pathsep=';'; fi
+
+    for _piu_applet in test printf uname awk cut date; do
+      # Check if it does NOT already run the internal applet by default
+      if test "$(command 2> /dev/null -v "${_piu_applet}" || :)" != "${_piu_applet}"; then
+        \eval " ${_piu_applet}() { '${2}' '${_piu_applet}' \"\${@}\"; } " || : # Force internal applet
+      fi
+    done
+  fi
+
+  if _piu_dir="$(dirname "${2}")" && test -n "${_piu_dir}"; then
+    PATH="${_piu_dir}${_piu_pathsep}${PATH:-%empty}"
+    export PATH
+  fi
+}
+
 get_applet_name()
 {
-  local _shell_cmdline _current_applet
+  local _shell_cmdline _gan_applet _gan_backup_ifs _gan_sep
 
   case "${1}" in
-    *'busybox'*)
-      if _shell_cmdline="$(tr 2> /dev/null -- '\0' ' ' 0< "/proc/${$}/cmdline")" && test -n "${_shell_cmdline}"; then
-        for _current_applet in bash ash hush msh lash sh; do
-          if printf '%s\n' "${_shell_cmdline}" | grep -m 1 -q -w -e "${_current_applet}"; then
-            printf '%s\n' "${_current_applet}"
-            return 0
+    'busybox' | 'oils')
+      if test -r "/proc/${$}/cmdline" && _shell_cmdline="$(tr -- '\n\0' ' \n' 0< "/proc/${$}/cmdline")" && test -n "${_shell_cmdline}"; then
+        _gan_sep="$(printf '\nx')" _gan_sep="${_gan_sep%x}"
+
+        _gan_backup_ifs="${IFS-unset}"
+        IFS="${_gan_sep}"
+        # shellcheck disable=SC2086 # Ignore: Double quote to prevent globbing and word splitting
+        set -- ${_shell_cmdline} || set -- || return 126
+        if test "${_gan_backup_ifs}" = 'unset'; then unset IFS; else IFS="${_gan_backup_ifs}"; fi
+      elif _shell_cmdline="$(ps 2> /dev/null -p "${$}" -o 'args=')" && test -n "${_shell_cmdline}"; then
+        set -- "${_shell_cmdline}" || set -- || return 126
+      else
+        set -- || return 126
+      fi
+
+      # We cover two cases:
+      # - /bin/busybox ash
+      # - /bin/ash
+
+      if test "${#}" -gt 0; then
+        for _gan_applet in bash lash msh hush ash osh ysh oil sh; do
+          if test "${2:-empty}" = "${_gan_applet}"; then
+            : # Found
+          else
+            case "${1:-empty}" in
+              *"/${_gan_applet}"* | *" ${_gan_applet}"*) ;; # Found
+              *) continue ;;                                # Not found yet
+            esac
           fi
+
+          printf '%s\n' "${_gan_applet}"
+          return 0
         done
       fi
       ;;
     *)
-      printf '%s\n' 'not-busybox'
-      return 1
+      return 2 # NOT an applet
       ;;
   esac
 
   printf '%s\n' 'unknown'
-  return 2
+  return 0
+}
+
+retrieve_bitness_from_uname()
+{
+  # IMPORTANT: Typically it should return the bitness of the OS, but in some cases it just returns the bitness of the shell (use it only as last resort)
+
+  case "$(uname 2> /dev/null -m || :)" in
+    x86_64 | ia64 | arm64 | aarch64 | mips64) printf '%s\n' '64-bit' ;;
+    x86 | i686 | i586 | i486 | i386 | armv7* | mips) printf '%s\n' '32-bit' ;;
+    *)
+      printf '%s\n' 'unknown'
+      return 1
+      ;;
+  esac
+  return 0
 }
 
 get_os_info()
@@ -725,15 +914,26 @@ get_version()
     return 1
   fi
 
-  # NOTE: "date --help" and "awk --help" of BusyBox may return failure but still print the correct output although it may be printed to STDERR
-  _version="$("${1}" 2> /dev/null -Wversion || "${1}" 2> /dev/null --version || "${1}" 2>&1 --help || :)"
+  # NOTE: "cut --version" of GNU textutils 1.5 return failure but still print the correct output although it is printed to STDERR
+  _version="$("${1}" 2> /dev/null -Wversion || "${1}" 2>&1 --version || :)"
+  case "${_version}" in *'CENIT Advanced Logfile Adapter'*) printf '%s\n' 'CENIT' && return 0 ;; *) ;; esac
   _version="$(printf '%s\n' "${_version}" | head -n 1)" || _version=''
 
   case "${_version}" in
-    '' | *'invalid option'* | *'unrecognized option'* | *'unknown option'* | *[Ii]'llegal option'* | *'not an option'* | *'bad option'*)
-      printf '%s\n' 'unknown'
-      return 2
+    '' | *[Uu]'sage'* | *'invalid option'* | *'unrecognized option'* | *[Uu]'nknown option'* | *[Ii]'llegal option'* | *'not an option'* | *'bad option'*)
+
+      # NOTE: "date --help" and "awk --help" of old BusyBox return failure but still print the correct output although it may be printed to STDERR
+      _version="$("${1}" 2>&1 --help || :)"
+      _version="$(printf '%s\n' "${_version}" | head -n 1)" || _version=''
+      case "${_version}" in
+        '' | *[Uu]'sage'* | *'invalid option'* | *'unrecognized option'* | *[Uu]'nknown option'* | *[Ii]'llegal option'* | *'not an option'* | *'bad option'*)
+          printf '%s\n' 'unknown'
+          return 2
+          ;;
+        *) ;;
+      esac
       ;;
+
     *) ;;
   esac
 
@@ -742,97 +942,224 @@ get_version()
 
 get_max_unsigned_int_of_shell_printf()
 {
-  # Some shells do NOT allow this, so we run it in a subshell and hide the errors
-  (
-    printf '%u\n' '-1' || return "${?}"
-  ) 2> /dev/null
+  # Some shells do NOT allow this, so we hide the errors
+  printf 2> /dev/null '%s\n' "$(printf '%u\n' '-1')"
+}
+
+test_seed_of_random()
+{
+  RANDOM="${1}"
+}
+
+seed_and_get_random()
+{
+  RANDOM="${1}"
+  # shellcheck disable=SC3028 # In POSIX sh, RANDOM is undefined
+  printf '%s\n' "${RANDOM}"
+}
+
+validate_num_for_cut_b()
+{
+  if test "${2}" = 'mac'; then
+    case "${1}" in
+      '4294967296') # This number can make the "cut" of macOS freeze forever
+        printf '%s\n' '4294967297'
+        return 0
+        ;;
+      *) ;;
+    esac
+  fi
+
+  printf '%s\n' "${1}"
+}
+
+detect_bits_of_cut_b()
+{
+  local _dbcb_max _dbcb_num _dbcb_tmp
+
+  _dbcb_max='-1'
+  for _dbcb_num in ${1}; do
+    if _dbcb_tmp="$(: | cut 2> /dev/null -b "${_dbcb_num}")"; then
+      _dbcb_max="${_dbcb_num}"
+    else
+      if _dbcb_num="$(inc_num "${_dbcb_max}")" && _dbcb_num="$(validate_num_for_cut_b "${_dbcb_num}" "${2}")" && _dbcb_tmp="$(: | cut 2> /dev/null -b "${_dbcb_num}")"; then
+        if test "${2}" = 'mac'; then
+          warn_msg 'Detection of cut -b was inconclusive!!!'
+        else
+          warn_msg 'Detection of cut -b was inconclusive, please report it to the author!!!'
+        fi
+      fi
+      break
+    fi
+  done
+
+  printf '%s\n' "${_dbcb_max}"
+}
+
+code_timeout()
+{
+  local _func_name _sec_limit _pid _bg_status
+
+  _func_name="${1}"
+  _sec_limit="${2}"
+  shift 2
+
+  "${_func_name}" 2>&3 "${@}" &
+  _pid="${!}"
+  if test -z "${_pid}" || test "${_pid}" = "${$}" || test "${_pid}" -le 1; then return 126; fi # Seriously broken shell
+
+  while test "$((_sec_limit = _sec_limit - 1))" -ge 0; do
+    sleep 1
+    if kill 2> /dev/null 1>&2 -0 "${_pid}"; then
+      : # Still running
+    else
+      _bg_status=0
+      wait 1>&3 2>&3 "${_pid}" || _bg_status="${?}"
+      test "${_bg_status}" != 127 || return 0 # On some shells "wait" misbehave and return 127 even on success
+      return "${_bg_status}"
+    fi
+  done
+
+  kill 2> /dev/null 1>&2 -9 "${_pid}" || :
+  return 124
+}
+
+list_available_shells()
+{
+  if chsh 2> /dev/null -l; then
+    :
+  elif test -r '/etc/shells' && grep -v -e '^#' -- '/etc/shells' | sort -u; then
+    :
+  elif getent 2> /dev/null 1>&2 'shells' && getent 'shells'; then # On OpenBSD / NetBSD
+    :
+  else
+    return 3
+  fi
+}
+
+clear_env()
+{
+  test "${prefer_included_utilities}" != '1' || unset ASH_STANDALONE
+  if test "${backup_posix}" = 'unset'; then unset POSIXLY_CORRECT; else POSIXLY_CORRECT="${backup_posix}"; fi
+  unset SCRIPT_NAME SCRIPT_VERSION HEXDUMP_CMD backup_posix backup_path execute_script prefer_included_utilities
 }
 
 pause_if_needed()
 {
-  # shellcheck disable=SC3028 # In POSIX sh, SHLVL is undefined
-  if test "${NO_PAUSE:-0}" = '0' && test "${CI:-false}" = 'false' && test "${TERM_PROGRAM-}" != 'vscode' && test "${SHLVL:-1}" = '1' && test -t 0 && test -t 1 && test -t 2; then
-    printf 1>&2 '\n\033[1;32m%s\033[0m' 'Press any key to exit...' || :
-    # shellcheck disable=SC3045
-    IFS='' read 1> /dev/null 2>&1 -r -s -n 1 _ || IFS='' read 1>&2 -r _ || :
+  # shellcheck disable=SC3028 # Intended: In POSIX sh, SHLVL is undefined
+  if test "${NO_PAUSE:-0}" = '0' && test "${no_pause:-0}" = '0' && test "${CI:-false}" = 'false' && test "${TERM_PROGRAM:-unknown}" != 'vscode' && test "${SHLVL:-1}" = '1' && test -t 0 && test -t 1 && test -t 2; then
+    if test -n "${NO_COLOR-}"; then
+      printf 1>&2 '\n%s' 'Press any key to exit... ' || :
+    else
+      printf 1>&2 '\n\033[1;32m\r%s' 'Press any key to exit... ' || :
+    fi
+    # shellcheck disable=SC3045 # Intended: In POSIX sh, read -s / -n is undefined
+    IFS='' read 2> /dev/null 1>&2 -r -s -n 1 _ || IFS='' read 1>&2 -r _ || :
     printf 1>&2 '\n' || :
+    test -n "${NO_COLOR-}" || printf 1>&2 '\033[0m\r    \r' || :
   fi
+  unset no_pause
   return "${1}"
 }
 
 main()
 {
-  local date_timezone_bug _limits _limits_date _limits_u _max _n tmp_var
-  local shell_exe shell_info shell_name shell_applet shell_bit os_bit cpu_bit _shell_test_bit _shell_arithmetic_bit _shell_printf_bit _awk_printf_bit _awk_printf_signed_bit _awk_printf_unsigned_bit _date_bit _date_u_bit
+  local prefer_included_utilities shell_is_msys shell_exe shell_exe_original date_timezone_bug limits limits_date limits_u limits_rnd_u limits_s_u _max _num tmp_var
+  local random_val previous_random_val next_random_val
+  local shell_info shell_name shell_applet os_info operative_system shell_bit os_bit cpu_bit
+  local shell_test_bit shell_arithmetic_bit shell_printf_bit shell_printf_unsigned_bit shell_printf_signed_bit shell_printf_max_u shell_random_seed_bit
+  local awk_printf_bit awk_printf_unsigned_bit awk_printf_signed_bit cut_version cut_b_bit date_bit date_u_bit
 
+  prefer_included_utilities="${1}"
   date_timezone_bug='false'
-  _limits='32767 2147483647 9223372036854775807'
-  _limits_date='32767 2147480047 2147483647 32535215999 32535244799 67767976233529199 67767976233532799 67768036191673199 67768036191676799 9223372036854775807'
-  _limits_u='65535 2147483647 2147483648 4294967295 18446744073709551615'
+
+  limits='32767 2147483647 9223372036854775807'
+  limits_date='32767 2147480047 2147483647 32535215999 32535244799 67767976233529199 67767976233532799 67768036191673199 67768036191676799 9223372036854775807'
+
+  limits_u='65535 2147483647 2147483648 4294967295 9223372036854775807 9223372036854775808 18446744073709551615'
+  limits_rnd_u='65535 4294967295 18446744073709551615'
+
+  limits_s_u='32767 65535 256446000 2147483647 4294967295 9223372036854775807 18446744073709551614 18446744073709551615'
+
+  shell_is_msys='false'
+  if is_shell_msys; then
+    shell_is_msys='true'
+    # We must do this in all cases with Bash under Windows using this POSIX layer otherwise we may run into freezes, obscure errors and unknown infinite loops!!!
+    PATH="/usr/bin:${PATH:-%empty}"
+  fi
 
   shell_exe="$(get_shell_exe || :)"
+  shell_exe_original="${shell_exe}"
+  if test "${shell_is_msys}" = 'true' && command 1> /dev/null 2>&1 -v 'cygpath'; then shell_exe="$(cygpath -m -a -l -- "${shell_exe}" || :)"; fi
   shell_info="$(get_shell_info "${shell_exe}" || :)"
   shell_name="$(printf '%s\n' "${shell_info}" | cut -d ' ' -f '1' || :)"
+  prefer_included_utilities_if_requested "${prefer_included_utilities}" "${shell_exe_original}" "${shell_name}"
+  os_info="$(get_os_info || :)"
 
-  if test -n "${shell_exe}" && shell_bit="$(detect_bitness_of_files "${shell_exe}")"; then
+  operative_system='other'
+  case "${os_info}" in 'MS/Windows'*) operative_system='win' ;; 'Darwin'*) operative_system='mac' ;; *) ;; esac
+
+  printf '%s\n' "${SCRIPT_NAME} v${SCRIPT_VERSION}"
+
+  shell_bit='unknown'
+  if test -n "${shell_exe}" && shell_bit="$(detect_bitness_of_single_file_caller "${shell_exe}")"; then
     :
-  elif tmp_var="$(uname 2> /dev/null -m)"; then
-    case "${tmp_var}" in
-      x86_64 | ia64 | arm64 | aarch64 | mips64) shell_bit='64-bit' ;;
-      x86 | i686 | i586 | i486 | i386 | armv7* | mips) shell_bit='32-bit' ;;
-      *) shell_bit='unknown' ;;
-    esac
-  elif test "${OS-}" = 'Windows_NT'; then
+  elif test "${operative_system}" = 'win' && shell_bit="${PROCESSOR_ARCHITECTURE-}" && test -n "${shell_bit}"; then
     # On Windows 2000+ / ReactOS
-    case "${PROCESSOR_ARCHITECTURE-}" in
+    case "${shell_bit}" in
       AMD64 | ARM64 | IA64) shell_bit='64-bit' ;;
       x86) shell_bit='32-bit' ;;
       *) shell_bit='unknown' ;;
     esac
   else
-    shell_bit='unknown'
+    shell_bit="$(retrieve_bitness_from_uname || :)" # Use it only as last resort (almost never happens)
   fi
 
-  if test "${OS-}" = 'Windows_NT' && os_bit="${PROCESSOR_ARCHITEW6432:-${PROCESSOR_ARCHITECTURE-}}" && test -n "${os_bit}"; then
+  os_bit='unknown'
+  if test "${operative_system}" = 'win' && os_bit="${PROCESSOR_ARCHITEW6432:-${PROCESSOR_ARCHITECTURE-}}" && test -n "${os_bit}"; then
     # On Windows 2000+ / ReactOS
     case "${os_bit}" in
       AMD64 | ARM64 | IA64) os_bit='64-bit' ;;
       x86) os_bit='32-bit' ;;
       *) os_bit='unknown' ;;
     esac
-  elif command 1> /dev/null 2>&1 -v 'getconf' && os_bit="$(getconf 'LONG_BIT')" && test -n "${os_bit}"; then
-    os_bit="${os_bit}-bit"
-  elif test -e '/system/build.prop'; then
-    # On Android
-    case "$(file_getprop 'ro.product.cpu.abi' '/system/build.prop' || :)" in
-      'x86_64' | 'arm64-v8a' | 'mips64' | 'riscv64') os_bit='64-bit' ;;
-      'x86' | 'armeabi-v7a' | 'armeabi' | 'mips') os_bit='32-bit' ;;
-      *) os_bit='unknown' ;;
-    esac
-  else
-    os_bit='unknown'
+  fi
+  if test "${os_bit}" = 'unknown'; then
+    if os_bit="$(getconf 2> /dev/null 'LONG_BIT')" && test -n "${os_bit}"; then
+      os_bit="${os_bit}-bit"
+    elif test -r '/system/build.prop'; then
+      # On Android
+      case "$(file_getprop 'ro.product.cpu.abi' '/system/build.prop' || :)" in
+        'x86_64' | 'arm64-v8a' | 'mips64' | 'riscv64') os_bit='64-bit' ;;
+        'x86' | 'armeabi-v7a' | 'armeabi' | 'mips') os_bit='32-bit' ;;
+        *) os_bit='unknown' ;;
+      esac
+    else
+      os_bit="$(retrieve_bitness_from_uname || :)" # Use it only as last resort (almost never happens)
+    fi
   fi
 
-  if test -e '/proc/cpuinfo' && tmp_var="$(grep -e '^flags[[:space:]]*:' -- '/proc/cpuinfo' | cut -d ':' -f '2-' -s)" && test -n "${tmp_var}"; then
+  cpu_bit='unknown'
+  if test -r '/proc/cpuinfo' && tmp_var="$(grep -e '^flags[[:space:]]*:' -- '/proc/cpuinfo' | cut -d ':' -f '2-' -s)" && test -n "${tmp_var}"; then
     if printf '%s\n' "${tmp_var}" | grep -m 1 -q -w -e '[[:lower:]]\{1,\}_lm'; then
       cpu_bit='64-bit'
     else
       cpu_bit='32-bit'
     fi
-  elif command 1> /dev/null 2>&1 -v 'sysctl' && tmp_var="$(sysctl hw.cpu64bit_capable | cut -d ':' -f '2-' -s)" && tmp_var="${tmp_var# }" && test -n "${tmp_var}"; then
+  elif command 1> /dev/null 2>&1 -v 'sysctl' && tmp_var="$(sysctl 2> /dev/null hw.cpu64bit_capable | cut -d ':' -f '2-' -s)" && tmp_var="${tmp_var# }" && test -n "${tmp_var}"; then
     # On macOS
     case "${tmp_var}" in
       '1') cpu_bit='64-bit' ;;
       '0') cpu_bit='32-bit' ;;
       *) cpu_bit='unknown' ;;
     esac
-  elif command 1> /dev/null 2>&1 -v 'wmic.exe' && cpu_bit="$(MSYS_NO_PATHCONV=1 wmic.exe 2> /dev/null cpu get DataWidth /VALUE | cut -d '=' -f '2-' -s | tr -d '\r\n')" && test -n "${cpu_bit}"; then
+  elif command 1> /dev/null 2>&1 -v 'wmic.exe' && cpu_bit="$(wmic.exe 2> /dev/null cpu get 'DataWidth' | grep -v -F -e 'DataWidth' | tr -d ' \r\n')" && test -n "${cpu_bit}"; then
     # On Windows / ReactOS (if WMIC is present)
     case "${cpu_bit}" in
       '64' | '32') cpu_bit="${cpu_bit}-bit" ;;
       *) cpu_bit='unknown' ;;
     esac
-  elif command 1> /dev/null 2>&1 -v 'powershell.exe' && cpu_bit="$(powershell.exe -c 'gwmi Win32_Processor | select -ExpandProperty DataWidth')" && test -n "${cpu_bit}"; then
+  elif command 1> /dev/null 2>&1 -v 'powershell.exe' && cpu_bit="$(powershell.exe 2> /dev/null -NoProfile -ExecutionPolicy 'Bypass' -c 'gwmi Win32_Processor | select -ExpandProperty DataWidth')" && test -n "${cpu_bit}"; then
     # On Windows (if PowerShell is installed - it is slow)
     case "${cpu_bit}" in
       '64' | '32') cpu_bit="${cpu_bit}-bit" ;;
@@ -843,103 +1170,235 @@ main()
   fi
 
   _max='-1'
-  for _n in ${_limits}; do
-    if ! test 2> /dev/null "${_n}" -gt 0; then break; fi
-    _max="${_n}"
+  for _num in ${limits}; do
+    if test 2> /dev/null "${_num}" -gt 0; then
+      _max="${_num}"
+    else
+      if _num="$(inc_num "${_max}")" && test 2> /dev/null "${_num}" -gt 0; then
+        warn_msg 'Detection of shell test int comparison was inconclusive, please report it to the author!!!'
+      fi
+      break
+    fi
   done
-  _shell_test_bit="$(convert_max_signed_int_to_bit "${_max}")" || _shell_test_bit='unknown'
+  shell_test_bit="$(convert_max_signed_int_to_bit "${_max}")" || shell_test_bit='unknown'
 
   _max='-1'
-  for _n in ${_limits}; do
-    if test "$((_n))" != "${_n}"; then break; fi
-    _max="${_n}"
+  for _num in ${limits}; do
+    if test "$((_num))" = "${_num}"; then
+      _max="${_num}"
+    else
+      if _num="$(inc_num "${_max}")" && test "$((_num))" = "${_num}"; then
+        warn_msg 'Detection of shell arithmetic was inconclusive, please report it to the author!!!'
+      fi
+      break
+    fi
   done
-  _shell_arithmetic_bit="$(convert_max_signed_int_to_bit "${_max}")" || _shell_arithmetic_bit='unknown'
+  shell_arithmetic_bit="$(convert_max_signed_int_to_bit "${_max}")" || shell_arithmetic_bit='unknown'
 
-  _shell_printf_bit="$(convert_max_unsigned_int_to_bit "$(get_max_unsigned_int_of_shell_printf || :)")" || _shell_printf_bit='unknown'
-
-  _awk_printf_bit="$(convert_max_unsigned_int_to_bit "$(awk -- 'BEGIN { printf "%u\n", "-1" }' || :)")" || _awk_printf_bit='unknown'
-
-  # IMPORTANT: For very big integer numbers GNU Awk may return the exponential notation or an imprecise number
-  _max='-1'
-  for _n in ${_limits}; do
-    if ! tmp_var="$(awk -v n="${_n}" -- 'BEGIN { printf "%d\n", n }')" || ! permissively_comparison "${tmp_var}" "${_n}"; then break; fi
-    _max="${_n}"
-  done
-  _awk_printf_signed_bit="$(convert_max_signed_int_to_bit "${_max}")" || _awk_printf_signed_bit='unknown'
-
-  # IMPORTANT: For very big integer numbers GNU Awk may return the exponential notation or an imprecise number
-  _max='-1'
-  for _n in ${_limits_u}; do
-    if ! tmp_var="$(awk -v n="${_n}" -- 'BEGIN { printf "%u\n", n }')" || ! permissively_comparison "${tmp_var}" "${_n}"; then break; fi
-    _max="${_n}"
-  done
-  _awk_printf_unsigned_bit="$(convert_max_unsigned_int_to_bit "${_max}")" || _awk_printf_unsigned_bit='unknown'
+  tmp_var="$(get_max_unsigned_int_of_shell_printf)" || tmp_var='unknown'
+  shell_printf_bit="$(convert_max_unsigned_int_to_bit "${tmp_var}" || :)"
 
   _max='-1'
-  for _n in ${_limits_date}; do
-    if ! tmp_var="$(TZ='CET-1' date 2> /dev/null -d "@${_n}" -- '+%s')"; then break; fi
-    if test "${tmp_var}" != "${_n}"; then
-      if test "${tmp_var}" = "$((_n - 14400))"; then
-        date_timezone_bug='true'
+  # We hide the errors otherwise it will display an error on old Bash under Windows (or a ValueError on Oils) when an overflow occurs
+  for _num in ${limits_u}; do
+    if tmp_var="$(printf 2> /dev/null "%u\n" "${_num}")" && test "${tmp_var}" = "${_num}"; then
+      _max="${_num}"
+    else
+      if _num="$(inc_num "${_max}")" && tmp_var="$(printf 2> /dev/null "%u\n" "${_num}")" && test "${tmp_var}" = "${_num}"; then
+        warn_msg 'Detection of unsigned shell printf was inconclusive, please report it to the author!!!'
+      fi
+      break
+    fi
+  done
+  shell_printf_unsigned_bit="$(convert_max_unsigned_int_to_bit "${_max}")" || shell_printf_unsigned_bit='unknown'
+  shell_printf_max_u='unknown'
+  test "${_max}" = '-1' || shell_printf_max_u="${_max}"
+
+  _max='-1'
+  # We hide the errors otherwise it will display an error on old Bash under Windows when an overflow occurs
+  for _num in ${limits}; do
+    if tmp_var="$(printf 2> /dev/null "%d\n" "${_num}")" && test "${tmp_var}" = "${_num}"; then
+      _max="${_num}"
+    else
+      if _num="$(inc_num "${_max}")" && tmp_var="$(printf 2> /dev/null "%d\n" "${_num}")" && test "${tmp_var}" = "${_num}"; then
+        warn_msg 'Detection of signed shell printf was inconclusive, please report it to the author!!!'
+      fi
+      break
+    fi
+  done
+  shell_printf_signed_bit="$(convert_max_signed_int_to_bit "${_max}")" || shell_printf_signed_bit='unknown'
+
+  _max='-1'
+  random_val='-1'
+  # shellcheck disable=SC3028 # In POSIX sh, RANDOM is undefined
+  if RANDOM='1234' && test "${RANDOM}" = '1234'; then
+    _max='unsupported' # $RANDOM is NOT supported
+    unset RANDOM
+  elif test "$(seed_and_get_random '1234' || :)" != "$(seed_and_get_random '1234' || :)"; then
+    _max='ignored' # $RANDOM is supported but the seed is ignored
+  else
+    for _num in ${limits_rnd_u}; do
+      if tmp_var="$(test_seed_of_random 2>&1 "${_num}")" && test -z "${tmp_var}"; then
+        : # OK
       else
+        break # Assigning an integer that is too large causes an error message to be displayed on zsh
+      fi
+
+      tmp_var="$(seed_and_get_random "${_num}")"
+      # All the overflowed RANDOM seeds produce the same random numbers (sometimes the repetition is every 2 seed values)
+      # IMPORTANT: This check is NOT always reliable because shells may break differently at overflow
+      if test "${random_val}" != "${tmp_var}"; then
+        _max="${_num}"
+        random_val="${tmp_var}"
+      else
+        if
+          _num="$(inc_num "${_max}")" && next_random_val="$(seed_and_get_random "${_num}")" && test "${next_random_val}" != "${random_val}" &&
+            _num="$((_max - 1))" && previous_random_val="$(seed_and_get_random "${_num}")" && test "${next_random_val}" != "${previous_random_val}"
+        then
+          warn_msg 'Detection of RANDOM seed was inconclusive, please report it to the author!!!'
+        fi
+        break
+      fi
+    done
+  fi
+  shell_random_seed_bit="$(convert_max_unsigned_int_to_bit "${_max}" || :)"
+
+  tmp_var="$(awk -- 'BEGIN { printf "%u\n", "-1" }' || :)"
+  awk_printf_bit="$(convert_max_unsigned_int_to_bit "${tmp_var}" || :)"
+
+  # IMPORTANT: For very big integer numbers GNU Awk may return the exponential notation or an imprecise number
+  _max='-1'
+  for _num in ${limits_u}; do
+    if tmp_var="$(awk -v n="${_num}" -- 'BEGIN { printf "%u\n", n }')" && permissively_comparison "${tmp_var}" "${_num}"; then
+      _max="${_num}"
+    else
+      if _num="$(inc_num "${_max}")" && tmp_var="$(awk -v n="${_num}" -- 'BEGIN { printf "%u\n", n }')" && permissively_comparison "${tmp_var}" "${_num}"; then
+        warn_msg 'Detection of unsigned awk printf was inconclusive, please report it to the author!!!'
+      fi
+      break
+    fi
+  done
+  awk_printf_unsigned_bit="$(convert_max_unsigned_int_to_bit "${_max}")" || awk_printf_unsigned_bit='unknown'
+
+  _max='-1'
+  for _num in ${limits}; do
+    if tmp_var="$(awk -v n="${_num}" -- 'BEGIN { printf "%d\n", n }')" && permissively_comparison "${tmp_var}" "${_num}"; then
+      _max="${_num}"
+    else
+      if _num="$(inc_num "${_max}")" && tmp_var="$(awk -v n="${_num}" -- 'BEGIN { printf "%d\n", n }')" && permissively_comparison "${tmp_var}" "${_num}"; then
+        warn_msg 'Detection of signed awk printf was inconclusive, please report it to the author!!!'
+      fi
+      break
+    fi
+  done
+  awk_printf_signed_bit="$(convert_max_signed_int_to_bit "${_max}")" || awk_printf_signed_bit='unknown'
+
+  cut_version="$(get_version 'cut' || :)"
+
+  _max='-1'
+  case "${cut_version}" in
+    # The "cut" of "GNU textutils 1.5" does NOT freeze (so no timeout needed) but shells that come with this old "cut" may NOT support background processes
+    *'GNU textutils'*) _max="$(detect_bits_of_cut_b "${limits_s_u}" "${operative_system}")" || _max='-1' ;;
+    *) _max="$(code_timeout 3>&2 2> /dev/null detect_bits_of_cut_b 8 "${limits_s_u}" "${operative_system}")" || _max='-1' ;;
+  esac
+  cut_b_bit="$(convert_max_unsigned_int_to_bit "${_max}" 'true' || :)"
+
+  _max='-1'
+  for _num in ${limits_date}; do
+    if tmp_var="$(TZ='CET-1' date 2> /dev/null -d "@${_num}" -- '+%s')" && test "${tmp_var}" = "${_num}"; then
+      _max="${_num}"
+    else
+      if test "${tmp_var}" = "$((_num - 14400))"; then
+        date_timezone_bug='true'
+        _max="${_num}"
+      else
+        if _num="$(inc_num "${_max}")" && tmp_var="$(TZ='CET-1' date 2> /dev/null -d "@${_num}" -- '+%s')" && test "${tmp_var}" = "${_num}"; then
+          warn_msg 'Detection of date timestamp was inconclusive, please report it to the author!!!'
+        fi
         break
       fi
     fi
-    _max="${_n}"
   done
-  _date_bit="$(convert_max_signed_int_to_bit "${_max}")" || _date_bit='unknown'
+  date_bit="$(convert_max_signed_int_to_bit "${_max}")" || date_bit='unknown'
 
   _max='-1'
-  for _n in ${_limits_date}; do
-    if ! tmp_var="$(TZ='CET-1' date 2> /dev/null -u -d "@${_n}" -- '+%s')" || test "${tmp_var}" != "${_n}"; then break; fi
-    _max="${_n}"
+  for _num in ${limits_date}; do
+    if tmp_var="$(TZ='CET-1' date 2> /dev/null -u -d "@${_num}" -- '+%s')" && test "${tmp_var}" = "${_num}"; then
+      _max="${_num}"
+    else
+      if _num="$(inc_num "${_max}")" && tmp_var="$(TZ='CET-1' date 2> /dev/null -u -d "@${_num}" -- '+%s')" && test "${tmp_var}" = "${_num}"; then
+        warn_msg 'Detection of date -u timestamp was inconclusive, please report it to the author!!!'
+      fi
+      break
+    fi
   done
-  _date_u_bit="$(convert_max_signed_int_to_bit "${_max}")" || _date_u_bit='unknown'
+  date_u_bit="$(convert_max_signed_int_to_bit "${_max}")" || date_u_bit='unknown'
 
-  printf '%s %s\n' "Shell:" "${shell_name}"
+  printf '\n%s %s\n' "Shell:" "${shell_name}"
   if shell_applet="$(get_applet_name "${shell_name}")"; then
     printf '%s %s\n' "Shell applet:" "${shell_applet}"
   fi
   printf '%s %s\n' "Shell version:" "$(printf '%s\n' "${shell_info}" | cut -d ' ' -f '2-' -s || :)"
-  printf '%s %s\n' "Shell path:" "${shell_exe:-unknown}"
-  printf '%s %s\n' "OS:" "$(get_os_info || :)"
+  printf '%s %s\n\n' "Shell path:" "${shell_exe:-unknown}"
+
+  printf '%s %s\n' "OS:" "${os_info}"
   printf '%s %s\n\n' "Version of uname:" "$(get_version 'uname' || :)"
 
   printf '%s\n' "Bits of shell: ${shell_bit}"
   printf '%s\n' "Bits of OS: ${os_bit}"
   printf '%s\n\n' "Bits of CPU: ${cpu_bit}"
 
-  printf '%s\n' "Bits of shell 'test' int comparison: ${_shell_test_bit}"
-  printf '%s\n' "Bits of shell arithmetic: ${_shell_arithmetic_bit}"
-  printf '%s\n\n' "Bits of shell 'printf': ${_shell_printf_bit}"
+  printf '%s\n' "Bits of shell 'test' int comparison: ${shell_test_bit}"
+  printf '%s\n\n' "Bits of shell arithmetic: ${shell_arithmetic_bit}"
+
+  printf '%s\n' "Bits of shell 'printf': ${shell_printf_bit}"
+  printf '%s\n' "Bits of shell 'printf' (unsigned): ${shell_printf_unsigned_bit} (0-${shell_printf_max_u})"
+  printf '%s\n' "Bits of shell 'printf' (signed): ${shell_printf_signed_bit}"
+  printf '%s %s\n\n' "Bits of \$RANDOM seed:" "${shell_random_seed_bit}"
 
   printf '%s %s\n' "Version of awk:" "$(get_version 'awk' || :)"
-  printf '%s\n' "Bits of awk 'printf': ${_awk_printf_bit}"
-  printf '%s\n' "Bits of awk 'printf' - signed: ${_awk_printf_signed_bit}"
-  printf '%s\n\n' "Bits of awk 'printf' - unsigned: ${_awk_printf_unsigned_bit}"
+  printf '%s\n' "Bits of awk 'printf': ${awk_printf_bit}"
+  printf '%s\n' "Bits of awk 'printf' (unsigned): ${awk_printf_unsigned_bit}"
+  printf '%s\n\n' "Bits of awk 'printf' (signed): ${awk_printf_signed_bit}"
+
+  printf '%s %s\n' "Version of cut:" "${cut_version}"
+  printf '%s\n\n' "Bits of 'cut -b': ${cut_b_bit}"
 
   printf '%s %s\n' "Version of date:" "$(get_version 'date' || :)"
-  printf '%s%s\n' "Bits of CET-1 'date' timestamp: ${_date_bit}" "$(test "${date_timezone_bug}" = 'false' || printf ' %s\n' '(with time zone bug)' || :)"
-  printf '%s\n' "Bits of 'date -u' timestamp: ${_date_u_bit}"
+  printf '%s%s\n' "Bits of 'TZ=CET-1 date' timestamp: ${date_bit}" "$(test "${date_timezone_bug}" = 'false' || printf ' %s\n' '(with time zone BUG)' || :)"
+  printf '%s\n' "Bits of 'date -u' timestamp: ${date_u_bit}"
 }
 
+backup_posix="${POSIXLY_CORRECT-unset}"
+POSIXLY_CORRECT='y'
+export POSIXLY_CORRECT
+
 execute_script='true'
+prefer_included_utilities=0
+no_pause=0
+STATUS=0
+
 while test "${#}" -gt 0; do
   case "${1}" in
     -V | --version)
       execute_script='false'
+      no_pause=1
       printf '%s\n' "${SCRIPT_NAME} v${SCRIPT_VERSION}"
       printf '%s\n' 'Copyright (c) 2024 ale5000'
       printf '%s\n' 'License GPLv3+'
       ;;
     -h | --help | '-?')
       execute_script='false'
+      no_pause=1
       printf '%s\n' "${SCRIPT_NAME} v${SCRIPT_VERSION}"
 
       printf '\n%s\n\n' 'Coming soon...'
 
-      if test -z "${0}" || ! script_filename="$(basename "${0}")"; then exit 1; fi
+      if test -n "${0-}" && script_filename="$(basename "${0}")"; then
+        :
+      else
+        exit 1
+      fi
 
       printf '%s\n' 'Notes:'
       printf '%s\n' 'If a single parameter is given, then it returns the specific error code, otherwise if there are multiple files, it returns the number of files that were not recognized.'
@@ -951,40 +1410,63 @@ while test "${#}" -gt 0; do
       printf '%s\n' "find './dir_to_test' -type f -print0 | xargs -0 -- '${script_filename}' -- ''"
       printf '%s\n' "find './dir_to_test' -type f | ${script_filename} -"
       ;;
-    -i | --prefer-internal-applets)
-      ASH_STANDALONE='1' # This only works on some versions of BusyBox under Android
+    -i | --prefer-included-utilities)
+      # Enable code to prefer utilities that are in the same directory of the shell
+      prefer_included_utilities=1
+
+      # Prefer internal applets over external utilities (only BusyBox under Windows)
+      unset BB_OVERRIDE_APPLETS
+      # Prefer internal applets over external utilities (only some versions of BusyBox under Android)
+      ASH_STANDALONE='1'
       export ASH_STANDALONE
-      unset BB_OVERRIDE_APPLETS # This only works on BusyBox under Windows
       ;;
     --no-pause)
-      NO_PAUSE='1'
-      export NO_PAUSE
+      no_pause=1
+      ;;
+
+    -l | --list-available-shells)
+      execute_script='false'
+      no_pause=1
+      list_available_shells || STATUS="${?}"
       ;;
 
     --)
       shift
       break
       ;;
+
     -) # Get file list from STDIN
       break
       ;;
 
-    --* | -*) ;; # Ignore unsupported options
+    --*)
+      execute_script='false'
+      printf 1>&2 '%s\n' "${SCRIPT_NAME}: unrecognized option '${1}'"
+      STATUS=2
+      ;;
+    -*)
+      execute_script='false'
+      printf 1>&2 '%s\n' "${SCRIPT_NAME}: invalid option -- '${1#-}'"
+      STATUS=2
+      ;;
 
     *) break ;;
   esac
 
   shift
-done
+done || :
 
 if test "${execute_script}" = 'true'; then
-  if test -e '/usr/bin/uname' && test "$(/usr/bin/uname 2> /dev/null -o || :)" = 'Msys'; then PATH="/usr/bin:${PATH:-/usr/bin}"; fi # Avoid bugs on Bash under Windows
+  backup_path="${PATH-unset}"
 
   if test "${#}" -eq 0; then
-    main
+    main "${prefer_included_utilities}" || STATUS="${?}"
   else
-    detect_bitness_of_files "${@}"
+    detect_bitness_of_files "${@}" || STATUS="${?}"
   fi
 
-  pause_if_needed "${?}"
+  if test "${backup_path}" = 'unset'; then unset PATH; else PATH="${backup_path}"; fi
 fi
+
+clear_env
+pause_if_needed "${STATUS}"
