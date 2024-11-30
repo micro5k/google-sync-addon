@@ -1,7 +1,6 @@
 #!/sbin/sh
 # SPDX-FileCopyrightText: (c) 2016 ale5000
 # SPDX-License-Identifier: GPL-3.0-or-later
-# SPDX-FileType: SOURCE
 
 ### GLOBAL VARIABLES ###
 
@@ -14,18 +13,18 @@ TMP_PATH="${2:?}"
 
 ### CODE ###
 
-INSTALL_CONTACTSSYNC="$(parse_setting 'INSTALL_CONTACTSSYNC' "${INSTALL_CONTACTSSYNC:?}")"
-INSTALL_CALENDARSYNC="$(parse_setting 'INSTALL_CALENDARSYNC' "${INSTALL_CALENDARSYNC:?}")"
-
 if test "${API:?}" -ge 24; then
-  : ### Supported Android versions
+  : # Supported Android version
 elif test "${API:?}" -ge 23; then
   ui_error 'Unsupported Android version'
 elif test "${API:?}" -ge 19; then
-  : ### Supported Android versions
+  : # Supported Android version
 else
-  ui_error "Your Android version is too old, API: ${API:-}"
+  ui_error "Your Android version is too old, API: ${API?}"
 fi
+
+INSTALL_CONTACTSSYNC="$(parse_setting 'INSTALL_CONTACTSSYNC' "${INSTALL_CONTACTSSYNC:?}")"
+INSTALL_CALENDARSYNC="$(parse_setting 'INSTALL_CALENDARSYNC' "${INSTALL_CALENDARSYNC:?}")"
 
 # Display info
 display_info
@@ -82,7 +81,6 @@ prepare_installation
 
 # Install
 perform_installation
-
 reset_authenticator_and_sync_adapter_caches
 
 clear_and_enable_app 'com.google.android.backuptransport'

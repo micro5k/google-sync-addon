@@ -714,11 +714,14 @@ initialize()
     ui_msg_empty_line
   fi
 
-  # Previously installed module version code (0 if wasn't installed)
+  # Previously installed version code (0 if not already installed)
   PREV_MODULE_VERCODE="$(simple_file_getprop 'install.version.code' "${SYS_PATH:?}/etc/zips/${MODULE_ID:?}.prop")" || PREV_MODULE_VERCODE=''
   case "${PREV_MODULE_VERCODE?}" in
-    '' | *[!0-9]*) PREV_MODULE_VERCODE='0' ;; # Not installed (empty) or invalid data
-    *) ;;                                     # OK
+    '' | *[!0-9]*) # Empty (not installed) or invalid data
+      test -z "${PREV_MODULE_VERCODE?}" || ui_warning 'Previously installed version code is NOT valid!!!'
+      PREV_MODULE_VERCODE='0'
+      ;;
+    *) ;; # Valid
   esac
 
   if test "${PREV_MODULE_VERCODE:?}" -ne 0; then
@@ -729,9 +732,15 @@ initialize()
   readonly FIRST_INSTALLATION PREV_MODULE_VERCODE
   export FIRST_INSTALLATION PREV_MODULE_VERCODE
 
+  if test "${MODULE_VERCODE:?}" -ge "${PREV_MODULE_VERCODE:?}"; then
+    : # OK
+  else
+    ui_error 'Downgrade not allowed!!!'
+  fi
+
   IS_INSTALLATION='true'
-  if test "${LIVE_SETUP_ENABLED:?}" = 'true' && test "${PREV_MODULE_VERCODE:?}" -ge 3; then
-    choose 'What do you want to do?' '+) Update / reinstall' '-) Uninstall'
+  if test "${LIVE_SETUP_ENABLED:?}" = 'true' && test "${MODULE_VERCODE:?}" -eq "${PREV_MODULE_VERCODE:?}" && test "${PREV_MODULE_VERCODE:?}" -gt 0; then
+    choose 'What do you want to do?' '+) Reinstall' '-) Uninstall'
     if test "${?}" != '3'; then
       IS_INSTALLATION='false'
     fi
@@ -875,8 +884,9 @@ clean_previous_installations()
 
   delete "${SYS_PATH:?}/etc/zips/${MODULE_ID:?}.prop"
 
-  # Reclaiming free space may take some time
-  _wait_free_space_changes 5 "${_initial_free_space:?}"
+  ui_debug ''
+  _wait_free_space_changes 5 "${_initial_free_space:?}" # Reclaiming free space may take some time
+  ui_debug ''
 }
 
 _move_app_into_subfolder()
@@ -903,12 +913,11 @@ replace_permission_placeholders()
 
 prepare_installation()
 {
-  local _backup_ifs _need_newline
+  local _backup_ifs _need_newline _path_without_ext
 
   ui_msg 'Preparing installation...'
-
   _need_newline='false'
-  printf '\r\r' # Waste some time otherwise ui_debug may appear before the previous ui_msg
+  sleep 2> /dev/null '0.05' || : # Wait some time otherwise ui_debug may appear before the previous ui_msg
 
   if test "${API:?}" -ge 29; then # Android 10+
     ui_debug '  Processing ACCESS_BACKGROUND_LOCATION...'
@@ -973,9 +982,22 @@ prepare_installation()
   fi
 
   set_std_perm_recursive "${TMP_PATH:?}/files"
-  if test -e "${TMP_PATH:?}/addon.d"; then
+  if test -d "${TMP_PATH:?}/origin/bin"; then
+    set_std_perm_recursive "${TMP_PATH:?}/origin/bin"
+  fi
+
+  if test -d "${TMP_PATH:?}/addon.d"; then
     set_std_perm_recursive "${TMP_PATH:?}/addon.d"
     find "${TMP_PATH:?}/addon.d" -type f -name '*.sh' -exec chmod 0755 '{}' '+' || ui_error 'Failed to chmod addon.d scripts'
+  fi
+
+  if test -d "${TMP_PATH:?}/files/bin"; then
+    for entry in "${TMP_PATH:?}/files/bin"/*; do
+      if test ! -f "${entry:?}"; then continue; fi
+      _path_without_ext="$(remove_ext "${entry:?}")" || ui_error 'Failed to remove ext'
+      move_rename_file "${entry:?}" "${_path_without_ext:?}"
+      set_perm 0 2000 0755 "${_path_without_ext:?}"
+    done
   fi
 }
 
@@ -1011,7 +1033,6 @@ _wait_free_space_changes()
   local _max_attempts='15'
   if test -n "${1?}"; then _max_attempts="${1:?}"; fi
 
-  ui_debug ''
   printf 'Waiting..'
 
   while test "${_max_attempts:?}" -gt 0 && _max_attempts="$((_max_attempts - 1))"; do
@@ -1021,9 +1042,7 @@ _wait_free_space_changes()
     fi
     sleep 1
   done
-
-  ui_debug ''
-  ui_debug ''
+  printf '\n'
 }
 
 _custom_rollback()
@@ -1065,10 +1084,11 @@ _do_rollback_last_app_internal()
   done
   IFS="${_backup_ifs:-}"
 
-  fstrim 2> /dev/null -- "${SYS_MOUNTPOINT:?}" || true
+  fstrim 2> /dev/null -- "${SYS_MOUNTPOINT:?}" || :
 
-  # Reclaiming free space may take some time
-  _wait_free_space_changes '' "${_initial_free_space:?}"
+  ui_debug ''
+  _wait_free_space_changes '' "${_initial_free_space:?}" # Reclaiming free space may take some time
+  ui_debug ''
 
   sed -ie '$ d' -- "${TMP_PATH:?}/processed-${1:?}s.log" || ui_error "Failed to remove the last line from read processed-${1?}s.log"
 
@@ -1252,9 +1272,9 @@ perform_installation()
     fi
   fi
 
-  perform_secure_copy_to_device 'etc/default-permissions'
   perform_secure_copy_to_device 'etc/permissions'
   perform_secure_copy_to_device 'framework'
+  perform_secure_copy_to_device 'etc/default-permissions'
   perform_secure_copy_to_device 'etc/org.fdroid.fdroid'
   if test "${PRIVAPP_FOLDERNAME:?}" != 'app'; then perform_secure_copy_to_device "${PRIVAPP_FOLDERNAME:?}"; fi
   perform_secure_copy_to_device 'app'
@@ -1836,7 +1856,7 @@ setup_app()
   local _app_conf _min_api _max_api _output_name _extract_libs _internal_name _file_hash _output_dir _installed_file_list
 
   _install="${1:-0}"
-  _chosen_option_name="${2:-}"
+  _chosen_option_name="${2-}"
   _vanity_name="${3:?}"
   _filename="${4:?}"
   _dir="${5:?}"
@@ -1907,6 +1927,70 @@ setup_app()
         '') ;;
         *) ui_error "Invalid value of extract libs => ${_extract_libs?}" ;;
       esac
+
+      return 0
+    else
+      ui_debug "Disabling: ${_vanity_name:?}"
+    fi
+  else
+    ui_debug "Skipping: ${_vanity_name:?}"
+  fi
+
+  return 1
+}
+
+setup_framework_lib()
+{
+  local _install _chosen_option_name _vanity_name _filename _dir _optional
+  local _app_conf _min_api _max_api _output_name _extract_libs _internal_name _file_hash _output_dir
+
+  _install="${1:-0}"
+  _chosen_option_name="${2-}"
+  _vanity_name="${3:?}"
+  _filename="${4:?}"
+  _optional="${5:-true}"
+  _dir='framework'
+  if test "${_optional:?}" = 'true' && test ! -f "${TMP_PATH:?}/origin/${_dir:?}/${_filename:?}.jar"; then return 1; fi
+
+  _app_conf="$(file_get_first_line_that_start_with "${_dir:?}/${_filename:?}|" "${TMP_PATH:?}/origin/file-list.dat")" || ui_error "Failed to get app config for '${_vanity_name?}'"
+  _min_api="$(string_split "${_app_conf:?}" 2)" || ui_error "Failed to get min API for '${_vanity_name?}'"
+  _max_api="$(string_split "${_app_conf:?}" 3)" || ui_error "Failed to get max API for '${_vanity_name?}'"
+  _output_name="$(string_split "${_app_conf:?}" 4)" || ui_error "Failed to get output name for '${_vanity_name?}'"
+  _extract_libs=''
+  _internal_name=''
+  _file_hash="$(string_split "${_app_conf:?}" 7)" || ui_error "Failed to get the hash of '${_vanity_name?}'"
+
+  _output_dir="${_dir:?}"
+
+  ui_debug ''
+
+  if test "${API:?}" -ge "${_min_api:?}" && test "${API:?}" -le "${_max_api:-999}"; then
+    if test "${_optional:?}" = 'true' && test "${LIVE_SETUP_ENABLED:?}" = 'true'; then
+      choose "Do you want to install ${_vanity_name:?}?" '+) Yes' '-) No'
+      if test "${?}" -eq 3; then _install='1'; else _install='0'; fi
+    fi
+
+    if test -n "${_chosen_option_name?}" && test "${CURRENTLY_ROLLBACKING:-false}" != 'true' && test "${_optional:?}" = 'true'; then
+      printf '%s\n' "${_chosen_option_name:?}=${_install:?}" 1>> "${TMP_PATH:?}/saved-choices.dat" || ui_error 'Failed to update saved-choices.dat'
+    fi
+
+    if test "${_install:?}" -ne 0 || test "${_optional:?}" != 'true'; then
+      ui_msg "Enabling: ${_vanity_name:?}"
+
+      ui_msg_sameline_start 'Verifying... '
+      ui_debug ''
+      verify_sha1 "${TMP_PATH:?}/origin/${_dir:?}/${_filename:?}.jar" "${_file_hash:?}" || ui_error "Failed hash verification of '${_vanity_name?}'"
+      ui_msg_sameline_end 'OK'
+
+      mkdir -p "${TMP_PATH:?}/files/${_output_dir:?}" || ui_error "Failed to create the folder for '${_vanity_name?}'"
+
+      if test -f "${TMP_PATH:?}/origin/etc/permissions/${_filename:?}.xml"; then
+        create_dir "${TMP_PATH:?}/files/etc/permissions" || ui_error "Failed to create the permissions folder for '${_vanity_name?}'"
+        move_rename_file "${TMP_PATH:?}/origin/etc/permissions/${_filename:?}.xml" "${TMP_PATH:?}/files/etc/permissions/${_output_name:?}.xml" || ui_error "Failed to setup the xml of '${_vanity_name?}'"
+      else
+        ui_error "Missing permission xml file for '${_vanity_name?}'"
+      fi
+      move_rename_file "${TMP_PATH:?}/origin/${_dir:?}/${_filename:?}.jar" "${TMP_PATH:?}/files/${_output_dir:?}/${_output_name:?}.jar" || ui_error "Failed to setup the app => '${_vanity_name?}'"
 
       return 0
     else
@@ -2635,8 +2719,8 @@ numerically_comparable_version()
 
 remove_ext()
 {
-  local str="$1"
-  echo "${str%.*}"
+  local str="${1}"
+  printf '%s\n' "${str%.*}"
 }
 
 # Find test: this is useful to test 'find' - if every file/folder, even the ones with spaces, is displayed in a single line then your version is good
