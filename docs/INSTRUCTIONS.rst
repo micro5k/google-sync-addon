@@ -19,4 +19,4 @@ Build
 Download
 --------
 
-You can get the complete package in the `XDA thread <https://forum.xda-developers.com/showthread.php?t=3432360>`_.
+You can get the complete package in the `XDA thread <https://xdaforums.com/t/3432360/>`_.

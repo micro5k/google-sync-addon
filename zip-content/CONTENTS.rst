@@ -49,4 +49,4 @@ Notes
 
 Components used only during setup (not installed)
 -------------------------------------------------
-- BusyBox for Android (available `here <https://forum.xda-developers.com/showthread.php?t=3348543>`_) - See `here <misc/README.rst>`_ for more info
+- BusyBox for Android (available `here <https://xdaforums.com/t/3348543/>`_) - See `here <misc/README.rst>`_ for more info
