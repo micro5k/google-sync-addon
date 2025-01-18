@@ -1,7 +1,7 @@
 ---
 # SPDX-FileCopyrightText: (c) 2021 ale5000
 # SPDX-License-Identifier: GPL-3.0-or-later
-# SPDX-FileType: SOURCE
+
 name: "Base"
 permissions: {}
 on:
@@ -10,18 +10,26 @@ on:
   workflow_dispatch:
 jobs:
   base-job:
-    name: "Coverage and testing"
+    name: "Artifacts, coverage and testing"
     runs-on: ubuntu-latest
 
     steps:
-      - name: "Check out code"
+      - name: "Checkout sources"
         uses: actions/checkout@v4
-      - name: "Set up Java"
+      - name: Parse repo info
+        id: "repo-info"
+        run: |
+          # Parsing informations...
+          id="$(grep -m 1 -e '^id=' -- 'zip-content/module.prop' | cut -d '=' -f '2-' -s)" || exit "${?}"
+          version="$(grep -m 1 -e '^version=' -- 'zip-content/module.prop' | cut -d '=' -f '2-' -s)" || exit "${?}"
+          printf 'id=%s\n' "${id?}" >> "${GITHUB_OUTPUT?}"
+          printf 'version=%s\n' "${version?}" >> "${GITHUB_OUTPUT?}"
+      - name: "Setup Java"
         uses: actions/setup-java@v4
         with:
           distribution: "temurin"
           java-version: "17"
-      - name: "Set up Ruby"
+      - name: "Setup Ruby"
         uses: ruby/setup-ruby@v1
         with:
           ruby-version: "3.3"
@@ -29,8 +37,8 @@ jobs:
         run: |
           # Installing Bashcov and simplecov-lcov...
           gem install bashcov:3.1.3 simplecov-lcov
-      - name: "Execute code coverage"
-        id: "coverage"
+      - name: "Build and coverage"
+        id: "build"
         run: |
           ### Executing code coverage...
           workspace_path='${{ github.workspace }}'; readonly workspace_path
@@ -57,24 +65,34 @@ jobs:
           if test -e "${workspace_path:?}/recovery-simulator/output/installed-files.log"; then
             cat "${workspace_path:?}/recovery-simulator/output/installed-files.log"
           fi
-      - name: "SHA256"
-        if: "${{ github.event_name != 'pull_request' }}"
+      - name: "ZIP info"
         run: |
-          # SHA256...
-          sha256_hash='${{ steps.coverage.outputs.sha256_hash }}'; readonly sha256_hash
-          echo "::notice::${sha256_hash:-Missing hash}"
+          # Retrieve informations...
+          ZIP_FOLDER='${{ steps.build.outputs.ZIP_FOLDER }}'
+          ZIP_FILENAME='${{ steps.build.outputs.ZIP_FILENAME }}'
+          ZIP_VERSION='${{ steps.build.outputs.ZIP_VERSION }}'
+          ZIP_SHORT_COMMIT_ID='${{ steps.build.outputs.ZIP_SHORT_COMMIT_ID }}'
+          ZIP_SHA256='${{ steps.build.outputs.ZIP_SHA256 }}'
+          ZIP_MD5='${{ steps.build.outputs.ZIP_MD5 }}'
+          # Displaying informations...
+          printf '%s\n' "::notice::Filename: ${ZIP_FILENAME:-Missing}"
+          printf '%s\n' "::notice::Version: ${ZIP_VERSION:-Missing}"
+          printf '%s\n' "::notice::Short commit ID: ${ZIP_SHORT_COMMIT_ID:-Missing}"
+          printf '%s\n' "::notice::SHA-256: ${ZIP_SHA256:-Missing}"
+          printf '%s\n' "::notice::MD5: ${ZIP_MD5:-Missing}"
+          : "${ZIP_FOLDER:?}" || exit "${?}"
       - name: "Upload artifacts"
         if: "${{ false && github.event_name != 'pull_request' }}"
         uses: actions/upload-artifact@v4
         with:
-          name: "Google Sync add-on OSS build (extract it)"
-          path: "output/*.zip*"
+          name: "${{ steps.repo-info.outputs.id }}-${{ steps.repo-info.outputs.version }}-${{ steps.build.outputs.ZIP_SHORT_COMMIT_ID }}-oss archive (extract it)"
+          path: "${{ steps.build.outputs.ZIP_FOLDER }}/*.zip*"
           retention-days: 7
       - name: "Upload coverage reports to Codacy"
         if: "${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && github.repository_owner == 'micro5k' }}"
         uses: codacy/codacy-coverage-reporter-action@v1
         with:
-          project-token: ${{ secrets.CODACY_PROJECT_TOKEN }}
+          project-token: "${{ secrets.CODACY_PROJECT_TOKEN }}"
       - name: "Upload coverage reports to Codecov"
         if: "${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && github.repository_owner == 'micro5k' }}"
         uses: codecov/codecov-action@v5
