@@ -1,0 +1,107 @@
+---
+# SPDX-FileCopyrightText: (c) 2025 ale5000
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+name: "Auto-nightly"
+permissions: {}
+on:
+  push:
+    branches:
+      - "main"
+concurrency:
+  group: "${{ github.repository_id }}-${{ github.workflow }}"
+  cancel-in-progress: true
+jobs:
+  base-job:
+    name: "Nightly"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Needed to create a tag
+
+    steps:
+      - name: "Checkout sources"
+        uses: actions/checkout@v4
+      - name: "Setup Java"
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "17"
+      - name: "Build nightly"
+        id: "build"
+        shell: bash
+        run: |
+          ### Building nightly...
+          BUILD_TYPE='oss' '${{ github.workspace }}/build.sh'
+      - name: "ZIP info"
+        run: |
+          # Retrieve informations...
+          ZIP_FOLDER='${{ steps.build.outputs.ZIP_FOLDER }}'
+          ZIP_FILENAME='${{ steps.build.outputs.ZIP_FILENAME }}'
+          ZIP_VERSION='${{ steps.build.outputs.ZIP_VERSION }}'
+          ZIP_SHORT_COMMIT_ID='${{ steps.build.outputs.ZIP_SHORT_COMMIT_ID }}'
+          ZIP_BUILD_TYPE='${{ steps.build.outputs.ZIP_BUILD_TYPE }}'
+          ZIP_BUILD_TYPE_SUPPORTED='${{ steps.build.outputs.ZIP_BUILD_TYPE_SUPPORTED }}'
+          ZIP_IS_ALPHA='${{ steps.build.outputs.ZIP_IS_ALPHA }}'
+          ZIP_SHA256='${{ steps.build.outputs.ZIP_SHA256 }}'
+          ZIP_MD5='${{ steps.build.outputs.ZIP_MD5 }}'
+          # Displaying informations...
+          printf '%s\n' "::notice::Filename: ${ZIP_FILENAME:-Missing}"
+          printf '%s\n' "::notice::Version: ${ZIP_VERSION:-Missing}"
+          printf '%s\n' "::notice::Short commit ID: ${ZIP_SHORT_COMMIT_ID:-Missing}"
+          printf '%s\n' "::notice::Build type: ${ZIP_BUILD_TYPE:?}"
+          printf '%s\n' "::notice::Build type supported: ${ZIP_BUILD_TYPE_SUPPORTED:?}"
+          printf '%s\n' "::notice::Is alpha: ${ZIP_IS_ALPHA:-Missing}"
+          printf '%s\n' "::notice::SHA-256: ${ZIP_SHA256:-Missing}"
+          printf '%s\n' "::notice::MD5: ${ZIP_MD5:-Missing}"
+          : "${ZIP_FOLDER:?}" || exit "${?}"
+      - name: "Delete previous nightly release"
+        uses: actions/github-script@v7
+        if: "${{ github.event_name != 'pull_request' && steps.build.outputs.ZIP_BUILD_TYPE_SUPPORTED == 'true' && steps.build.outputs.ZIP_IS_ALPHA == 'true' }}"
+        with:
+          retries: 3
+          script: |
+            /* jshint esversion: 6 */
+            const response = await github.rest.repos.getReleaseByTag({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag: 'nightly'
+            }).catch(response => response);
+            if(response.status >= 200 && response.status < 300 && response.data && response.data.id && response.data.tag_name === 'nightly') {
+              await github.rest.repos.deleteRelease({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                release_id: response.data.id
+              });
+              console.log('Previous nightly release deleted: ' + response.data.name + ' (' + response.data.id + ')')
+            } else if(response.status !== 404) {
+              throw response;
+            }
+            github.rest.git.deleteRef({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: 'tags/nightly'
+            }).catch(error => {
+              if(error.status !== 422 || error.message !== 'Reference does not exist') throw error;
+            });
+      - name: "Create nightly release"
+        uses: softprops/action-gh-release@v2
+        if: "${{ github.event_name != 'pull_request' && steps.build.outputs.ZIP_BUILD_TYPE_SUPPORTED == 'true' && steps.build.outputs.ZIP_IS_ALPHA == 'true' }}"
+        with:
+          name: "Nightly build"
+          tag_name: "nightly"
+          body: "Latest automatically built ZIP (unstable development snapshot)\n\nSHA-256: ${{ steps.build.outputs.ZIP_SHA256 }}"
+          append_body: false
+          generate_release_notes: false
+          make_latest: false
+          draft: false
+          prerelease: true
+          files: "${{ steps.build.outputs.ZIP_FOLDER }}/*.zip*"
+          fail_on_unmatched_files: true
+      - name: "Upload artifacts"
+        uses: actions/upload-artifact@v4
+        if: "${{ steps.build.outputs.ZIP_BUILD_TYPE_SUPPORTED == 'true' }}"
+        with:
+          name: "${{ github.event.repository.name }}-${{ steps.build.outputs.ZIP_VERSION }}-${{ steps.build.outputs.ZIP_SHORT_COMMIT_ID }}-${{ steps.build.outputs.ZIP_BUILD_TYPE }} archive (extract it)"
+          path: "${{ steps.build.outputs.ZIP_FOLDER }}/*.zip*"
+          if-no-files-found: "error"
+          retention-days: 7
