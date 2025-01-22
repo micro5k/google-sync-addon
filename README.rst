@@ -30,14 +30,10 @@ This project is available on GitHub_, on GitLab_ as well as on XDA_.
 Release
 -------
 .. image:: https://img.shields.io/github/v/release/micro5k/google-sync-addon.svg?cacheSeconds=3600
-   :alt: GitHub release
-   :target: docs/INSTRUCTIONS.rst
+   :alt: GitHub latest release
+   :target: `Release`_
 
-.. image:: ../../actions/workflows/auto-nightly.yml/badge.svg
-   :alt: GitHub nightly workflow
-   :target: ../../actions/workflows/auto-nightly.yml
-
-See `here <docs/INSTRUCTIONS.rst>`_ for the instructions.
+Download `releases <docs/INSTRUCTIONS.rst>`_
 
 
 Copyright
@@ -48,8 +44,12 @@ Copyright
 Code analysis
 -------------
 .. image:: https://github.com/micro5k/google-sync-addon/actions/workflows/code-linting.yml/badge.svg
-   :alt: Code linting of GitHub
+   :alt: Code linting workflow
    :target: https://github.com/micro5k/google-sync-addon/actions/workflows/code-linting.yml
+
+.. image:: https://github.com/micro5k/google-sync-addon/actions/workflows/auto-nightly.yml/badge.svg
+   :alt: Nightly workflow
+   :target: https://github.com/micro5k/google-sync-addon/actions/workflows/auto-nightly.yml
 
 .. image:: https://www.codefactor.io/repository/github/micro5k/google-sync-addon/badge
    :alt: CodeFactor Badge
