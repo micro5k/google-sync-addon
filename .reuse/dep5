@@ -5,9 +5,5 @@ Source: https://github.com/micro5k/google-sync-addon
 Comment: Here I will list only files that don't have license and/or copyright in the files themselves as per REUSE specification
 License: GPL-3.0-or-later
 
-Files: README.rst
-Copyright: © 2016-2019, 2021-2025 ale5000
-License: GPL-3.0-or-later
-
 License: GPL-3.0-or-later
  <../LICENSES/GPL-3.0-or-later.txt>
