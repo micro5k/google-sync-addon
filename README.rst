@@ -34,8 +34,8 @@ Release
    :target: docs/INSTRUCTIONS.rst
 
 .. image:: ../../actions/workflows/auto-nightly.yml/badge.svg
-   :alt: GitHub nightly
-   :target: ../../releases/tag/nightly
+   :alt: GitHub nightly workflow
+   :target: ../../actions/workflows/auto-nightly.yml
 
 See `here <docs/INSTRUCTIONS.rst>`_ for the instructions.
 
