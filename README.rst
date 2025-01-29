@@ -58,3 +58,7 @@ Code analysis
 .. image:: https://app.codacy.com/project/badge/Grade/0a3cd4857c224c59afa38e4cdfeb9486
    :alt: Codacy Badge
    :target: https://app.codacy.com/gh/micro5k/google-sync-addon/dashboard
+
+.. image:: https://sonarcloud.io/api/project_badges/measure?project=micro5k_google-sync-addon&metric=reliability_rating
+   :alt: SonarQube reliability rating
+   :target: https://sonarcloud.io/summary/new_code?id=micro5k_google-sync-addon
