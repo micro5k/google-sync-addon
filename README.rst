@@ -43,13 +43,9 @@ Copyright
 
 Code analysis
 -------------
-.. image:: https://github.com/micro5k/google-sync-addon/actions/workflows/code-linting.yml/badge.svg
+.. image:: https://github.com/micro5k/google-sync-addon/actions/workflows/code-linting-1.yml/badge.svg
    :alt: Code linting workflow
-   :target: https://github.com/micro5k/google-sync-addon/actions/workflows/code-linting.yml
-
-.. image:: https://github.com/micro5k/google-sync-addon/actions/workflows/auto-nightly.yml/badge.svg
-   :alt: Nightly workflow
-   :target: https://github.com/micro5k/google-sync-addon/actions/workflows/auto-nightly.yml
+   :target: https://github.com/micro5k/google-sync-addon/actions/workflows/code-linting-1.yml
 
 .. image:: https://www.codefactor.io/repository/github/micro5k/google-sync-addon/badge
    :alt: CodeFactor Badge
