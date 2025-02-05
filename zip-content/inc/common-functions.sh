@@ -793,7 +793,7 @@ initialize()
       DATA_INIT_STATUS=1
       ui_debug "Mounted: ${DATA_PATH:-}"
     else
-      ui_warning "The data partition cannot be mounted, so updates of installed / removed apps cannot be deleted and their Dalvik cache cannot be cleaned, but it doesn't matter if you do a factory reset"
+      ui_warning "The data partition cannot be mounted, so updates of installed / removed apps cannot be automatically deleted and their Dalvik cache cannot be automatically cleaned. I suggest to manually do a factory reset after flashing this ZIP."
     fi
   fi
   readonly DATA_PATH
@@ -876,7 +876,7 @@ clean_previous_installations()
     ui_error "Something is wrong because '${SYS_PATH?}' is NOT really writable!!!"
   fi
 
-  _initial_free_space="$(_get_free_space)" || _initial_free_space='-1'
+  _initial_free_space="$(get_free_disk_space_of_partition "${SYS_PATH:?}")" || _initial_free_space='-1'
 
   rm -f -- "${SYS_PATH:?}/etc/write-test-file.dat" || ui_error 'Failed to delete the test file'
 
@@ -1006,11 +1006,11 @@ _something_exists()
   return 1
 }
 
-_get_free_space()
+_get_free_disk_space_of_partition_using_df()
 {
   local _skip_first='true'
 
-  df -P -- "${SYS_MOUNTPOINT:?}" | while IFS=' ' read -r _ _ _ available_space _; do
+  df -B1 -P -- "${1:?}" | while IFS=' ' read -r _ _ _ available_space _; do
     if test "${_skip_first?}" = 'true'; then
       _skip_first='false'
       continue
@@ -1027,14 +1027,16 @@ _get_free_space()
 
 _wait_free_space_changes()
 {
-  local _max_attempts='15'
+  local _max_attempts
+
+  _max_attempts='15'
   if test -n "${1?}"; then _max_attempts="${1:?}"; fi
 
   printf 'Waiting..'
 
   while test "${_max_attempts:?}" -gt 0 && _max_attempts="$((_max_attempts - 1))"; do
     printf '.'
-    if test "$(_get_free_space || true)" != "${2:?}"; then
+    if test "$(get_free_disk_space_of_partition "${SYS_PATH:?}" || :)" != "${2:?}"; then
       break
     fi
     sleep 1
@@ -1058,7 +1060,7 @@ _do_rollback_last_app_internal()
   local _backup_ifs _skip_first _initial_free_space _vanity_name _installed_file_list
   if test ! -s "${TMP_PATH:?}/processed-${1:?}s.log"; then return 1; fi
 
-  _initial_free_space="$(_get_free_space)" || return 2
+  _initial_free_space="$(get_free_disk_space_of_partition "${SYS_PATH:?}")" || return 2
   _installed_file_list="$(tail -n '1' -- "${TMP_PATH:?}/processed-${1:?}s.log")" || ui_error "Failed to read processed-${1?}s.log"
   test -n "${_installed_file_list?}" || return 3
 
@@ -1087,7 +1089,7 @@ _do_rollback_last_app_internal()
   _wait_free_space_changes '' "${_initial_free_space:?}" # Reclaiming free space may take some time
   ui_debug ''
 
-  sed -ie '$ d' -- "${TMP_PATH:?}/processed-${1:?}s.log" || ui_error "Failed to remove the last line from read processed-${1?}s.log"
+  sed -ie '$ d' "${TMP_PATH:?}/processed-${1:?}s.log" || ui_error "Failed to remove the last line from processed-${1?}s.log"
 
   if command 1> /dev/null -v 'rollback_complete_callback'; then
     export CURRENTLY_ROLLBACKING='true'
@@ -1124,16 +1126,55 @@ _is_free_space_error()
   return 1 # NOT found
 }
 
+get_size_of_file()
+{
+  local _stat_result
+
+  if _stat_result="$(stat 2> /dev/null -c '%s' -- "${1:?}")"; then
+    : # OK
+  elif test -n "${DEVICE_STAT?}" && _stat_result="$(PATH="${PREVIOUS_PATH:?}" "${DEVICE_STAT:?}" -c '%s' -- "${1:?}")"; then
+    : # OK
+  else
+    _stat_result=''
+  fi
+
+  if test -n "${_stat_result?}" && printf '%s\n' "${_stat_result:?}"; then
+    return 0
+  fi
+
+  return 1
+}
+
+get_free_disk_space_of_partition()
+{
+  local _stat_result
+
+  if _stat_result="$(stat 2> /dev/null -f -c '%f * %S' -- "${1:?}")"; then
+    : # OK
+  elif test -n "${DEVICE_STAT?}" && _stat_result="$(PATH="${PREVIOUS_PATH:?}" "${DEVICE_STAT:?}" 2> /dev/null -f -c '%f * %S' -- "${1:?}")"; then
+    : # OK
+  else
+    _stat_result=''
+  fi
+
+  if test -n "${_stat_result?}" && printf '%s\n' "$((_stat_result))"; then
+    return 0
+  fi
+
+  printf '%s\n' '-1'
+  return 1
+}
+
 get_disk_space_usage_of_file_or_folder()
 {
   local _result
 
-  if _result="$(du 2> /dev/null -s -B 1 -- "${1:?}" | cut -f 1 -s)" && test -n "${_result?}"; then
-    printf '%u\n' "${_result:?}"
+  if _result="$(du 2> /dev/null -s -B1 -- "${1:?}" | cut -f 1 -s)" && test -n "${_result?}"; then
+    printf '%s\n' "${_result:?}"
   elif _result="$(du -s -k -- "${1:?}" | cut -f 1 -s)" && test -n "${_result?}"; then
-    printf '%u\n' "$((_result * 1024))"
+    printf '%s\n' "$((_result * 1024))"
   else
-    printf '%d\n' '-1'
+    printf '%s\n' '-1'
     return 1
   fi
 }
@@ -1184,21 +1225,30 @@ verify_disk_space()
 {
   local _needed_space_bytes _free_space_bytes
 
-  _needed_space_bytes="$(get_disk_space_usage_of_file_or_folder "${TMP_PATH:?}/files")" || _needed_space_bytes='-1'
-  _free_space_bytes="$(($(stat -f -c '%f * %S' -- "${1:?}")))" || _free_space_bytes='-1'
+  if _needed_space_bytes="$(get_disk_space_usage_of_file_or_folder "${TMP_PATH:?}/files")" && test -n "${_needed_space_bytes?}"; then
+    ui_msg "Disk space required: $(convert_bytes_to_mb "${_needed_space_bytes:?}" || :) MB"
+  else
+    _needed_space_bytes='-1'
+  fi
 
-  ui_msg "Disk space required: $(convert_bytes_to_mb "${_needed_space_bytes:?}" || true) MB"
-  ui_msg "Free disk space: $(convert_bytes_to_mb "${_free_space_bytes:?}" || true) MB ($(convert_bytes_to_human_readable_format "${_free_space_bytes:?}" || true))"
+  if _free_space_bytes="$(get_free_disk_space_of_partition "${1:?}")" && test -n "${_free_space_bytes?}"; then
+    ui_msg "Free disk space: $(convert_bytes_to_mb "${_free_space_bytes:?}" || :) MB ($(convert_bytes_to_human_readable_format "${_free_space_bytes:?}" || :))"
+  else
+    ui_warning "Unable to get free disk space, output for '${1?}' => $(stat -f -c '%f * %S' -- "${1:?}" || :)"
+    _free_space_bytes='-1'
+  fi
 
-  if test "${_needed_space_bytes:?}" -lt 0 || test "${_free_space_bytes:?}" -lt 0; then
+  if test "${_needed_space_bytes:?}" -gt 0 && test "${_free_space_bytes:?}" -ge 0; then
+    : # OK
+  else
     ui_msg_empty_line
-    ui_warning "Unable to verify needed space, continuing anyway"
+    ui_warning 'Unable to verify needed space, continuing anyway'
     return 0
   fi
 
-  if test "${_needed_space_bytes:?}" -ge "${_free_space_bytes:?}"; then return 1; fi
+  if test "${_free_space_bytes:?}" -gt "${_needed_space_bytes:?}"; then return 0; fi
 
-  return 0
+  return 1
 }
 
 perform_secure_copy_to_device()
@@ -1230,8 +1280,15 @@ perform_secure_copy_to_device()
   touch 2> /dev/null "${SYS_PATH:?}/etc/zips/${MODULE_ID:?}.failed" || :
 
   ui_debug ''
-  df -h -T -- "${SYS_MOUNTPOINT:?}" || true
+  df 2> /dev/null -B1 -P -- "${SYS_MOUNTPOINT:?}" || :
   ui_debug ''
+  df 2> /dev/null -h -T -- "${SYS_MOUNTPOINT:?}" || df -h -- "${SYS_MOUNTPOINT:?}" || :
+  ui_debug ''
+
+  local _free_space_bytes
+  if _free_space_bytes="$(get_free_disk_space_of_partition "${SYS_PATH:?}")" && test -n "${_free_space_bytes?}"; then
+    ui_debug "Free disk space: $(convert_bytes_to_mb "${_free_space_bytes:?}" || :) MB ($(convert_bytes_to_human_readable_format "${_free_space_bytes:?}" || :))"
+  fi
 
   if test -n "${_error_text?}"; then
     ui_error "Failed to copy '${1?}' to the device due to => $(printf '%s\n' "${_error_text?}" | head -n 1 || :)"
@@ -1770,7 +1827,7 @@ select_lib()
 
 extract_libs()
 {
-  local _lib_selected
+  local _lib_selected _curr_arch _backup_ifs
 
   ui_msg "Extracting libs from ${1:?}/${2:?}.apk..."
   create_dir "${TMP_PATH:?}/libs"
@@ -1781,29 +1838,20 @@ extract_libs()
 
     _lib_selected='false'
 
-    if test "${ARCH_X64:?}" = 'true' && select_lib 'x86_64'; then
-      _lib_selected='true'
-    fi
-    if test "${ARCH_ARM64:?}" = 'true' && select_lib 'arm64-v8a'; then
-      _lib_selected='true'
-    fi
-    if test "${ARCH_MIPS64:?}" = 'true' && select_lib 'mips64'; then
-      _lib_selected='true'
-    fi
+    _backup_ifs="${IFS-}"
+    IFS=','
+    for _curr_arch in ${ARCH_LIST?}; do
+      if test -n "${_curr_arch?}" && select_lib "${_curr_arch:?}"; then
+        _lib_selected='true'
+        break
+      fi
+    done
+    IFS="${_backup_ifs?}"
 
-    if test "${ARCH_X86:?}" = 'true' && select_lib 'x86'; then
-      _lib_selected='true'
-    fi
-    if test "${ARCH_ARM:?}" = 'true' && select_lib 'armeabi-v7a'; then
-      _lib_selected='true'
-    elif test "${ARCH_LEGACY_ARM:?}" = 'true' && select_lib 'armeabi'; then
-      _lib_selected='true'
-    elif test "${ARCH_ARM:?}" = 'true' && select_lib 'armeabi-v7a-hard'; then # Use the deprecated Hard Float ABI only as fallback
-      _lib_selected='true'
-    fi
     # armeabi-v7a-hard is not a real ABI. No devices are built with this. The "hard float" variant only changes the function call ABI.
     # More info: https://android.googlesource.com/platform/ndk/+/master/docs/HardFloatAbi.md
-    if test "${ARCH_MIPS:?}" = 'true' && select_lib 'mips'; then
+    # Use the deprecated Hard Float ABI only as fallback
+    if test "${_lib_selected:?}" = 'false' && test "${ARCH_ARM:?}" = 'true' && select_lib 'armeabi-v7a-hard'; then
       _lib_selected='true'
     fi
 
@@ -1915,12 +1963,12 @@ setup_app()
         move_rename_file "${TMP_PATH:?}/origin/etc/default-permissions/default-permissions-${_filename:?}.xml" "${TMP_PATH:?}/files/etc/default-permissions/default-permissions-${_output_name:?}.xml" || ui_error "Failed to setup the default permissions xml of '${_vanity_name?}'"
         _installed_file_list="${_installed_file_list?}|etc/default-permissions/default-permissions-${_output_name:?}.xml"
       fi
-      if test "${_url_handling:?}" != 'false'; then
+      if test "${_url_handling:?}" != 'false' && test "${CURRENTLY_ROLLBACKING:-false}" != 'true'; then
         add_line_in_file_after_string "${TMP_PATH:?}/files/etc/sysconfig/google.xml" '<!-- %CUSTOM_APP_LINKS-START% -->' "    <app-link package=\"${_internal_name:?}\" />" || ui_error "Failed to auto-enable URL handling for '${_vanity_name?}'"
       fi
       move_rename_file "${TMP_PATH:?}/origin/${_dir:?}/${_filename:?}.apk" "${TMP_PATH:?}/files/${_output_dir:?}/${_output_name:?}.apk" || ui_error "Failed to setup the app => '${_vanity_name?}'"
 
-      if test "${CURRENTLY_ROLLBACKING:-false}" != 'true' && test "${_optional:?}" = 'true' && test "$(stat -c '%s' -- "${TMP_PATH:?}/files/${_output_dir:?}/${_output_name:?}.apk" || printf '0' || true)" -gt 300000; then
+      if test "${CURRENTLY_ROLLBACKING:-false}" != 'true' && test "${_optional:?}" = 'true' && test "$(get_size_of_file "${TMP_PATH:?}/files/${_output_dir:?}/${_output_name:?}.apk" || printf '0' || :)" -gt 102400; then
         _installed_file_list="${_installed_file_list#|}"
         printf '%s\n' "${_vanity_name:?}|${_output_dir:?}/${_output_name:?}.apk|${_installed_file_list?}" 1>> "${TMP_PATH:?}/processed-${_dir:?}s.log" || ui_error "Failed to update processed-${_dir?}s.log"
       fi
