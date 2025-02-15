@@ -58,9 +58,9 @@ if test "${IS_INCLUDED:-false}" = 'false'; then
     FIRST_INSTALLATION='true'
     API=999
     SYS_PATH="${ANDROID_ROOT:-/system}"
-    PRIVAPP_PATH="${SYS_PATH:?}/app"
-    if test -e "${SYS_PATH:?}/priv-app"; then PRIVAPP_PATH="${SYS_PATH:?}/priv-app"; fi
+    PRIVAPP_DIRNAME='priv-app'
     DATA_PATH="${ANDROID_DATA:-/data}"
+    DEST_PATH="${SYS_PATH:?}"
   }
 fi
 
@@ -86,32 +86,32 @@ if test -e '/mnt/sdcard'; then INTERNAL_MEMORY_PATH='/mnt/sdcard'; fi
 
 uninstall_list | while IFS='|' read -r FILENAME INTERNAL_NAME _; do
   if test -n "${INTERNAL_NAME}"; then
-    delete "${PRIVAPP_PATH}/${INTERNAL_NAME}"
-    delete "${PRIVAPP_PATH}/${INTERNAL_NAME}.apk"
-    delete "${SYS_PATH}/app/${INTERNAL_NAME}"
-    delete "${SYS_PATH}/app/${INTERNAL_NAME}.apk"
+    delete "${SYS_PATH:?}/${PRIVAPP_DIRNAME:?}/${INTERNAL_NAME}"
+    delete "${SYS_PATH:?}/${PRIVAPP_DIRNAME:?}/${INTERNAL_NAME}.apk"
+    delete "${SYS_PATH:?}/app/${INTERNAL_NAME}"
+    delete "${SYS_PATH:?}/app/${INTERNAL_NAME}.apk"
   fi
 
   if test -n "${FILENAME}"; then
-    delete "${PRIVAPP_PATH}/${FILENAME}"
-    delete "${PRIVAPP_PATH}/${FILENAME}.apk"
-    delete "${PRIVAPP_PATH}/${FILENAME}.odex"
-    delete "${SYS_PATH}/app/${FILENAME}"
-    delete "${SYS_PATH}/app/${FILENAME}.apk"
-    delete "${SYS_PATH}/app/${FILENAME}.odex"
+    delete "${SYS_PATH:?}/${PRIVAPP_DIRNAME:?}/${FILENAME}"
+    delete "${SYS_PATH:?}/${PRIVAPP_DIRNAME:?}/${FILENAME}.apk"
+    delete "${SYS_PATH:?}/${PRIVAPP_DIRNAME:?}/${FILENAME}.odex"
+    delete "${SYS_PATH:?}/app/${FILENAME}"
+    delete "${SYS_PATH:?}/app/${FILENAME}.apk"
+    delete "${SYS_PATH:?}/app/${FILENAME}.odex"
 
-    delete "${SYS_PATH}/system_ext/priv-app/${FILENAME}"
-    delete "${SYS_PATH}/system_ext/app/${FILENAME}"
+    delete "${SYS_PATH:?}/system_ext/priv-app/${FILENAME}"
+    delete "${SYS_PATH:?}/system_ext/app/${FILENAME}"
     delete "/system_ext/priv-app/${FILENAME}"
     delete "/system_ext/app/${FILENAME}"
 
-    delete "${SYS_PATH}/product/priv-app/${FILENAME}"
-    delete "${SYS_PATH}/product/app/${FILENAME}"
+    delete "${SYS_PATH:?}/product/priv-app/${FILENAME}"
+    delete "${SYS_PATH:?}/product/app/${FILENAME}"
     delete "/product/priv-app/${FILENAME}"
     delete "/product/app/${FILENAME}"
 
-    delete "${SYS_PATH}/vendor/priv-app/${FILENAME}"
-    delete "${SYS_PATH}/vendor/app/${FILENAME}"
+    delete "${SYS_PATH:?}/vendor/priv-app/${FILENAME}"
+    delete "${SYS_PATH:?}/vendor/app/${FILENAME}"
     delete "/vendor/priv-app/${FILENAME}"
     delete "/vendor/app/${FILENAME}"
 
@@ -130,10 +130,10 @@ uninstall_list | while IFS='|' read -r FILENAME INTERNAL_NAME _; do
     delete "${SYS_PATH:?}/vendor/lib/${FILENAME:?}"
 
     # Current xml paths
-    delete "${SYS_PATH}/etc/permissions/privapp-permissions-${FILENAME:?}.xml"
-    delete "${SYS_PATH}/etc/default-permissions/default-permissions-${FILENAME:?}.xml"
+    delete "${SYS_PATH:?}/etc/permissions/privapp-permissions-${FILENAME:?}.xml"
+    delete "${SYS_PATH:?}/etc/default-permissions/default-permissions-${FILENAME:?}.xml"
     # Legacy xml paths
-    delete "${SYS_PATH}/etc/default-permissions/${FILENAME:?}-permissions.xml"
+    delete "${SYS_PATH:?}/etc/default-permissions/${FILENAME:?}-permissions.xml"
   fi
 
   if test -n "${INTERNAL_NAME}"; then
@@ -165,14 +165,14 @@ uninstall_list | while IFS='|' read -r FILENAME INTERNAL_NAME _; do
     delete_folder_content_silent "${DATA_PATH:?}/data/${INTERNAL_NAME:?}/app_cache_dg"
 
     # Legacy xml paths
-    delete "${SYS_PATH}/etc/default-permissions/${INTERNAL_NAME:?}-permissions.xml"
+    delete "${SYS_PATH:?}/etc/default-permissions/${INTERNAL_NAME:?}-permissions.xml"
     # Other installers
-    delete "${SYS_PATH}/etc/permissions/privapp-permissions-${INTERNAL_NAME:?}.xml"
-    delete "${SYS_PATH}/etc/permissions/permissions_${INTERNAL_NAME:?}.xml"
-    delete "${SYS_PATH}/etc/permissions/${INTERNAL_NAME:?}.xml"
-    delete "${SYS_PATH}/etc/default-permissions/default-permissions-${INTERNAL_NAME:?}.xml"
+    delete "${SYS_PATH:?}/etc/permissions/privapp-permissions-${INTERNAL_NAME:?}.xml"
+    delete "${SYS_PATH:?}/etc/permissions/permissions_${INTERNAL_NAME:?}.xml"
+    delete "${SYS_PATH:?}/etc/permissions/${INTERNAL_NAME:?}.xml"
+    delete "${SYS_PATH:?}/etc/default-permissions/default-permissions-${INTERNAL_NAME:?}.xml"
 
-    delete "${SYS_PATH}/etc/sysconfig/sysconfig-${INTERNAL_NAME:?}.xml"
+    delete "${SYS_PATH:?}/etc/sysconfig/sysconfig-${INTERNAL_NAME:?}.xml"
   fi
 done
 STATUS="$?"
@@ -203,8 +203,8 @@ list_app_data_to_remove | while IFS='|' read -r FILENAME; do
   delete "${INTERNAL_MEMORY_PATH}/Android/data/${FILENAME}"
 done
 
-delete "${SYS_PATH}"/etc/default-permissions/google-sync-permissions.xml
-delete "${SYS_PATH}"/etc/default-permissions/contacts-calendar-sync.xml
+delete "${SYS_PATH:?}"/etc/default-permissions/google-sync-permissions.xml
+delete "${SYS_PATH:?}"/etc/default-permissions/contacts-calendar-sync.xml
 
 # Legacy file
 delete "${SYS_PATH:?}/etc/zips/google-sync.prop"
