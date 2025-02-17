@@ -70,11 +70,8 @@ if test "${IS_INSTALLATION:?}" != 'true'; then
   clear_app 'com.google.android.syncadapters.contacts'
   clear_app 'com.google.android.backuptransport'
 
-  unmount_extra_partitions
   finalize_and_report_success
 fi
-
-unmount_extra_partitions
 
 # Prepare installation
 prepare_installation
