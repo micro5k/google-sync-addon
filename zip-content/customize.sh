@@ -19,29 +19,34 @@ export POSIXLY_CORRECT='y'
 
 ### PREVENTIVE CHECKS ###
 
-if test -z "${BOOTMODE:-}"; then
+if test -z "${BOOTMODE-}"; then
   printf 1>&2 '%s\n' 'Missing BOOTMODE variable'
-  abort 'Missing BOOTMODE variable' 2> /dev/null || exit 1
+  abort 2> /dev/null 'Missing BOOTMODE variable'
+  exit 1
 fi
-if test -z "${OUTFD:-}" || test "${OUTFD:?}" -lt 1; then
+if test -z "${ZIPFILE-}"; then
+  printf 1>&2 '%s\n' 'Missing ZIPFILE variable'
+  abort 2> /dev/null 'Missing ZIPFILE variable'
+  exit 1
+fi
+if test -z "${TMPDIR-}" || test ! -e "${TMPDIR:?}"; then
+  printf 1>&2 '%s\n' 'The temp folder is missing (2)'
+  abort 2> /dev/null 'The temp folder is missing (2)'
+  exit 1
+fi
+if test -z "${OUTFD-}" || test "${OUTFD:?}" -lt 1; then
   printf 1>&2 '%s\n' 'Missing or invalid OUTFD variable'
-  abort 'Missing or invalid OUTFD variable' 2> /dev/null || exit 1
+  abort 2> /dev/null  'Missing or invalid OUTFD variable'
+  exit 1
 fi
 RECOVERY_PIPE="/proc/self/fd/${OUTFD:?}"
-if test -z "${ZIPFILE:-}"; then
-  printf 1>&2 '%s\n' 'Missing ZIPFILE variable'
-  abort 'Missing ZIPFILE variable' 2> /dev/null || exit 1
-fi
-if test -z "${TMPDIR:-}" || test ! -e "${TMPDIR:?}"; then
-  printf 1>&2 '%s\n' 'The temp folder is missing (2)'
-  abort 'The temp folder is missing (2)' 2> /dev/null || exit 1
-fi
+test -e "${RECOVERY_PIPE:?}" || RECOVERY_PIPE=''
 
 export BOOTMODE
-export OUTFD
-export RECOVERY_PIPE
 export ZIPFILE
 export TMPDIR
+export OUTFD
+export RECOVERY_PIPE
 export ANDROID_ROOT
 export ANDROID_DATA
 unset REPLACE
@@ -130,27 +135,38 @@ _send_text_to_recovery()
 {
   if test "${RECOVERY_OUTPUT:?}" != 'true'; then return; fi # Nothing to do here
 
-  if test -e "${RECOVERY_PIPE:?}"; then
+  if test -n "${RECOVERY_PIPE?}"; then
     printf 'ui_print %s\nui_print\n' "${1?}" >> "${RECOVERY_PIPE:?}"
   else
     printf 'ui_print %s\nui_print\n' "${1?}" 1>&"${OUTFD:?}"
   fi
 
-  if test "${DEBUG_LOG_ENABLED:?}" -eq 1; then printf 1>&2 '%s\n' "${1?}"; fi
+  if test "${DEBUG_LOG_ENABLED:?}" = '1'; then printf 1>&2 '%s\n' "${1?}"; fi
+}
+
+_print_text()
+{
+  if test -n "${NO_COLOR-}"; then
+    printf '%s\n' "${2?}"
+  else
+    # shellcheck disable=SC2059
+    printf "${1:?}\n" "${2?}"
+  fi
 }
 
 ui_error()
 {
-  ERROR_CODE=79
-  if test -n "${2:-}"; then ERROR_CODE="${2:?}"; fi
+  local _error_code
+  _error_code=79
+  test -z "${2-}" || _error_code="${2:?}"
 
   if test "${RECOVERY_OUTPUT:?}" = 'true'; then
-    _send_text_to_recovery "ERROR ${ERROR_CODE:?}: ${1:?}"
+    _send_text_to_recovery "ERROR ${_error_code:?}: ${1:?}"
   else
-    printf 1>&2 '\033[1;31m%s\033[0m\n' "ERROR ${ERROR_CODE:?}: ${1:?}"
+    _print_text 1>&2 '\033[1;31m%s\033[0m' "ERROR ${_error_code:?}: ${1:?}"
   fi
 
-  abort '' 2> /dev/null || exit "${ERROR_CODE:?}"
+  exit "${_error_code:?}"
 }
 
 ui_warning()
@@ -158,7 +174,7 @@ ui_warning()
   if test "${RECOVERY_OUTPUT:?}" = 'true'; then
     _send_text_to_recovery "WARNING: ${1:?}"
   else
-    printf 1>&2 '\033[0;33m%s\033[0m\n' "WARNING: ${1:?}"
+    _print_text 1>&2 '\033[0;33m%s\033[0m' "WARNING: ${1:?}"
   fi
 }
 
@@ -173,7 +189,7 @@ ui_msg()
 
 ui_debug()
 {
-  printf '%s\n' "${1?}"
+  printf 1>&2 '%s\n' "${1?}"
 }
 
 enable_debug_log()
@@ -189,6 +205,7 @@ enable_debug_log()
     return
   }
 
+  export NO_COLOR=1
   export DEBUG_LOG_ENABLED=1
 
   # If they are already in use, then use alternatives
@@ -208,7 +225,7 @@ enable_debug_log()
 disable_debug_log()
 {
   if test "${DEBUG_LOG_ENABLED}" -ne 1; then return; fi
-  export DEBUG_LOG_ENABLED=0
+
   if test "${ALTERNATIVE_FDS:?}" -eq 0; then
     exec 1>&6 2>&7 # Restore stdout and stderr
     exec 6>&- 7>&-
@@ -217,6 +234,9 @@ disable_debug_log()
     # shellcheck disable=SC3023
     exec 88>&- 89>&-
   fi
+
+  export DEBUG_LOG_ENABLED=0
+  unset NO_COLOR
 }
 
 set_perm()
