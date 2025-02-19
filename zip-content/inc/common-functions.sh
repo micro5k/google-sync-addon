@@ -62,17 +62,55 @@ _canonicalize()
   return 0
 }
 
-_detect_slot()
+_parse_kernel_cmdline()
 {
-  if test ! -e '/proc/cmdline'; then return 1; fi
+  local _var
+  if test ! -e '/proc/cmdline'; then return 2; fi
 
-  local _slot
-  if _slot="$(grep -o -e 'androidboot.slot_suffix=[_[:alpha:]]*' '/proc/cmdline' | cut -d '=' -f 2)" && test -n "${_slot:-}"; then
-    printf '%s' "${_slot:?}"
+  if _var="$(grep -o -m 1 -e "androidboot\.${1:?}=[^ ]*" -- '/proc/cmdline' | cut -d '=' -f '2-' -s)"; then
+    printf '%s\n' "${_var?}"
     return 0
   fi
 
   return 1
+}
+
+_detect_slot()
+{
+  _parse_kernel_cmdline 'slot_suffix'
+}
+
+_detect_verity_status()
+{
+  if _parse_kernel_cmdline 'veritymode'; then # Value from kernel command-line
+    :
+  elif _val="$(simple_getprop 'ro.boot.veritymode')" && is_valid_prop "${_val?}"; then # Value from getprop
+    printf '%s\n' "${_val:?}"
+  elif simple_getprop | grep -q -m 1 -e '^\[ro\.boot\.veritymode\]'; then # If the value exist, even if empty, it is supported
+    printf '%s\n' 'unknown'
+  else
+    printf '%s\n' 'unsupported'
+  fi
+}
+
+_detect_battery_level()
+{
+  if test -n "${DEVICE_DUMPSYS?}" && _val="$("${DEVICE_DUMPSYS:?}" battery | grep -m 1 -F -e 'level:' | cut -d ':' -f '2-' -s)" && _val="${_val# }" && test -n "${_val?}"; then
+    printf '%s\n' "${_val:?}"
+    return 0
+  fi
+
+  return 1
+}
+
+is_verity_enabled()
+{
+  case "${VERITY_MODE?}" in
+    'unsupported' | 'unknown' | 'disabled' | 'ignore_corruption' | '') return 1 ;; # NOT enabled
+    *) ;;
+  esac
+
+  return 0 # Enabled
 }
 
 _mount_helper()
@@ -92,7 +130,7 @@ _verify_system_partition()
   IFS="${NL:?}"
 
   for _path in ${1?}; do
-    if test -z "${_path:-}"; then continue; fi
+    test -n "${_path?}" || continue
     _path="$(_canonicalize "${_path:?}")"
 
     if test -e "${_path:?}/system/build.prop"; then
@@ -123,43 +161,17 @@ _verify_system_partition()
   return 1
 }
 
-_mount_and_verify_system_partition()
+_set_system_path_from_mountpoint()
 {
-  local _backup_ifs _path
-  _backup_ifs="${IFS:-}"
-  IFS="${NL:?}"
+  if test -e "${1:?}/system/build.prop"; then
+    SYS_PATH="${1:?}/system"
+    return 0
+  elif test -e "${1:?}/build.prop"; then
+    SYS_PATH="${1:?}"
+    return 0
+  fi
 
-  for _path in ${1?}; do
-    test -n "${_path?}" || continue
-
-    case "${_path:?}" in
-      '/mnt'/* | "${TMP_PATH:?}"/*) continue ;; # NOTE: These paths can only be mounted manually (example: /mnt/system)
-      *) ;;
-    esac
-
-    _path="$(_canonicalize "${_path:?}")"
-    _mount_helper '-o' 'rw' "${_path:?}" || true
-
-    if test -e "${_path:?}/system/build.prop"; then
-      SYS_PATH="${_path:?}/system"
-      SYS_MOUNTPOINT="${_path:?}"
-
-      IFS="${_backup_ifs:-}"
-      ui_debug "Mounted: ${SYS_MOUNTPOINT:-}"
-      return 0
-    fi
-
-    if test -e "${_path:?}/build.prop"; then
-      SYS_PATH="${_path:?}"
-      SYS_MOUNTPOINT="${_path:?}"
-
-      IFS="${_backup_ifs:-}"
-      ui_debug "Mounted: ${SYS_MOUNTPOINT:-}"
-      return 0
-    fi
-  done
-
-  IFS="${_backup_ifs:-}"
+  ui_warning "System path not found from '${1?}' mountpoint"
   return 1
 }
 
@@ -258,27 +270,28 @@ _find_block()
   return 1
 }
 
-_ensure_mountpoint_exist()
+_prepare_mountpoint()
 {
-  if test -e "${1:?}"; then return 0; fi
-
   case "${1:?}" in
     "${TMP_PATH:?}"/*)
-      ui_debug "Creating mountpoint '${1?}'..."
-      if mkdir -p "${1:?}" && set_perm 0 0 0755 "${1:?}"; then
-        return 0
+      if test ! -e "${1:?}"; then
+        ui_debug "Creating mountpoint '${1?}'..."
+        if mkdir -p "${1:?}" && set_perm 0 0 0755 "${1:?}"; then
+          return 0
+        fi
+        ui_warning "Unable to prepare mountpoint '${1?}'"
+        return 1
       fi
       ;;
     *) ;;
   esac
 
-  ui_warning "Invalid mountpoint '${1?}'"
-  return 1
+  return 0
 }
 
 _manual_partition_mount()
 {
-  local _backup_ifs _path _block _found _curr_mp_list
+  local _backup_ifs _path _block _found
   unset LAST_MOUNTPOINT
   _backup_ifs="${IFS:-}"
   IFS="${NL:?}"
@@ -289,7 +302,7 @@ _manual_partition_mount()
       test -n "${_path?}" || continue
       if test -e "/dev/block/mapper/${_path:?}"; then
         _block="$(_canonicalize "/dev/block/mapper/${_path:?}")"
-        ui_msg "Found 'mapper/${_path:-}' block at: ${_block:-}"
+        ui_msg "Found 'mapper/${_path?}' block at: ${_block?}"
         _found='true'
         break
       fi
@@ -300,32 +313,27 @@ _manual_partition_mount()
     for _path in ${1?}; do
       test -n "${_path?}" || continue
       if _block="$(_find_block "${_path:?}")"; then
-        ui_msg "Found '${_path:-}' block at: ${_block:-}"
+        ui_msg "Found '${_path?}' block at: ${_block?}"
         _found='true'
         break
       fi
     done
   fi
 
-  _curr_mp_list=''
   if test "${_found:?}" != 'false'; then
     for _path in ${2?}; do
       test -n "${_path?}" || continue
-      _ensure_mountpoint_exist "${_path:?}" || continue
-      _path="$(_canonicalize "${_path:?}")"
-      _curr_mp_list="${_curr_mp_list?}${_curr_mp_list:+, }${_path:?}"
+      if test "${RECOVERY_FAKE_SYSTEM:?}" = 'true' && test "${_path:?}" = '/system'; then continue; fi
+      _prepare_mountpoint "${_path:?}" || continue
 
-      umount 2> /dev/null "${_path:?}" || :
       if _mount_helper "${_block:?}" "${_path:?}"; then
         IFS="${_backup_ifs:-}"
         LAST_MOUNTPOINT="${_path:?}"
         return 0
       fi
     done
-
-    ui_warning "Not mounted => ${_curr_mp_list?}"
   else
-    ui_warning "Not found => ${1?}"
+    ui_warning "Block not found => ${1?}"
   fi
 
   IFS="${_backup_ifs:-}"
@@ -334,49 +342,40 @@ _manual_partition_mount()
 
 _find_and_mount_system()
 {
-  local _sys_mountpoint_list='' # This is a list of paths separated by newlines
+  local _sys_mountpoint_list _additional_system_mountpoint
 
-  if test "${TEST_INSTALL:-false}" != 'false' && test -n "${ANDROID_ROOT-}" && test -e "${ANDROID_ROOT:?}"; then
-    _sys_mountpoint_list="${ANDROID_ROOT:?}${NL:?}"
-  else
-    if test -e '/mnt/system'; then
-      _sys_mountpoint_list="${_sys_mountpoint_list?}/mnt/system${NL:?}"
-    fi
-    if test -n "${ANDROID_ROOT-}" &&
-      test "${ANDROID_ROOT:?}" != '/system_root' &&
-      test "${ANDROID_ROOT:?}" != '/system' &&
-      test -e "${ANDROID_ROOT:?}"; then
-      _sys_mountpoint_list="${_sys_mountpoint_list?}${ANDROID_ROOT:?}${NL:?}"
-    fi
-    if test -e '/system_root'; then
-      _sys_mountpoint_list="${_sys_mountpoint_list?}/system_root${NL:?}"
-    fi
-    if test "${RECOVERY_FAKE_SYSTEM:?}" = 'false' && test -e '/system'; then
-      _sys_mountpoint_list="${_sys_mountpoint_list?}/system${NL:?}"
-    fi
-    _sys_mountpoint_list="${_sys_mountpoint_list?}${TMP_PATH:?}/system_mountpoint${NL:?}"
+  _additional_system_mountpoint=''
+  if test -n "${ANDROID_ROOT-}" && test "${ANDROID_ROOT:?}" != '/system_root' && test "${ANDROID_ROOT:?}" != '/system'; then
+    _additional_system_mountpoint="${ANDROID_ROOT:?}"
   fi
+
+  _sys_mountpoint_list="$(generate_mountpoint_list 'system' "${_additional_system_mountpoint?}" '/system_root' || :)${NL:?}${TMP_PATH:?}/system_mountpoint"
   ui_debug 'System mountpoint list:'
   ui_debug "${_sys_mountpoint_list?}"
+  ui_debug ''
 
   if _verify_system_partition "${_sys_mountpoint_list?}"; then
-    : # Found (it was already mounted)
+    ui_debug 'Checking system...'
+    ui_debug "Already mounted: ${SYS_MOUNTPOINT?}" # Found (it was already mounted)
   else
-    UNMOUNT_SYSTEM=1
-    ui_debug "Mounting system..."
 
-    if _mount_and_verify_system_partition "${_sys_mountpoint_list?}"; then
-      : # Mounted and found
-    elif _manual_partition_mount "${SLOT:+system}${SLOT-}${NL:?}system${NL:?}FACTORYFS${NL:?}" "${_sys_mountpoint_list?}" && test -n "${LAST_MOUNTPOINT?}" && _verify_system_partition "${_sys_mountpoint_list?}"; then
-      ui_debug "Mounted: ${LAST_MOUNTPOINT?}" # Mounted and found
+    if
+      mount_partition_if_possible 'system' "${SLOT:+system}${SLOT-}${NL:?}system${NL:?}FACTORYFS${NL:?}" "${_sys_mountpoint_list?}" &&
+        test -n "${LAST_MOUNTPOINT?}" && _set_system_path_from_mountpoint "${LAST_MOUNTPOINT:?}"
+    then
+      # SYS_PATH already set
+      SYS_MOUNTPOINT="${LAST_MOUNTPOINT:?}"
+      UNMOUNT_SYSTEM="${LAST_PARTITION_MUST_BE_UNMOUNTED:?}"
     else
       deinitialize
 
       ui_msg_empty_line
-      ui_msg "Verity mode: ${VERITY_MODE:-disabled}"
-      ui_msg "Dynamic partitions: ${DYNAMIC_PARTITIONS:?}"
       ui_msg "Current slot: ${SLOT:-no slot}"
-      ui_msg "Recov. fake system: ${RECOVERY_FAKE_SYSTEM:?}"
+      ui_msg "Device locked state: ${DEVICE_STATE?}"
+      ui_msg "Verified boot state: ${VERIFIED_BOOT_STATE?}"
+      ui_msg "Verity mode: ${VERITY_MODE?}"
+      ui_msg "Dynamic partitions: ${DYNAMIC_PARTITIONS:?}"
+      ui_msg "Recovery fake system: ${RECOVERY_FAKE_SYSTEM:?}"
       ui_msg_empty_line
 
       ui_error "The ROM cannot be found!"
@@ -386,35 +385,47 @@ _find_and_mount_system()
   readonly SYS_MOUNTPOINT SYS_PATH
 }
 
-mount_partition_if_exist()
+generate_mountpoint_list()
 {
-  local _backup_ifs _partition_name _block_search_list _raw_mp_list _mp_list _mp
-  unset LAST_MOUNTPOINT
-  LAST_PARTITION_MUST_BE_UNMOUNTED=0
-
-  _partition_name="${2:?}"
-  _block_search_list="${1:?}"
-  _raw_mp_list="/mnt/${2:?}${NL:?}${3-}${NL:?}/${2:?}${NL:?}"
-
-  _backup_ifs="${IFS-}"
-  IFS="${NL:?}"
+  local _mp_list _mp
 
   _mp_list=''
-  for _mp in ${_raw_mp_list?}; do
+  for _mp in "${2-}" "/mnt/${1:?}" "${3-}" "/${1:?}"; do
     if test -n "${_mp?}" && test -e "${_mp:?}"; then
       _mp="$(_canonicalize "${_mp:?}")"
       _mp_list="${_mp_list?}${_mp:?}${NL:?}"
     fi
   done
-  unset _raw_mp_list
+  test -n "${_mp_list?}" || return 1 # Empty list
+
+  printf '%s' "${_mp_list:?}"
+  return 0
+}
+
+mount_partition_if_possible()
+{
+  local _backup_ifs _partition_name _block_search_list _mp_list _mp
+  unset LAST_MOUNTPOINT
+  LAST_PARTITION_MUST_BE_UNMOUNTED=0
+
+  _partition_name="${1:?}"
+  _block_search_list="${2:?}"
+  _mp_list="${3-auto}"
+
+  if test "${_mp_list?}" = 'auto'; then
+    _mp_list="$(generate_mountpoint_list "${_partition_name:?}" || :)"
+  fi
+  test -n "${_mp_list?}" || return 1 # No usable mountpoint found
+
+  _backup_ifs="${IFS-}"
+  IFS="${NL:?}"
+
   set -f || :
   # shellcheck disable=SC2086 # Word splitting is intended
-  set -- ${_mp_list?} || ui_error "Failed expanding \${_mp_list} inside mount_partition_if_exist()"
+  set -- ${_mp_list:?} || ui_error "Failed expanding \${_mp_list} inside mount_partition_if_possible()"
   set +f || :
 
   IFS="${_backup_ifs?}"
-
-  test -n "${_mp_list?}" || return 1 # No usable mountpoint found
 
   ui_debug "Checking ${_partition_name?}..."
 
@@ -454,14 +465,8 @@ _get_local_settings()
 {
   if test "${LOCAL_SETTINGS_READ:-false}" = 'true'; then return; fi
 
-  LOCAL_SETTINGS=''
-  if test -n "${DEVICE_GETPROP?}"; then
-    ui_debug 'Parsing local settings...'
-    LOCAL_SETTINGS="$("${DEVICE_GETPROP:?}" | grep -e "^\[zip\.${MODULE_ID:?}\.")" || LOCAL_SETTINGS=''
-  elif command -v getprop 1> /dev/null; then
-    ui_debug 'Parsing local settings (2)...'
-    LOCAL_SETTINGS="$(getprop | grep -e "^\[zip\.${MODULE_ID:?}\.")" || LOCAL_SETTINGS=''
-  fi
+  ui_debug 'Parsing local settings...'
+  LOCAL_SETTINGS="$(simple_getprop | grep -e "^\[zip\.${MODULE_ID:?}\.")" || LOCAL_SETTINGS=''
   LOCAL_SETTINGS_READ='true'
 
   readonly LOCAL_SETTINGS LOCAL_SETTINGS_READ
@@ -668,6 +673,7 @@ display_info()
   ui_msg "Device: ${BUILD_DEVICE?}"
   ui_msg "Product: ${BUILD_PRODUCT?}"
   ui_msg "Emulator: ${IS_EMU:?}"
+  ui_msg "Battery level: ${BATTERY_LEVEL:-unknown}"
   ui_msg_empty_line
   ui_msg "First installation: ${FIRST_INSTALLATION:?}"
   ui_msg "Boot mode: ${BOOTMODE:?}"
@@ -677,24 +683,26 @@ display_info()
   else
     ui_msg "Zip install: ${ZIP_INSTALL:?}"
   fi
-  ui_msg "Recovery API ver: ${RECOVERY_API_VER:-}"
+  ui_msg "Recovery API ver: ${RECOVERY_API_VER-}"
   ui_msg_empty_line
   ui_msg "Android API: ${API:?}"
   ui_msg "64-bit CPU arch: ${CPU64:?}"
   ui_msg "32-bit CPU arch: ${CPU:?}"
   ui_msg "ABI list: ${ARCH_LIST?}"
   ui_msg_empty_line
-  ui_msg "Verity mode: ${VERITY_MODE:-disabled}"
-  ui_msg "Dynamic partitions: ${DYNAMIC_PARTITIONS:?}"
   ui_msg "Current slot: ${SLOT:-no slot}"
-  ui_msg "Recov. fake system: ${RECOVERY_FAKE_SYSTEM:?}"
+  ui_msg "Device locked state: ${DEVICE_STATE?}"
+  ui_msg "Verified boot state: ${VERIFIED_BOOT_STATE?}"
+  ui_msg "Verity mode: ${VERITY_MODE?}"
+  ui_msg "Dynamic partitions: ${DYNAMIC_PARTITIONS:?}"
+  ui_msg "Recovery fake system: ${RECOVERY_FAKE_SYSTEM:?}"
   ui_msg "Fake signature perm.: ${FAKE_SIGN_PERMISSION:?}"
   ui_msg_empty_line
   ui_msg "System mount point: ${SYS_MOUNTPOINT:?}"
   ui_msg "System path: ${SYS_PATH:?}"
   ui_msg "Priv-app dir: ${PRIVAPP_DIRNAME:?}"
   #ui_msg "Android root ENV: ${ANDROID_ROOT-}"
-  ui_msg "$(write_separator_line "${#MODULE_NAME}" '-' || true)"
+  ui_msg "$(write_separator_line "${#MODULE_NAME}" '-' || :)"
 }
 
 initialize()
@@ -743,16 +751,25 @@ initialize()
   fi
   export RECOVERY_FAKE_SYSTEM
 
-  if test -e '/dev/block/mapper'; then readonly DYNAMIC_PARTITIONS='true'; else readonly DYNAMIC_PARTITIONS='false'; fi
-  export DYNAMIC_PARTITIONS
-
   SLOT="$(_detect_slot)" || SLOT=''
   readonly SLOT
   export SLOT
 
-  VERITY_MODE="$(simple_getprop 'ro.boot.veritymode')" || VERITY_MODE=''
-  readonly VERITY_MODE
-  export VERITY_MODE
+  DEVICE_STATE="$(_parse_kernel_cmdline 'vbmeta\.device_state')" || DEVICE_STATE='unknown'
+  VERIFIED_BOOT_STATE="$(_parse_kernel_cmdline 'verifiedbootstate')" || VERIFIED_BOOT_STATE='unknown'
+  VERITY_MODE="$(_detect_verity_status)" || VERITY_MODE='unknown'
+  readonly DEVICE_STATE VERIFIED_BOOT_STATE VERITY_MODE
+  export DEVICE_STATE VERIFIED_BOOT_STATE VERITY_MODE
+
+  if test -e '/dev/block/mapper'; then readonly DYNAMIC_PARTITIONS='true'; else readonly DYNAMIC_PARTITIONS='false'; fi
+  export DYNAMIC_PARTITIONS
+
+  BATTERY_LEVEL="$(_detect_battery_level)" || BATTERY_LEVEL=''
+  readonly BATTERY_LEVEL
+  export BATTERY_LEVEL
+  if test -n "${BATTERY_LEVEL?}" && test "${BATTERY_LEVEL:?}" -le 15; then
+    ui_error "The battery is too low. Current level: ${BATTERY_LEVEL?}%" 108
+  fi
 
   _find_and_mount_system
   cp -pf "${SYS_PATH:?}/build.prop" "${TMP_PATH:?}/build.prop" # Cache the file for faster access
@@ -839,51 +856,54 @@ initialize()
   export IS_INSTALLATION
 
   if is_mounted_read_only "${SYS_MOUNTPOINT:?}"; then
-    ui_msg "INFO: The '${SYS_MOUNTPOINT?}'  mountpoint is read-only, it will be remounted"
-    ui_msg_empty_line
+    ui_msg "INFO: The '${SYS_MOUNTPOINT?}' mountpoint is read-only, it will be remounted"
     _remount_read_write_helper "${SYS_MOUNTPOINT:?}" || {
       deinitialize
 
       ui_msg_empty_line
       ui_msg "Device: ${BUILD_DEVICE?}"
       ui_msg_empty_line
-      ui_msg "Verity mode: ${VERITY_MODE:-disabled}"
-      ui_msg "Dynamic partitions: ${DYNAMIC_PARTITIONS:?}"
       ui_msg "Current slot: ${SLOT:-no slot}"
-      ui_msg "Recov. fake system: ${RECOVERY_FAKE_SYSTEM:?}"
+      ui_msg "Device locked state: ${DEVICE_STATE?}"
+      ui_msg "Verified boot state: ${VERIFIED_BOOT_STATE?}"
+      ui_msg "Verity mode: ${VERITY_MODE?}"
+      ui_msg "Dynamic partitions: ${DYNAMIC_PARTITIONS:?}"
+      ui_msg "Recovery fake system: ${RECOVERY_FAKE_SYSTEM:?}"
       ui_msg_empty_line
 
-      if test "${VERITY_MODE?}" = 'enforcing'; then
-        ui_error "Remounting of '${SYS_MOUNTPOINT?}' failed, you should DISABLE dm-verity!!!"
+      if is_verity_enabled; then
+        ui_error "Remounting '${SYS_MOUNTPOINT?}' failed, it is possible that DM-Verity is enabled. If this is the case you should DISABLE it!!!"
       else
-        ui_error "Remounting of '${SYS_MOUNTPOINT?}' failed!!!"
+        ui_error "Remounting '${SYS_MOUNTPOINT?}' failed!!!"
       fi
     }
   fi
 
-  if mount_partition_if_exist "${SLOT:+product}${SLOT-}${NL:?}product${NL:?}" 'product'; then
+  if mount_partition_if_possible 'product' "${SLOT:+product}${SLOT-}${NL:?}product${NL:?}"; then
     PRODUCT_PATH="${LAST_MOUNTPOINT:?}"
     UNMOUNT_PRODUCT="${LAST_PARTITION_MUST_BE_UNMOUNTED:?}"
     remount_read_write_if_needed "${LAST_MOUNTPOINT:?}" false && PRODUCT_WRITABLE='true'
   fi
-  if mount_partition_if_exist "${SLOT:+vendor}${SLOT-}${NL:?}vendor${NL:?}" 'vendor'; then
+  if mount_partition_if_possible 'vendor' "${SLOT:+vendor}${SLOT-}${NL:?}vendor${NL:?}"; then
     VENDOR_PATH="${LAST_MOUNTPOINT:?}"
     UNMOUNT_VENDOR="${LAST_PARTITION_MUST_BE_UNMOUNTED:?}"
     remount_read_write_if_needed "${LAST_MOUNTPOINT:?}" false && VENDOR_WRITABLE='true'
   fi
-  if mount_partition_if_exist "${SLOT:+system_ext}${SLOT-}${NL:?}system_ext${NL:?}" 'system_ext'; then
+  if mount_partition_if_possible 'system_ext' "${SLOT:+system_ext}${SLOT-}${NL:?}system_ext${NL:?}"; then
     SYS_EXT_PATH="${LAST_MOUNTPOINT:?}"
     UNMOUNT_SYS_EXT="${LAST_PARTITION_MUST_BE_UNMOUNTED:?}"
     remount_read_write_if_needed "${LAST_MOUNTPOINT:?}" false
   fi
-  if mount_partition_if_exist "${SLOT:+odm}${SLOT-}${NL:?}odm${NL:?}" 'odm'; then
+  if mount_partition_if_possible 'odm' "${SLOT:+odm}${SLOT-}${NL:?}odm${NL:?}"; then
     ODM_PATH="${LAST_MOUNTPOINT:?}"
     UNMOUNT_ODM="${LAST_PARTITION_MUST_BE_UNMOUNTED:?}"
     remount_read_write_if_needed "${LAST_MOUNTPOINT:?}" false
   fi
 
-  if test "${ANDROID_DATA-}" = '/data'; then ANDROID_DATA=''; fi # Avoid double checks
-  if mount_partition_if_exist "userdata${NL:?}DATAFS${NL:?}" 'data' "${ANDROID_DATA-}"; then
+  local _additional_data_mountpoint=''
+  if test -n "${ANDROID_DATA-}" && test "${ANDROID_DATA:?}" != '/data'; then _additional_data_mountpoint="${ANDROID_DATA:?}"; fi
+
+  if mount_partition_if_possible 'data' "userdata${NL:?}DATAFS${NL:?}" "$(generate_mountpoint_list 'data' "${_additional_data_mountpoint?}" || :)"; then
     DATA_PATH="${LAST_MOUNTPOINT:?}"
     UNMOUNT_DATA="${LAST_PARTITION_MUST_BE_UNMOUNTED:?}"
     remount_read_write_if_needed "${LAST_MOUNTPOINT:?}"
@@ -891,7 +911,6 @@ initialize()
     ui_warning "The data partition cannot be mounted, so updates of installed / removed apps cannot be automatically deleted and their Dalvik cache cannot be automatically cleaned. I suggest to manually do a factory reset after flashing this ZIP."
   fi
   readonly DATA_PATH
-  unset ANDROID_DATA
 
   DEST_PATH="${SYS_PATH:?}"
   readonly DEST_PATH
@@ -959,14 +978,14 @@ initialize()
 
 deinitialize()
 {
-  if test "${UNMOUNT_DATA:?}" = '1' && test -n "${DATA_PATH-}"; then _unmount_helper "${DATA_PATH:?}"; fi
+  if test "${UNMOUNT_DATA:?}" = '1' && test -n "${DATA_PATH-}"; then unmount_partition "${DATA_PATH:?}"; fi
 
-  if test "${UNMOUNT_PRODUCT:?}" = '1' && test -n "${PRODUCT_PATH-}"; then _unmount_helper "${PRODUCT_PATH:?}"; fi
-  if test "${UNMOUNT_VENDOR:?}" = '1' && test -n "${VENDOR_PATH-}"; then _unmount_helper "${VENDOR_PATH:?}"; fi
-  if test "${UNMOUNT_SYS_EXT:?}" = '1' && test -n "${SYS_EXT_PATH-}"; then _unmount_helper "${SYS_EXT_PATH:?}"; fi
-  if test "${UNMOUNT_ODM:?}" = '1' && test -n "${ODM_PATH-}"; then _unmount_helper "${ODM_PATH:?}"; fi
+  if test "${UNMOUNT_PRODUCT:?}" = '1' && test -n "${PRODUCT_PATH-}"; then unmount_partition "${PRODUCT_PATH:?}"; fi
+  if test "${UNMOUNT_VENDOR:?}" = '1' && test -n "${VENDOR_PATH-}"; then unmount_partition "${VENDOR_PATH:?}"; fi
+  if test "${UNMOUNT_SYS_EXT:?}" = '1' && test -n "${SYS_EXT_PATH-}"; then unmount_partition "${SYS_EXT_PATH:?}"; fi
+  if test "${UNMOUNT_ODM:?}" = '1' && test -n "${ODM_PATH-}"; then unmount_partition "${ODM_PATH:?}"; fi
 
-  if test "${UNMOUNT_SYSTEM:?}" = '1' && test -n "${SYS_MOUNTPOINT-}"; then _unmount_helper "${SYS_MOUNTPOINT:?}"; fi
+  if test "${UNMOUNT_SYSTEM:?}" = '1' && test -n "${SYS_MOUNTPOINT-}"; then unmount_partition "${SYS_MOUNTPOINT:?}"; fi
 
   if test -e "${TMP_PATH:?}/system_mountpoint"; then
     rmdir -- "${TMP_PATH:?}/system_mountpoint" || ui_error 'Failed to delete the temp system mountpoint'
@@ -1597,7 +1616,7 @@ validate_return_code_warning()
 }
 
 # Mounting related functions
-_unmount_helper()
+unmount_partition()
 {
   umount "${1:?}" || {
     ui_warning "Failed to unmount '${1:?}'"
@@ -1616,9 +1635,9 @@ build_getprop()
 simple_getprop()
 {
   if test -n "${DEVICE_GETPROP?}"; then
-    "${DEVICE_GETPROP:?}" "${1:?}" || return "${?}"
-  elif command -v getprop 1> /dev/null; then
-    getprop "${1:?}" || return "${?}"
+    PATH="${PREVIOUS_PATH:?}" "${DEVICE_GETPROP:?}" "${@}" || return "${?}"
+  elif command 1> /dev/null -v getprop; then
+    getprop "${@}" || return "${?}"
   else
     return 1
   fi
