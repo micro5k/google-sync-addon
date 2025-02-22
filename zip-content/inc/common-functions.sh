@@ -21,6 +21,8 @@ unset CDPATH
 
 ### INIT OPTIONS ###
 
+export DRY_RUN=0
+
 # shellcheck disable=SC3040,SC2015
 {
   # Unsupported set options may cause the shell to exit (even without set -e), so first try them in a subshell to avoid this issue
@@ -185,17 +187,54 @@ _parse_kernel_cmdline()
   return 1
 }
 
-_detect_slot()
+parse_boot_value()
 {
-  _parse_kernel_cmdline 'slot_suffix'
+  local _val
+
+  if _val="$(_parse_kernel_cmdline "${1:?}")"; then # Value from kernel command-line
+    :
+  elif _val="$(simple_getprop "ro.boot.${1:?}")" && is_valid_prop "${_val?}"; then # Value from getprop
+    :
+  else
+    return 1
+  fi
+
+  printf '%s\n' "${_val?}"
 }
 
-_detect_verity_status()
+_detect_slot_suffix()
 {
-  if _parse_kernel_cmdline 'veritymode'; then # Value from kernel command-line
+  local _val
+
+  if _val="$(_parse_kernel_cmdline 'slot_suffix')" && test -n "${_val?}"; then # Value from kernel command-line
     :
-  elif _val="$(simple_getprop 'ro.boot.veritymode')" && is_valid_prop "${_val?}"; then # Value from getprop
-    printf '%s\n' "${_val:?}"
+  elif _val="$(_parse_kernel_cmdline 'slot')" && test -n "${_val?}" && _val="_${_val:?}"; then # Value from kernel command-line
+    :
+  elif _val="$(simple_getprop 'ro.boot.slot_suffix')" && is_valid_prop "${_val?}"; then # Value from getprop
+    :
+  elif _val="$(simple_getprop 'ro.boot.slot')" && is_valid_prop "${_val?}" && _val="_${_val:?}"; then # Value from getprop
+    :
+  else
+    return 1
+  fi
+
+  printf '%s\n' "${_val:?}"
+}
+
+_detect_device_state()
+{
+  parse_boot_value 'vbmeta.device_state' || printf '%s\n' 'unknown'
+}
+
+_detect_verified_boot_state()
+{
+  parse_boot_value 'verifiedbootstate' || printf '%s\n' 'unknown'
+}
+
+_detect_verity_state()
+{
+  if parse_boot_value 'veritymode'; then
+    :
   elif simple_getprop | grep -q -m 1 -e '^\[ro\.boot\.veritymode\]'; then # If the value exist, even if empty, it is supported
     printf '%s\n' 'unknown'
   else
@@ -203,14 +242,34 @@ _detect_verity_status()
   fi
 }
 
+is_device_locked()
+{
+  case "${DEVICE_STATE?}" in
+    'locked') return 0 ;; # Device locked
+    *) ;;                 # Device unlocked: 'unlocked' or 'unknown'
+  esac
+
+  return 1
+}
+
+is_bootloader_locked()
+{
+  case "${VERIFIED_BOOT_STATE?}" in
+    'green' | 'yellow' | 'red') return 0 ;; # Boot loader locked
+    *) ;;                                   # Boot loader unlocked: 'orange' or 'unknown'
+  esac
+
+  return 1
+}
+
 is_verity_enabled()
 {
   case "${VERITY_MODE?}" in
-    'unsupported' | 'unknown' | 'disabled' | 'ignore_corruption' | '') return 1 ;; # NOT enabled
-    *) ;;
+    'unsupported' | 'unknown' | 'disabled' | 'logging' | '') return 1 ;; # Verity NOT enabled
+    *) ;;                                                                # Verity enabled: 'enforcing', 'eio' or 'panicking'
   esac
 
-  return 0 # Enabled
+  return 0
 }
 
 _detect_battery_level()
@@ -443,7 +502,7 @@ _manual_partition_mount()
       fi
     done
   else
-    ui_warning "Block not found => ${1?}"
+    ui_warning "Block not found for => $(printf '%s' "${1?}" | tr -- '\n' ' ' || :)"
   fi
 
   IFS="${_backup_ifs:-}"
@@ -488,7 +547,7 @@ _find_and_mount_system()
       ui_msg "Recovery fake system: ${RECOVERY_FAKE_SYSTEM:?}"
       ui_msg_empty_line
 
-      ui_error "The ROM cannot be found!"
+      ui_error "The ROM cannot be found!!!" 123
     fi
   fi
 
@@ -828,6 +887,7 @@ initialize()
   DATA_PATH='/data'
   PRODUCT_WRITABLE='false'
   VENDOR_WRITABLE='false'
+  SYS_EXT_WRITABLE='false'
 
   # Make sure that the commands are still overridden here (most shells don't have the ability to export functions)
   if test "${TEST_INSTALL:-false}" != 'false' && test -f "${RS_OVERRIDE_SCRIPT:?}"; then
@@ -843,10 +903,18 @@ initialize()
   _get_local_settings
 
   if test "${INPUT_FROM_TERMINAL:?}" = 'true' && test "${LIVE_SETUP_TIMEOUT:?}" -gt 0; then LIVE_SETUP_TIMEOUT="$((LIVE_SETUP_TIMEOUT + 3))"; fi
+  DRY_RUN="$(parse_setting 'DRY_RUN' "${DRY_RUN:?}" 'false')"
   LIVE_SETUP_DEFAULT="$(parse_setting 'LIVE_SETUP_DEFAULT' "${LIVE_SETUP_DEFAULT:?}" 'false')"
   LIVE_SETUP_TIMEOUT="$(parse_setting 'LIVE_SETUP_TIMEOUT' "${LIVE_SETUP_TIMEOUT:?}" 'false')"
 
   ui_debug ''
+
+  case "${DRY_RUN?}" in '') DRY_RUN=0 ;; *[!0-9]*) DRY_RUN=1 ;; *) ;; esac
+  readonly DRY_RUN
+  if test "${DRY_RUN:?}" -gt 0; then
+    ui_warning "DRY RUN mode ${DRY_RUN?} enabled!!! No files on your device will be modified"
+    ui_debug ''
+  fi
 
   # Some recoveries have a fake system folder when nothing is mounted with just bin, etc and lib / lib64 or, in some rare cases, just bin and usr.
   # Usable binaries are under the fake /system/bin so the /system mountpoint mustn't be used while in this recovery.
@@ -861,13 +929,13 @@ initialize()
   fi
   export RECOVERY_FAKE_SYSTEM
 
-  SLOT="$(_detect_slot)" || SLOT=''
+  SLOT="$(_detect_slot_suffix)" || SLOT=''
   readonly SLOT
   export SLOT
 
-  DEVICE_STATE="$(_parse_kernel_cmdline 'vbmeta\.device_state')" || DEVICE_STATE='unknown'
-  VERIFIED_BOOT_STATE="$(_parse_kernel_cmdline 'verifiedbootstate')" || VERIFIED_BOOT_STATE='unknown'
-  VERITY_MODE="$(_detect_verity_status)" || VERITY_MODE='unknown'
+  DEVICE_STATE="$(_detect_device_state)"
+  VERIFIED_BOOT_STATE="$(_detect_verified_boot_state)"
+  VERITY_MODE="$(_detect_verity_state)"
   readonly DEVICE_STATE VERIFIED_BOOT_STATE VERITY_MODE
   export DEVICE_STATE VERIFIED_BOOT_STATE VERITY_MODE
 
@@ -877,8 +945,17 @@ initialize()
   BATTERY_LEVEL="$(_detect_battery_level)" || BATTERY_LEVEL=''
   readonly BATTERY_LEVEL
   export BATTERY_LEVEL
+
   if test -n "${BATTERY_LEVEL?}" && test "${BATTERY_LEVEL:?}" -le 15; then
     ui_error "The battery is too low. Current level: ${BATTERY_LEVEL?}%" 108
+  fi
+
+  if is_device_locked; then
+    ui_error 'The device is locked!!!' 37
+  fi
+
+  if is_bootloader_locked; then
+    ui_error "The boot loader is locked!!! Verified boot state: ${VERIFIED_BOOT_STATE?}" 37
   fi
 
   _find_and_mount_system
@@ -948,7 +1025,7 @@ initialize()
   export FIRST_INSTALLATION PREV_MODULE_VERCODE PREV_INSTALL_FAILED
 
   if test "${MODULE_VERCODE:?}" -lt "${PREV_MODULE_VERCODE:?}"; then
-    ui_error 'Downgrade not allowed!!!'
+    ui_error 'Downgrade not allowed!!!' 95
   fi
 
   IS_INSTALLATION='true'
@@ -982,9 +1059,9 @@ initialize()
       ui_msg_empty_line
 
       if is_verity_enabled; then
-        ui_error "Remounting '${SYS_MOUNTPOINT?}' failed, it is possible that DM-Verity is enabled. If this is the case you should DISABLE it!!!"
+        ui_error "Remounting '${SYS_MOUNTPOINT?}' failed, it is possible that Verity is enabled. If this is the case you should DISABLE it!!!" 30
       else
-        ui_error "Remounting '${SYS_MOUNTPOINT?}' failed!!!"
+        ui_error "Remounting '${SYS_MOUNTPOINT?}' failed!!!" 30
       fi
     }
   fi
@@ -1002,13 +1079,15 @@ initialize()
   if mount_partition_if_possible 'system_ext' "${SLOT:+system_ext}${SLOT-}${NL:?}system_ext${NL:?}"; then
     SYS_EXT_PATH="${LAST_MOUNTPOINT:?}"
     UNMOUNT_SYS_EXT="${LAST_PARTITION_MUST_BE_UNMOUNTED:?}"
-    remount_read_write_if_needed "${LAST_MOUNTPOINT:?}" false
+    remount_read_write_if_needed "${LAST_MOUNTPOINT:?}" false && SYS_EXT_WRITABLE='true'
   fi
   if mount_partition_if_possible 'odm' "${SLOT:+odm}${SLOT-}${NL:?}odm${NL:?}"; then
     ODM_PATH="${LAST_MOUNTPOINT:?}"
     UNMOUNT_ODM="${LAST_PARTITION_MUST_BE_UNMOUNTED:?}"
     remount_read_write_if_needed "${LAST_MOUNTPOINT:?}" false
   fi
+  readonly PRODUCT_WRITABLE VENDOR_WRITABLE SYS_EXT_WRITABLE
+  export PRODUCT_WRITABLE VENDOR_WRITABLE SYS_EXT_WRITABLE
 
   local _additional_data_mountpoint=''
   if test -n "${ANDROID_DATA-}" && test "${ANDROID_DATA:?}" != '/data'; then _additional_data_mountpoint="${ANDROID_DATA:?}"; fi
@@ -1106,10 +1185,12 @@ clean_previous_installations()
 {
   local _initial_free_space
 
+  test "${DRY_RUN:?}" -eq 0 || return
+
   if _write_test "${SYS_PATH:?}/etc"; then
     : # Really writable
   else
-    ui_error "Something is wrong because '${SYS_PATH?}' is NOT really writable!!!"
+    ui_error "Something is wrong because '${SYS_PATH?}' is NOT really writable!!!" 30
   fi
 
   _initial_free_space="$(get_free_disk_space_of_partition "${SYS_PATH:?}")" || _initial_free_space='-1'
@@ -1483,6 +1564,7 @@ verify_disk_space()
 
   if test "${PRODUCT_WRITABLE:?}" = 'true'; then display_free_space "${PRODUCT_PATH:?}" "$(get_free_disk_space_of_partition "${PRODUCT_PATH:?}" || :)"; fi
   if test "${VENDOR_WRITABLE:?}" = 'true'; then display_free_space "${VENDOR_PATH:?}" "$(get_free_disk_space_of_partition "${VENDOR_PATH:?}" || :)"; fi
+  if test "${SYS_EXT_WRITABLE:?}" = 'true'; then display_free_space "${SYS_EXT_PATH:?}" "$(get_free_disk_space_of_partition "${SYS_EXT_PATH:?}" || :)"; fi
 
   if test "${_needed_space_bytes:?}" -ge 0 && test "${_free_space_bytes:?}" -ge 0; then
     : # OK
@@ -1538,7 +1620,7 @@ perform_secure_copy_to_device()
 
   local _ret_code
   _ret_code=5
-  ! _is_free_space_error "${_error_text?}" || _ret_code=28
+  ! _is_free_space_error "${_error_text?}" || _ret_code=122
 
   if test -n "${_error_text?}"; then
     ui_error "Failed to copy '${1?}' to the device due to => $(printf '%s\n' "${_error_text?}" | head -n 1 || :)" "${_ret_code?}"
@@ -1556,6 +1638,8 @@ perform_installation()
   fi
 
   ui_msg_empty_line
+
+  test "${DRY_RUN:?}" -eq 0 || return
 
   ui_msg 'Installing...'
 
@@ -1605,7 +1689,9 @@ perform_installation()
 
 finalize_and_report_success()
 {
-  rm -f -- "${SYS_PATH:?}/etc/zips/${MODULE_ID:?}.failed" || :
+  if test "${DRY_RUN:?}" -eq 0; then
+    rm -f -- "${SYS_PATH:?}/etc/zips/${MODULE_ID:?}.failed" || :
+  fi
   deinitialize
   touch "${TMP_PATH:?}/installed"
 
@@ -1778,9 +1864,9 @@ package_extract_file()
 
 custom_package_extract_dir()
 {
-  mkdir -p "${2:?}" || ui_error "Failed to create the dir '${2}' for extraction" 95
+  mkdir -p "${2:?}" || ui_error "Failed to create the dir '${2}' for extraction"
   set_perm 0 0 0755 "${2:?}"
-  unzip -oq "${ZIPFILE:?}" "${1:?}/*" -d "${2:?}" || ui_error "Failed to extract the dir '${1}' from this archive" 95
+  unzip -oq "${ZIPFILE:?}" "${1:?}/*" -d "${2:?}" || ui_error "Failed to extract the dir '${1}' from this archive"
 }
 
 zip_extract_file()
@@ -1802,6 +1888,8 @@ zip_extract_dir()
 # Data reset functions
 reset_gms_data_of_all_apps()
 {
+  test "${DRY_RUN:?}" -eq 0 || return
+
   if test -e "${DATA_PATH:?}/data"; then
     ui_debug 'Resetting GMS data of all apps...'
     find "${DATA_PATH:?}"/data/*/shared_prefs -name 'com.google.android.gms.*.xml' -delete
@@ -2609,7 +2697,7 @@ choose_read_with_timeout()
       'c' | 'C' | "${_esc_keycode:?}") _key='ESC' ;; # ESC or C key (allowed)
       '') continue ;;                                # Enter key (ignored)
       *)
-        printf 'Invalid choice!!!'
+        printf '%s' 'Invalid choice!!!'
         continue
         ;; # NOT allowed
     esac
@@ -2644,7 +2732,7 @@ choose_read()
       'c' | 'C' | "${_esc_keycode:?}") _key='ESC' ;; # ESC or C key (allowed)
       '') continue ;;                                # Enter key (ignored)
       *)
-        printf 'Invalid choice!!!'
+        printf '%s' 'Invalid choice!!!'
         continue
         ;; # NOT allowed
     esac
@@ -2861,6 +2949,8 @@ live_setup_choice()
 # Other
 soft_kill_app()
 {
+  test "${DRY_RUN:?}" -eq 0 || return
+
   if test "${BOOTMODE:?}" = 'true' && test -n "${DEVICE_AM?}"; then
     PATH="${PREVIOUS_PATH?}" "${DEVICE_AM:?}" 2> /dev/null kill "${1:?}" || true
   fi
@@ -2868,6 +2958,8 @@ soft_kill_app()
 
 kill_app()
 {
+  test "${DRY_RUN:?}" -eq 0 || return
+
   if test "${BOOTMODE:?}" = 'true' && test -n "${DEVICE_AM?}"; then
     PATH="${PREVIOUS_PATH?}" "${DEVICE_AM:?}" 2> /dev/null force-stop "${1:?}" || PATH="${PREVIOUS_PATH?}" "${DEVICE_AM:?}" 2> /dev/null kill "${1:?}" || true
   fi
@@ -2875,6 +2967,8 @@ kill_app()
 
 disable_app()
 {
+  test "${DRY_RUN:?}" -eq 0 || return
+
   if test "${BOOTMODE:?}" = 'true' && test -n "${DEVICE_PM?}"; then
     PATH="${PREVIOUS_PATH?}" "${DEVICE_PM:?}" 2> /dev/null disable "${1:?}" || true
   fi
@@ -2882,6 +2976,8 @@ disable_app()
 
 clear_app()
 {
+  test "${DRY_RUN:?}" -eq 0 || return
+
   if test "${BOOTMODE:?}" = 'true' && test -n "${DEVICE_PM?}"; then
     PATH="${PREVIOUS_PATH?}" "${DEVICE_PM:?}" 2> /dev/null clear "${1:?}" || true
   fi
@@ -2889,6 +2985,8 @@ clear_app()
 
 clear_and_enable_app()
 {
+  test "${DRY_RUN:?}" -eq 0 || return
+
   if test "${BOOTMODE:?}" = 'true' && test -n "${DEVICE_PM?}"; then
     PATH="${PREVIOUS_PATH?}" "${DEVICE_PM:?}" 2> /dev/null clear "${1:?}" || true
     PATH="${PREVIOUS_PATH?}" "${DEVICE_PM:?}" 2> /dev/null enable "${1:?}" || true
@@ -2897,6 +2995,8 @@ clear_and_enable_app()
 
 reset_authenticator_and_sync_adapter_caches()
 {
+  test "${DRY_RUN:?}" -eq 0 || return
+
   # Reset to avoid problems with signature changes
   delete "${DATA_PATH:?}"/system/registered_services/android.accounts.AccountAuthenticator.xml
   delete "${DATA_PATH:?}"/system/registered_services/android.content.SyncAdapter.xml
