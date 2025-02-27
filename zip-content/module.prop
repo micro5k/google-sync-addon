@@ -2,9 +2,10 @@
 # SPDX-FileCopyrightText: none
 # SPDX-License-Identifier: CC0-1.0
 
+numericId=33167927
 id=google-sync-addon
 name=Google Sync add-on
-version=v1.3.1.79-alpha
+version=v1.3.1.81-alpha
 versionCode=5
 author=ale5000
 description=It installs Google sync adapters on Android.

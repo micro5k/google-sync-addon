@@ -5,9 +5,8 @@
 # SPDX-FileCopyrightText: (c) 2016 ale5000
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-# shellcheck disable=SC3043 # SC3043: In POSIX sh, local is undefined #
-
-### INIT ENV ###
+# shellcheck enable=all
+# shellcheck disable=SC3043 # SC3043: In POSIX sh, local is undefined
 
 export TZ=UTC
 export LANG=en_US
@@ -21,7 +20,10 @@ unset CDPATH
 
 ### INIT OPTIONS ###
 
-export DRY_RUN=0
+export DRY_RUN="${DRY_RUN:-0}"
+export KEY_TEST_ONLY=0
+
+readonly ROLLBACK_TEST='false'
 
 # shellcheck disable=SC3040,SC2015
 {
@@ -42,7 +44,6 @@ mkdir -p "${TMP_PATH:?}/func-tmp" || {
   exit 90
 }
 
-readonly ROLLBACK_TEST='false'
 readonly NL='
 '
 
@@ -174,6 +175,25 @@ _canonicalize()
   return 0
 }
 
+_detect_recovery_name()
+{
+  local _val
+
+  test "${BOOTMODE:?}" != 'true' || return 2
+
+  if test -n "${DEVICE_TWRP?}" && _val="$("${DEVICE_TWRP:?}" --version | head -n 1)" && _val="${_val#*"openrecoveryscript command line tool, "}" && test -n "${_val?}"; then
+    :
+  elif _val="$(simple_getprop 'ro.twrp.version')" && is_valid_prop "${_val?}" && _val="TWRP ${_val:?}"; then
+    :
+  elif _val="$(simple_getprop 'ro.build.date')" && is_valid_prop "${_val?}"; then
+    :
+  else
+    return 1
+  fi
+
+  printf '%s\n' "${_val:?}"
+}
+
 _parse_kernel_cmdline()
 {
   local _var
@@ -274,12 +294,32 @@ is_verity_enabled()
 
 _detect_battery_level()
 {
-  if test -n "${DEVICE_DUMPSYS?}" && _val="$("${DEVICE_DUMPSYS:?}" battery | grep -m 1 -F -e 'level:' | cut -d ':' -f '2-' -s)" && _val="${_val# }" && test -n "${_val?}"; then
-    printf '%s\n' "${_val:?}"
-    return 0
+  local _val
+
+  # Check also batt_soc, fg_psoc, uevent
+  if test -r '/sys/class/power_supply/battery/capacity' && _val="$(cat '/sys/class/power_supply/battery/capacity')" && test -n "${_val?}"; then
+    :
+  elif test -n "${DEVICE_DUMPSYS?}" && _val="$("${DEVICE_DUMPSYS:?}" 2> /dev/null battery | grep -m 1 -F -e 'level:' | cut -d ':' -f '2-' -s)" && _val="${_val# }" && test -n "${_val?}"; then
+    :
+  else
+    _val=''
   fi
 
-  return 1
+  case "${_val?}" in
+    '') return 1 ;;
+    *[!0-9]*)
+      ui_warning "Invalid battery level. Current value: ${_val?}"
+      return 2
+      ;;
+    *) ;;
+  esac
+
+  if test "${_val:?}" -eq 0 || test "${_val:?}" -gt 100; then
+    ui_warning "Invalid battery level. Current value: ${_val?}"
+    return 3
+  fi
+
+  printf '%s\n' "${_val:?}"
 }
 
 _mount_helper()
@@ -318,7 +358,7 @@ _verify_system_partition()
         SYS_MOUNTPOINT="${_path:?}"
       else
         IFS="${_backup_ifs:-}"
-        ui_error "Found system path at '${SYS_PATH:-}' but failed to find the mount point"
+        ui_error "Found system path at '${SYS_PATH:-}' but failed to find the mountpoint"
       fi
 
       IFS="${_backup_ifs:-}"
@@ -399,6 +439,8 @@ is_mounted_read_only()
 
 _remount_read_write_helper()
 {
+  test "${DRY_RUN:?}" -lt 2 || return 0
+
   {
     test -n "${DEVICE_MOUNT-}" && PATH="${PREVIOUS_PATH:?}" "${DEVICE_MOUNT:?}" 2> /dev/null -o 'remount,rw' "${1:?}"
   } ||
@@ -478,6 +520,18 @@ _manual_partition_mount()
     done
   fi
 
+  if test "${_found:?}" = 'false' && test -e '/dev/block/by-name'; then
+    for _path in ${1?}; do
+      test -n "${_path?}" || continue
+      if test -e "/dev/block/by-name/${_path:?}"; then
+        _block="$(_canonicalize "/dev/block/by-name/${_path:?}")"
+        ui_msg "Found 'by-name/${_path?}' block at: ${_block?}"
+        _found='true'
+        break
+      fi
+    done
+  fi
+
   if test "${_found:?}" = 'false' && test -e '/sys/dev/block'; then
     for _path in ${1?}; do
       test -n "${_path?}" || continue
@@ -502,7 +556,7 @@ _manual_partition_mount()
       fi
     done
   else
-    ui_warning "Block not found for => $(printf '%s' "${1?}" | tr -- '\n' ' ' || :)"
+    ui_debug "Block not found for: $(printf '%s' "${1?}" | tr -- '\n' ' ' || :)"
   fi
 
   IFS="${_backup_ifs:-}"
@@ -529,7 +583,7 @@ _find_and_mount_system()
   else
 
     if
-      mount_partition_if_possible 'system' "${SLOT:+system}${SLOT-}${NL:?}system${NL:?}FACTORYFS${NL:?}" "${_sys_mountpoint_list?}" &&
+      mount_partition_if_possible 'system' "${SLOT_SUFFIX:+system}${SLOT_SUFFIX-}${NL:?}system${NL:?}FACTORYFS${NL:?}" "${_sys_mountpoint_list?}" &&
         test -n "${LAST_MOUNTPOINT?}" && _set_system_path_from_mountpoint "${LAST_MOUNTPOINT:?}"
     then
       # SYS_PATH already set
@@ -539,12 +593,12 @@ _find_and_mount_system()
       deinitialize
 
       ui_msg_empty_line
-      ui_msg "Current slot: ${SLOT:-no slot}"
+      ui_msg "Current slot: ${SLOT?}"
       ui_msg "Device locked state: ${DEVICE_STATE?}"
       ui_msg "Verified boot state: ${VERIFIED_BOOT_STATE?}"
-      ui_msg "Verity mode: ${VERITY_MODE?}"
-      ui_msg "Dynamic partitions: ${DYNAMIC_PARTITIONS:?}"
-      ui_msg "Recovery fake system: ${RECOVERY_FAKE_SYSTEM:?}"
+      ui_msg "Verity mode: ${VERITY_MODE?} (detection is unreliable)"
+      ui_msg "Dynamic partitions: ${DYNAMIC_PARTITIONS?}"
+      ui_msg "Recovery fake system: ${RECOVERY_FAKE_SYSTEM?}"
       ui_msg_empty_line
 
       ui_error "The ROM cannot be found!!!" 123
@@ -560,7 +614,13 @@ generate_mountpoint_list()
 
   _mp_list=''
   for _mp in "${2-}" "/mnt/${1:?}" "${3-}" "/${1:?}"; do
-    if test -n "${_mp?}" && test -e "${_mp:?}"; then
+    test -n "${_mp?}" || continue
+
+    if test -L "${_mp:?}"; then
+      # It detect the case where there is NO real partition but only a symbolic link to a folder under /system (example: /product -> '/system/product').
+      # It works when inside Android but when inside recovery the symbolic link is missing, so the other case is handled directly inside mount_partition_if_possible()
+      ui_debug "INFO: ${_mp?} is a symlink to $(readlink "${_mp?}" || :)"
+    elif test -r "${_mp:?}"; then
       _mp="$(_canonicalize "${_mp:?}")"
       _mp_list="${_mp_list?}${_mp:?}${NL:?}"
     fi
@@ -573,13 +633,14 @@ generate_mountpoint_list()
 
 mount_partition_if_possible()
 {
-  local _backup_ifs _partition_name _block_search_list _mp_list _mp
+  local _backup_ifs _partition_name _block_search_list _mp_list _mp _skip_warnings
   unset LAST_MOUNTPOINT
   LAST_PARTITION_MUST_BE_UNMOUNTED=0
 
   _partition_name="${1:?}"
   _block_search_list="${2:?}"
   _mp_list="${3-auto}"
+  _skip_warnings='false'
 
   if test "${_mp_list?}" = 'auto'; then
     _mp_list="$(generate_mountpoint_list "${_partition_name:?}" || :)"
@@ -618,7 +679,7 @@ mount_partition_if_possible()
       *) ;;
     esac
 
-    if _mount_helper "${_mp:?}"; then
+    if _mount_helper 2> /dev/null "${_mp:?}"; then
       LAST_MOUNTPOINT="${_mp:?}"
       LAST_PARTITION_MUST_BE_UNMOUNTED=1
       ui_debug "Mounted (2): ${LAST_MOUNTPOINT?}"
@@ -626,7 +687,21 @@ mount_partition_if_possible()
     fi
   done
 
-  ui_warning "Mounting of ${_partition_name?} failed"
+  # In some cases there is no real partition but it is just a folder inside the system partition.
+  # In these cases no warnings are shown when the partition is not found.
+  if test "${_partition_name:?}" != 'system' && test "${_partition_name:?}" != 'data'; then
+    if test -n "${SYS_PATH-}" && test ! -L "${SYS_PATH:?}/${_partition_name:?}" && test -d "${SYS_PATH:?}/${_partition_name:?}"; then # Example: /system_root/system/product
+      _skip_warnings='true'
+      ui_debug "Found ${_partition_name?} folder: ${SYS_PATH?}/${_partition_name?}"
+    elif test -n "${SYS_MOUNTPOINT-}" && test ! -L "${SYS_MOUNTPOINT:?}/${_partition_name:?}" && test -d "${SYS_MOUNTPOINT:?}/${_partition_name:?}"; then # Example: /system_root/odm
+      _skip_warnings='true'
+      ui_debug "Found ${_partition_name?} folder: ${SYS_MOUNTPOINT?}/${_partition_name?}"
+    fi
+  fi
+
+  if test "${_skip_warnings:?}" = 'false'; then
+    ui_warning "Mounting of ${_partition_name?} failed"
+  fi
   return 2
 }
 
@@ -700,6 +775,20 @@ is_string_starting_with()
     *) ;;
   esac
   return 1 # NOT found
+}
+
+verify_keycheck_compatibility()
+{
+  if test "${BUILD_MANUFACTURER?}" = 'OnePlus' && test "${BUILD_DEVICE?}" = 'OnePlus6'; then
+    : # OnePlus 6
+  elif test "${BUILD_MANUFACTURER?}" = 'Google' && test "${BUILD_DEVICE?}" = 'blueline'; then
+    : # Google Pixel 3
+  else
+    return # OK
+  fi
+
+  # It doesn't work properly on these devices
+  export KEYCHECK_ENABLED='false'
 }
 
 _write_test()
@@ -844,6 +933,9 @@ display_info()
   ui_msg "Emulator: ${IS_EMU:?}"
   ui_msg "Battery level: ${BATTERY_LEVEL:-unknown}"
   ui_msg_empty_line
+  ui_msg "Recovery: ${RECOVERY_NAME?}"
+  ui_msg "Recovery API version: ${RECOVERY_API_VER-}"
+  ui_msg_empty_line
   ui_msg "First installation: ${FIRST_INSTALLATION:?}"
   ui_msg "Boot mode: ${BOOTMODE:?}"
   ui_msg "Sideload: ${SIDELOAD:?}"
@@ -852,24 +944,23 @@ display_info()
   else
     ui_msg "Zip install: ${ZIP_INSTALL:?}"
   fi
-  ui_msg "Recovery API ver: ${RECOVERY_API_VER-}"
   ui_msg_empty_line
   ui_msg "Android API: ${API:?}"
   ui_msg "64-bit CPU arch: ${CPU64:?}"
   ui_msg "32-bit CPU arch: ${CPU:?}"
   ui_msg "ABI list: ${ARCH_LIST?}"
   ui_msg_empty_line
-  ui_msg "Current slot: ${SLOT:-no slot}"
+  ui_msg "Current slot: ${SLOT?}$(test "${VIRTUAL_AB?}" != 'true' || printf '%s\n' ' (Virtual A/B)' || :)"
   ui_msg "Device locked state: ${DEVICE_STATE?}"
   ui_msg "Verified boot state: ${VERIFIED_BOOT_STATE?}"
-  ui_msg "Verity mode: ${VERITY_MODE?}"
+  ui_msg "Verity mode: ${VERITY_MODE?} (detection is unreliable)"
   ui_msg "Dynamic partitions: ${DYNAMIC_PARTITIONS:?}"
   ui_msg "Recovery fake system: ${RECOVERY_FAKE_SYSTEM:?}"
   ui_msg "Fake signature perm.: ${FAKE_SIGN_PERMISSION:?}"
   ui_msg_empty_line
-  ui_msg "System mount point: ${SYS_MOUNTPOINT:?}"
+  ui_msg "System mountpoint: ${SYS_MOUNTPOINT:?}"
   ui_msg "System path: ${SYS_PATH:?}"
-  ui_msg "Priv-app dir: ${PRIVAPP_DIRNAME:?}"
+  ui_msg "Priv-app dir name: ${PRIVAPP_DIRNAME:?}"
   #ui_msg "Android root ENV: ${ANDROID_ROOT-}"
   ui_msg "$(write_separator_line "${#MODULE_NAME}" '-' || :)"
 }
@@ -884,10 +975,16 @@ initialize()
   UNMOUNT_SYS_EXT=0
   UNMOUNT_ODM=0
   UNMOUNT_DATA=0
+
+  PRODUCT_PATH=''
+  VENDOR_PATH=''
+  SYS_EXT_PATH=''
+  ODM_PATH=''
   DATA_PATH='/data'
-  PRODUCT_WRITABLE='false'
-  VENDOR_WRITABLE='false'
-  SYS_EXT_WRITABLE='false'
+
+  PRODUCT_USABLE='false'
+  VENDOR_USABLE='false'
+  SYS_EXT_USABLE='false'
 
   # Make sure that the commands are still overridden here (most shells don't have the ability to export functions)
   if test "${TEST_INSTALL:-false}" != 'false' && test -f "${RS_OVERRIDE_SCRIPT:?}"; then
@@ -902,24 +999,36 @@ initialize()
 
   _get_local_settings
 
-  if test "${INPUT_FROM_TERMINAL:?}" = 'true' && test "${LIVE_SETUP_TIMEOUT:?}" -gt 0; then LIVE_SETUP_TIMEOUT="$((LIVE_SETUP_TIMEOUT + 3))"; fi
   DRY_RUN="$(parse_setting 'DRY_RUN' "${DRY_RUN:?}" 'false')"
+  KEY_TEST_ONLY="$(parse_setting 'KEY_TEST_ONLY' "${KEY_TEST_ONLY:?}" 'false')"
+
   LIVE_SETUP_DEFAULT="$(parse_setting 'LIVE_SETUP_DEFAULT' "${LIVE_SETUP_DEFAULT:?}" 'false')"
   LIVE_SETUP_TIMEOUT="$(parse_setting 'LIVE_SETUP_TIMEOUT' "${LIVE_SETUP_TIMEOUT:?}" 'false')"
 
   ui_debug ''
 
-  case "${DRY_RUN?}" in '') DRY_RUN=0 ;; *[!0-9]*) DRY_RUN=1 ;; *) ;; esac
+  case "${KEY_TEST_ONLY?}" in '' | *[!0-1]*) KEY_TEST_ONLY=1 ;; *) ;; esac
+  if test "${KEY_TEST_ONLY:?}" -eq 1; then DRY_RUN=2; fi
+  readonly KEY_TEST_ONLY
+
+  case "${DRY_RUN?}" in '' | *[!0-2]*) DRY_RUN=1 ;; *) ;; esac
   readonly DRY_RUN
   if test "${DRY_RUN:?}" -gt 0; then
     ui_warning "DRY RUN mode ${DRY_RUN?} enabled!!! No files on your device will be modified"
     ui_debug ''
   fi
 
+  package_extract_file 'info.prop' "${TMP_PATH:?}/info.prop"
+  BUILD_TYPE="$(simple_file_getprop 'buildType' "${TMP_PATH:?}/info.prop")" || ui_error 'Failed to parse build type'
+  readonly BUILD_TYPE
+  export BUILD_TYPE
+
+  RECOVERY_NAME="$(_detect_recovery_name)" || RECOVERY_NAME='unknown'
+
   # Some recoveries have a fake system folder when nothing is mounted with just bin, etc and lib / lib64 or, in some rare cases, just bin and usr.
   # Usable binaries are under the fake /system/bin so the /system mountpoint mustn't be used while in this recovery.
   if test "${BOOTMODE:?}" != 'true' &&
-    test -e '/system/bin' &&
+    test -e '/system/bin/sh' &&
     test ! -e '/system/app' &&
     test ! -e '/system/build.prop' &&
     test ! -e '/system/system/build.prop'; then
@@ -929,9 +1038,15 @@ initialize()
   fi
   export RECOVERY_FAKE_SYSTEM
 
-  SLOT="$(_detect_slot_suffix)" || SLOT=''
-  readonly SLOT
-  export SLOT
+  SLOT_SUFFIX="$(_detect_slot_suffix)" || SLOT_SUFFIX=''
+  if test -n "${SLOT_SUFFIX?}"; then
+    SLOT="${SLOT_SUFFIX#"_"}"
+  else
+    SLOT='no slot'
+  fi
+  if VIRTUAL_AB="$(simple_getprop 'ro.virtual_ab.enabled')" && is_valid_prop "${VIRTUAL_AB?}"; then :; else VIRTUAL_AB='false'; fi
+  readonly SLOT_SUFFIX SLOT VIRTUAL_AB
+  export SLOT_SUFFIX SLOT VIRTUAL_AB
 
   DEVICE_STATE="$(_detect_device_state)"
   VERIFIED_BOOT_STATE="$(_detect_verified_boot_state)"
@@ -946,7 +1061,7 @@ initialize()
   readonly BATTERY_LEVEL
   export BATTERY_LEVEL
 
-  if test -n "${BATTERY_LEVEL?}" && test "${BATTERY_LEVEL:?}" -le 15; then
+  if test -n "${BATTERY_LEVEL?}" && test "${BATTERY_LEVEL:?}" -lt 15; then
     ui_error "The battery is too low. Current level: ${BATTERY_LEVEL?}%" 108
   fi
 
@@ -969,9 +1084,7 @@ initialize()
   readonly BUILD_BRAND BUILD_MANUFACTURER BUILD_MODEL BUILD_DEVICE BUILD_PRODUCT
   export BUILD_BRAND BUILD_MANUFACTURER BUILD_MODEL BUILD_DEVICE BUILD_PRODUCT
 
-  if test "${BUILD_MANUFACTURER?}" = 'OnePlus' && test "${BUILD_DEVICE?}" = 'OnePlus6'; then
-    export KEYCHECK_ENABLED='false' # It doesn't work properly on this device
-  fi
+  verify_keycheck_compatibility
 
   _timeout_check
   live_setup_choice
@@ -1050,12 +1163,12 @@ initialize()
       ui_msg_empty_line
       ui_msg "Device: ${BUILD_DEVICE?}"
       ui_msg_empty_line
-      ui_msg "Current slot: ${SLOT:-no slot}"
+      ui_msg "Current slot: ${SLOT?}"
       ui_msg "Device locked state: ${DEVICE_STATE?}"
       ui_msg "Verified boot state: ${VERIFIED_BOOT_STATE?}"
-      ui_msg "Verity mode: ${VERITY_MODE?}"
-      ui_msg "Dynamic partitions: ${DYNAMIC_PARTITIONS:?}"
-      ui_msg "Recovery fake system: ${RECOVERY_FAKE_SYSTEM:?}"
+      ui_msg "Verity mode: ${VERITY_MODE?} (detection is unreliable)"
+      ui_msg "Dynamic partitions: ${DYNAMIC_PARTITIONS?}"
+      ui_msg "Recovery fake system: ${RECOVERY_FAKE_SYSTEM?}"
       ui_msg_empty_line
 
       if is_verity_enabled; then
@@ -1066,28 +1179,30 @@ initialize()
     }
   fi
 
-  if mount_partition_if_possible 'product' "${SLOT:+product}${SLOT-}${NL:?}product${NL:?}"; then
+  if mount_partition_if_possible 'product' "${SLOT_SUFFIX:+product}${SLOT_SUFFIX-}${NL:?}product${NL:?}"; then
     PRODUCT_PATH="${LAST_MOUNTPOINT:?}"
     UNMOUNT_PRODUCT="${LAST_PARTITION_MUST_BE_UNMOUNTED:?}"
-    remount_read_write_if_needed "${LAST_MOUNTPOINT:?}" false && PRODUCT_WRITABLE='true'
+    remount_read_write_if_needed "${LAST_MOUNTPOINT:?}" false && PRODUCT_USABLE='true'
   fi
-  if mount_partition_if_possible 'vendor' "${SLOT:+vendor}${SLOT-}${NL:?}vendor${NL:?}"; then
+  if mount_partition_if_possible 'vendor' "${SLOT_SUFFIX:+vendor}${SLOT_SUFFIX-}${NL:?}vendor${NL:?}"; then
     VENDOR_PATH="${LAST_MOUNTPOINT:?}"
     UNMOUNT_VENDOR="${LAST_PARTITION_MUST_BE_UNMOUNTED:?}"
-    remount_read_write_if_needed "${LAST_MOUNTPOINT:?}" false && VENDOR_WRITABLE='true'
+    remount_read_write_if_needed "${LAST_MOUNTPOINT:?}" false && VENDOR_USABLE='true'
   fi
-  if mount_partition_if_possible 'system_ext' "${SLOT:+system_ext}${SLOT-}${NL:?}system_ext${NL:?}"; then
+  if mount_partition_if_possible 'system_ext' "${SLOT_SUFFIX:+system_ext}${SLOT_SUFFIX-}${NL:?}system_ext${NL:?}"; then
     SYS_EXT_PATH="${LAST_MOUNTPOINT:?}"
     UNMOUNT_SYS_EXT="${LAST_PARTITION_MUST_BE_UNMOUNTED:?}"
-    remount_read_write_if_needed "${LAST_MOUNTPOINT:?}" false && SYS_EXT_WRITABLE='true'
+    remount_read_write_if_needed "${LAST_MOUNTPOINT:?}" false && SYS_EXT_USABLE='true'
   fi
-  if mount_partition_if_possible 'odm' "${SLOT:+odm}${SLOT-}${NL:?}odm${NL:?}"; then
+  if mount_partition_if_possible 'odm' "${SLOT_SUFFIX:+odm}${SLOT_SUFFIX-}${NL:?}odm${NL:?}"; then
     ODM_PATH="${LAST_MOUNTPOINT:?}"
     UNMOUNT_ODM="${LAST_PARTITION_MUST_BE_UNMOUNTED:?}"
     remount_read_write_if_needed "${LAST_MOUNTPOINT:?}" false
   fi
-  readonly PRODUCT_WRITABLE VENDOR_WRITABLE SYS_EXT_WRITABLE
-  export PRODUCT_WRITABLE VENDOR_WRITABLE SYS_EXT_WRITABLE
+  readonly PRODUCT_PATH VENDOR_PATH SYS_EXT_PATH ODM_PATH
+  export PRODUCT_PATH VENDOR_PATH SYS_EXT_PATH ODM_PATH
+  readonly PRODUCT_USABLE VENDOR_USABLE SYS_EXT_USABLE
+  export PRODUCT_USABLE VENDOR_USABLE SYS_EXT_USABLE
 
   local _additional_data_mountpoint=''
   if test -n "${ANDROID_DATA-}" && test "${ANDROID_DATA:?}" != '/data'; then _additional_data_mountpoint="${ANDROID_DATA:?}"; fi
@@ -1100,6 +1215,7 @@ initialize()
     ui_warning "The data partition cannot be mounted, so updates of installed / removed apps cannot be automatically deleted and their Dalvik cache cannot be automatically cleaned. I suggest to manually do a factory reset after flashing this ZIP."
   fi
   readonly DATA_PATH
+  export DATA_PATH
 
   DEST_PATH="${SYS_PATH:?}"
   readonly DEST_PATH
@@ -1116,6 +1232,7 @@ initialize()
   ui_msg "$(write_separator_line "${#MODULE_NAME}" '-' || :)"
   ui_msg "${MODULE_NAME:?}"
   ui_msg "${MODULE_VERSION:?}"
+  ui_msg "${BUILD_TYPE:?}"
   ui_msg "(by ${MODULE_AUTHOR:?})"
   ui_msg "$(write_separator_line "${#MODULE_NAME}" '-' || :)"
 
@@ -1167,12 +1284,12 @@ initialize()
 
 deinitialize()
 {
-  if test "${UNMOUNT_DATA:?}" = '1' && test -n "${DATA_PATH-}"; then unmount_partition "${DATA_PATH:?}"; fi
+  if test "${UNMOUNT_DATA:?}" = '1' && test -n "${DATA_PATH?}"; then unmount_partition "${DATA_PATH:?}"; fi
 
-  if test "${UNMOUNT_PRODUCT:?}" = '1' && test -n "${PRODUCT_PATH-}"; then unmount_partition "${PRODUCT_PATH:?}"; fi
-  if test "${UNMOUNT_VENDOR:?}" = '1' && test -n "${VENDOR_PATH-}"; then unmount_partition "${VENDOR_PATH:?}"; fi
-  if test "${UNMOUNT_SYS_EXT:?}" = '1' && test -n "${SYS_EXT_PATH-}"; then unmount_partition "${SYS_EXT_PATH:?}"; fi
-  if test "${UNMOUNT_ODM:?}" = '1' && test -n "${ODM_PATH-}"; then unmount_partition "${ODM_PATH:?}"; fi
+  if test "${UNMOUNT_ODM:?}" = '1' && test -n "${ODM_PATH?}"; then unmount_partition "${ODM_PATH:?}"; fi
+  if test "${UNMOUNT_SYS_EXT:?}" = '1' && test -n "${SYS_EXT_PATH?}"; then unmount_partition "${SYS_EXT_PATH:?}"; fi
+  if test "${UNMOUNT_VENDOR:?}" = '1' && test -n "${VENDOR_PATH?}"; then unmount_partition "${VENDOR_PATH:?}"; fi
+  if test "${UNMOUNT_PRODUCT:?}" = '1' && test -n "${PRODUCT_PATH?}"; then unmount_partition "${PRODUCT_PATH:?}"; fi
 
   if test "${UNMOUNT_SYSTEM:?}" = '1' && test -n "${SYS_MOUNTPOINT-}"; then unmount_partition "${SYS_MOUNTPOINT:?}"; fi
 
@@ -1484,8 +1601,17 @@ get_free_disk_space_of_partition()
 
 display_free_space()
 {
+  local _free_space_mb _free_space_auto
+
   if test -n "${2?}" && test "${2:?}" -ge 0; then
-    ui_msg "Free space on ${1?}: $(convert_bytes_to_mb "${2:?}" || :) MB ($(convert_bytes_to_human_readable_format "${2:?}" || :))"
+    _free_space_mb="$(convert_bytes_to_mb "${2:?}")"
+    _free_space_auto="$(convert_bytes_to_human_readable_format "${2:?}")"
+
+    if test "${_free_space_auto?}" != "${_free_space_mb?} MB"; then
+      ui_msg "Free space on ${1?}: ${_free_space_mb?} MB (${_free_space_auto?}) - usable: ${3?}"
+    else
+      ui_msg "Free space on ${1?}: ${_free_space_mb?} MB - usable: ${3?}"
+    fi
     return 0
   fi
 
@@ -1560,11 +1686,12 @@ verify_disk_space()
   fi
 
   _free_space_bytes="$(get_free_disk_space_of_partition "${1:?}")" || _free_space_bytes='-1'
-  display_free_space "${1:?}" "${_free_space_bytes?}" || :
+  display_free_space "${1:?}" "${_free_space_bytes?}" 'true'
 
-  if test "${PRODUCT_WRITABLE:?}" = 'true'; then display_free_space "${PRODUCT_PATH:?}" "$(get_free_disk_space_of_partition "${PRODUCT_PATH:?}" || :)"; fi
-  if test "${VENDOR_WRITABLE:?}" = 'true'; then display_free_space "${VENDOR_PATH:?}" "$(get_free_disk_space_of_partition "${VENDOR_PATH:?}" || :)"; fi
-  if test "${SYS_EXT_WRITABLE:?}" = 'true'; then display_free_space "${SYS_EXT_PATH:?}" "$(get_free_disk_space_of_partition "${SYS_EXT_PATH:?}" || :)"; fi
+  if test -n "${PRODUCT_PATH?}"; then display_free_space "${PRODUCT_PATH:?}" "$(get_free_disk_space_of_partition "${PRODUCT_PATH:?}" || :)" "${PRODUCT_USABLE:?}"; fi
+  if test -n "${VENDOR_PATH?}"; then display_free_space "${VENDOR_PATH:?}" "$(get_free_disk_space_of_partition "${VENDOR_PATH:?}" || :)" "${VENDOR_USABLE:?}"; fi
+  if test -n "${SYS_EXT_PATH?}"; then display_free_space "${SYS_EXT_PATH:?}" "$(get_free_disk_space_of_partition "${SYS_EXT_PATH:?}" || :)" "${SYS_EXT_USABLE:?}"; fi
+  if test -n "${ODM_PATH?}"; then display_free_space "${ODM_PATH:?}" "$(get_free_disk_space_of_partition "${ODM_PATH:?}" || :)" 'false'; fi
 
   if test "${_needed_space_bytes:?}" -ge 0 && test "${_free_space_bytes:?}" -ge 0; then
     : # OK
@@ -1616,7 +1743,7 @@ perform_secure_copy_to_device()
   df 2> /dev/null -h -T -- "${SYS_MOUNTPOINT:?}" || df -h -- "${SYS_MOUNTPOINT:?}" || :
   ui_debug ''
 
-  display_free_space "${DEST_PATH:?}" "$(get_free_disk_space_of_partition "${DEST_PATH:?}" || :)"
+  display_free_space "${DEST_PATH:?}" "$(get_free_disk_space_of_partition "${DEST_PATH:?}" || :)" 'true'
 
   local _ret_code
   _ret_code=5
@@ -1890,7 +2017,7 @@ reset_gms_data_of_all_apps()
 {
   test "${DRY_RUN:?}" -eq 0 || return
 
-  if test -e "${DATA_PATH:?}/data"; then
+  if test -n "${DATA_PATH?}" && test -e "${DATA_PATH:?}/data"; then
     ui_debug 'Resetting GMS data of all apps...'
     find "${DATA_PATH:?}"/data/*/shared_prefs -name 'com.google.android.gms.*.xml' -delete
     validate_return_code_warning "$?" 'Failed to reset GMS data of all apps'
@@ -2724,7 +2851,7 @@ choose_read()
       ui_msg_empty_line
       return 1
     }
-    printf '\r                 \r' # Clean invalid choice message (if printed)
+    test "${KEY_TEST_ONLY:?}" -eq 1 || printf '\r                 \r' # Clean invalid choice message (if printed)
 
     case "${_key?}" in
       '+') ;;                                        # + key (allowed)
@@ -2732,8 +2859,10 @@ choose_read()
       'c' | 'C' | "${_esc_keycode:?}") _key='ESC' ;; # ESC or C key (allowed)
       '') continue ;;                                # Enter key (ignored)
       *)
-        printf '%s' 'Invalid choice!!!'
-        continue
+        test "${KEY_TEST_ONLY:?}" -eq 1 || {
+          printf '%s' 'Invalid choice!!!'
+          continue
+        }
         ;; # NOT allowed
     esac
 
@@ -2772,9 +2901,11 @@ choose_inputevent()
       return 1
     }
 
-    if test "${DEBUG_LOG_ENABLED:?}" -eq 1; then
+    if test "${KEY_TEST_ONLY:?}" -eq 1; then
+      ui_msg "EVENT DEBUG:$(printf '%s\n' "${INPUT_EVENT_CURRENT?}" | _prepare_hexdump_output | LC_ALL=C tr -d -s '\n' '[:blank:]' || :)"
+    elif test "${DEBUG_LOG_ENABLED:?}" -eq 1; then
       ui_debug ''
-      ui_debug "EVENT DEBUG:$(printf '%s\n' "${INPUT_EVENT_CURRENT?}" | _prepare_hexdump_output | LC_ALL=C tr -d -s '\n' '[:blank:]' || true)"
+      ui_debug "EVENT DEBUG:$(printf '%s\n' "${INPUT_EVENT_CURRENT?}" | _prepare_hexdump_output | LC_ALL=C tr -d -s '\n' '[:blank:]' || :)"
     fi
 
     _status=0
@@ -2824,8 +2955,10 @@ choose_inputevent()
         continue # Power key (ignored)
         ;;
       *)
-        ui_msg "Invalid choice!!! Key code: ${_key:-}"
-        continue
+        test "${KEY_TEST_ONLY:?}" -eq 1 || {
+          ui_msg "Invalid choice!!! Key code: ${_key:-}"
+          continue
+        }
         ;;
     esac
 
@@ -2844,6 +2977,10 @@ choose_inputevent()
     ui_msg "Key press: - (${INPUT_CODE_VOLUME_DOWN:-})"
     ui_msg_empty_line
     return 2
+  elif test "${KEY_TEST_ONLY:?}" -eq 1; then
+    ui_msg_empty_line
+    ui_msg "Key press: (${_key?})"
+    ui_msg_empty_line
   else
     ui_error "choose_inputevent failed, key code: ${_key:-}"
   fi
@@ -2858,8 +2995,8 @@ choose()
   local _last_status=0
 
   ui_msg "QUESTION: ${1:?}"
-  ui_msg "${2:?}"
-  ui_msg "${3:?}"
+  test -z "${2?}" || ui_msg "${2:?}"
+  test -z "${3?}" || ui_msg "${3:?}"
   shift 3
 
   if test "${INPUT_FROM_TERMINAL:?}" = 'true'; then
@@ -2886,6 +3023,15 @@ write_separator_line()
   printf '%*s\n' "${1:?}" '' | tr -- ' ' "${2:?}"
 }
 
+_live_setup_key_test()
+{
+  ui_msg_empty_line
+
+  while :; do
+    choose 'Press any key' '' ''
+  done
+}
+
 _live_setup_choice_msg()
 {
   local _msg _sep
@@ -2910,6 +3056,7 @@ _live_setup_choice_msg()
 live_setup_choice()
 {
   LIVE_SETUP_ENABLED='false'
+  test "${KEY_TEST_ONLY:?}" -eq 0 || _live_setup_key_test
 
   # Currently we don't handle this case properly so return in this case
   if test "${RECOVERY_OUTPUT:?}" != 'true' && test "${DEBUG_LOG_ENABLED}" -eq 1; then
@@ -2921,16 +3068,17 @@ live_setup_choice()
       LIVE_SETUP_ENABLED='true'
     elif test "${LIVE_SETUP_TIMEOUT:?}" -gt 0; then
 
+      ui_msg_empty_line
       if test "${INPUT_FROM_TERMINAL:?}" = 'true'; then
-        if test "${DEBUG_LOG_ENABLED:?}" -eq 1 || test "${RECOVERY_OUTPUT:?}" = 'true'; then ui_debug 'Using: read'; fi
+        ui_msg 'Using: read'
         _live_setup_choice_msg "${LIVE_SETUP_TIMEOUT}"
         choose_read_with_timeout "${LIVE_SETUP_TIMEOUT}"
       elif "${KEYCHECK_ENABLED:?}"; then
-        if test "${DEBUG_LOG_ENABLED:?}" -eq 1 || test "${RECOVERY_OUTPUT:?}" = 'true'; then ui_debug 'Using: keycheck'; fi
+        ui_msg 'Using: keycheck'
         _live_setup_choice_msg "${LIVE_SETUP_TIMEOUT}"
         choose_keycheck_with_timeout "${LIVE_SETUP_TIMEOUT}"
       else
-        if test "${DEBUG_LOG_ENABLED:?}" -eq 1 || test "${RECOVERY_OUTPUT:?}" = 'true'; then ui_debug 'Using: input event'; fi
+        ui_msg 'Using: input event'
         _live_setup_choice_msg "${LIVE_SETUP_TIMEOUT}"
         choose_inputevent "${LIVE_SETUP_TIMEOUT}"
       fi
@@ -2998,11 +3146,13 @@ reset_authenticator_and_sync_adapter_caches()
   test "${DRY_RUN:?}" -eq 0 || return
 
   # Reset to avoid problems with signature changes
-  delete "${DATA_PATH:?}"/system/registered_services/android.accounts.AccountAuthenticator.xml
-  delete "${DATA_PATH:?}"/system/registered_services/android.content.SyncAdapter.xml
-  delete "${DATA_PATH:?}"/system/users/*/registered_services/android.accounts.AccountAuthenticator.xml
-  delete "${DATA_PATH:?}"/system/users/*/registered_services/android.content.SyncAdapter.xml
-  delete "${DATA_PATH:?}"/system/uiderrors.txt
+  if test -n "${DATA_PATH?}"; then
+    delete "${DATA_PATH:?}"/system/registered_services/android.accounts.AccountAuthenticator.xml
+    delete "${DATA_PATH:?}"/system/registered_services/android.content.SyncAdapter.xml
+    delete "${DATA_PATH:?}"/system/users/*/registered_services/android.accounts.AccountAuthenticator.xml
+    delete "${DATA_PATH:?}"/system/users/*/registered_services/android.content.SyncAdapter.xml
+    delete "${DATA_PATH:?}"/system/uiderrors.txt
+  fi
 }
 
 parse_busybox_version()
