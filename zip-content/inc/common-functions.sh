@@ -55,7 +55,7 @@ _send_text_to_recovery()
   if test "${RECOVERY_OUTPUT:?}" != 'true'; then return; fi # Nothing to do here
 
   if test -n "${RECOVERY_PIPE?}"; then
-    printf 'ui_print %s\nui_print\n' "${1?}" >> "${RECOVERY_PIPE:?}"
+    printf 'ui_print %s\nui_print\n' "${1?}" 1>> "${RECOVERY_PIPE:?}"
   else
     printf 'ui_print %s\nui_print\n' "${1?}" 1>&"${OUTFD:?}"
   fi
@@ -71,6 +71,8 @@ _print_text()
     # shellcheck disable=SC2059
     printf "${1:?}\n" "${2?}"
   fi
+
+  if test "${DEBUG_LOG_ENABLED:?}" = '1' && test -n "${ORIGINAL_STDERR_FD_PATH?}"; then printf '%s\n' "${2?}" 1>> "${ORIGINAL_STDERR_FD_PATH:?}"; fi
 }
 
 ui_error()
@@ -111,7 +113,7 @@ ui_msg_empty_line()
   if test "${RECOVERY_OUTPUT:?}" = 'true'; then
     _send_text_to_recovery ' '
   else
-    printf '\n'
+    _print_text '%s' ''
   fi
 }
 
@@ -120,7 +122,7 @@ ui_msg()
   if test "${RECOVERY_OUTPUT:?}" = 'true'; then
     _send_text_to_recovery "${1:?}"
   else
-    printf '%s\n' "${1:?}"
+    _print_text '%s' "${1:?}"
   fi
 }
 
@@ -154,7 +156,7 @@ ui_msg_sameline_end()
 
 ui_debug()
 {
-  printf 1>&2 '%s\n' "${1?}"
+  _print_text 1>&2 '%s' "${1?}"
 }
 
 # Other
@@ -183,9 +185,9 @@ _detect_recovery_name()
 
   if test -n "${DEVICE_TWRP?}" && _val="$("${DEVICE_TWRP:?}" --version | head -n 1)" && _val="${_val#*"openrecoveryscript command line tool, "}" && test -n "${_val?}"; then
     :
-  elif _val="$(simple_getprop 'ro.twrp.version')" && is_valid_prop "${_val?}" && _val="TWRP ${_val:?}"; then
+  elif _val="$(simple_getprop 'ro.twrp.version')" && _val="TWRP v${_val:?}"; then
     :
-  elif _val="$(simple_getprop 'ro.build.date')" && is_valid_prop "${_val?}"; then
+  elif _val="$(simple_getprop 'ro.build.date')"; then
     :
   else
     return 1
@@ -209,17 +211,13 @@ _parse_kernel_cmdline()
 
 parse_boot_value()
 {
-  local _val
-
-  if _val="$(_parse_kernel_cmdline "${1:?}")"; then # Value from kernel command-line
+  if _parse_kernel_cmdline "${1:?}"; then # Value from kernel command-line
     :
-  elif _val="$(simple_getprop "ro.boot.${1:?}")" && is_valid_prop "${_val?}"; then # Value from getprop
+  elif simple_getprop "ro.boot.${1:?}"; then # Value from getprop
     :
   else
     return 1
   fi
-
-  printf '%s\n' "${_val?}"
 }
 
 _detect_slot_suffix()
@@ -230,9 +228,9 @@ _detect_slot_suffix()
     :
   elif _val="$(_parse_kernel_cmdline 'slot')" && test -n "${_val?}" && _val="_${_val:?}"; then # Value from kernel command-line
     :
-  elif _val="$(simple_getprop 'ro.boot.slot_suffix')" && is_valid_prop "${_val?}"; then # Value from getprop
+  elif _val="$(simple_getprop 'ro.boot.slot_suffix')" && is_valid_prop "${_val:?}"; then # Value from getprop
     :
-  elif _val="$(simple_getprop 'ro.boot.slot')" && is_valid_prop "${_val?}" && _val="_${_val:?}"; then # Value from getprop
+  elif _val="$(simple_getprop 'ro.boot.slot')" && is_valid_prop "${_val:?}" && _val="_${_val:?}"; then # Value from getprop
     :
   else
     return 1
@@ -241,24 +239,27 @@ _detect_slot_suffix()
   printf '%s\n' "${_val:?}"
 }
 
-_detect_device_state()
-{
-  parse_boot_value 'vbmeta.device_state' || printf '%s\n' 'unknown'
-}
-
-_detect_verified_boot_state()
-{
-  parse_boot_value 'verifiedbootstate' || printf '%s\n' 'unknown'
-}
-
 _detect_verity_state()
 {
   if parse_boot_value 'veritymode'; then
     :
-  elif simple_getprop | grep -q -m 1 -e '^\[ro\.boot\.veritymode\]'; then # If the value exist, even if empty, it is supported
+  elif list_props | grep -q -m 1 -e '^\[ro\.boot\.veritymode\]'; then # If the value exist, even if empty, it is supported
     printf '%s\n' 'unknown'
   else
     printf '%s\n' 'unsupported'
+  fi
+}
+
+_detect_encryption_options()
+{
+  local _val
+
+  if simple_getprop 'ro.crypto.volume.options'; then
+    :
+  elif _val="$(simple_getprop 'ro.crypto.volume.contents_mode')"; then
+    printf '%s\n' "${_val:?}:$(simple_getprop 'ro.crypto.volume.filenames_mode' || :)"
+  else
+    return 1
   fi
 }
 
@@ -710,7 +711,7 @@ _get_local_settings()
   if test "${LOCAL_SETTINGS_READ:-false}" = 'true'; then return; fi
 
   ui_debug 'Parsing local settings...'
-  LOCAL_SETTINGS="$(simple_getprop | grep -e "^\[zip\.${MODULE_ID:?}\.")" || LOCAL_SETTINGS=''
+  LOCAL_SETTINGS="$(list_props | grep -e "^\[zip\.${MODULE_ID:?}\.")" || LOCAL_SETTINGS=''
   LOCAL_SETTINGS_READ='true'
 
   readonly LOCAL_SETTINGS LOCAL_SETTINGS_READ
@@ -933,34 +934,39 @@ display_info()
   ui_msg "Emulator: ${IS_EMU:?}"
   ui_msg "Battery level: ${BATTERY_LEVEL:-unknown}"
   ui_msg_empty_line
-  ui_msg "Recovery: ${RECOVERY_NAME?}"
-  ui_msg "Recovery API version: ${RECOVERY_API_VER-}"
-  ui_msg_empty_line
   ui_msg "First installation: ${FIRST_INSTALLATION:?}"
   ui_msg "Boot mode: ${BOOTMODE:?}"
   ui_msg "Sideload: ${SIDELOAD:?}"
-  if test "${ZIP_INSTALL:?}" = 'true'; then
-    ui_msg "Zip install: ${ZIP_INSTALL:?} (${ZIPINSTALL_VERSION?})"
+  if test -n "${ZIPINSTALL_VERSION?}"; then
+    ui_msg "Zip install: ${ZIP_INSTALL?} (${ZIPINSTALL_VERSION?})"
   else
-    ui_msg "Zip install: ${ZIP_INSTALL:?}"
+    ui_msg "Zip install: ${ZIP_INSTALL?}"
   fi
+  ui_msg "Fake signature perm.: ${FAKE_SIGN_PERMISSION?}"
+  ui_msg_empty_line
+  ui_msg "Recovery: ${RECOVERY_NAME?}"
+  ui_msg "Recovery API version: ${RECOVERY_API_VER-}"
   ui_msg_empty_line
   ui_msg "Android API: ${API:?}"
   ui_msg "64-bit CPU arch: ${CPU64:?}"
   ui_msg "32-bit CPU arch: ${CPU:?}"
   ui_msg "ABI list: ${ARCH_LIST?}"
   ui_msg_empty_line
+  ui_msg "Boot reason: ${BOOT_REASON?}"
   ui_msg "Current slot: ${SLOT?}$(test "${VIRTUAL_AB?}" != 'true' || printf '%s\n' ' (Virtual A/B)' || :)"
   ui_msg "Device locked state: ${DEVICE_STATE?}"
   ui_msg "Verified boot state: ${VERIFIED_BOOT_STATE?}"
   ui_msg "Verity mode: ${VERITY_MODE?} (detection is unreliable)"
-  ui_msg "Dynamic partitions: ${DYNAMIC_PARTITIONS:?}"
-  ui_msg "Recovery fake system: ${RECOVERY_FAKE_SYSTEM:?}"
-  ui_msg "Fake signature perm.: ${FAKE_SIGN_PERMISSION:?}"
+  ui_msg "Dynamic partitions: ${DYNAMIC_PARTITIONS?}"
+  ui_msg "Recovery fake system: ${RECOVERY_FAKE_SYSTEM?}"
   ui_msg_empty_line
-  ui_msg "System mountpoint: ${SYS_MOUNTPOINT:?}"
-  ui_msg "System path: ${SYS_PATH:?}"
-  ui_msg "Priv-app dir name: ${PRIVAPP_DIRNAME:?}"
+  ui_msg "Encryption state: ${ENCRYPTION_STATE?}"
+  ui_msg "Encryption type: ${ENCRYPTION_TYPE?}"
+  ui_msg "Encryption options: ${ENCRYPTION_OPTIONS?}"
+  ui_msg_empty_line
+  ui_msg "System mountpoint: ${SYS_MOUNTPOINT?}"
+  ui_msg "System path: ${SYS_PATH?}"
+  ui_msg "Priv-app dir name: ${PRIVAPP_DIRNAME?}"
   #ui_msg "Android root ENV: ${ANDROID_ROOT-}"
   ui_msg "$(write_separator_line "${#MODULE_NAME}" '-' || :)"
 }
@@ -1023,8 +1029,6 @@ initialize()
   readonly BUILD_TYPE
   export BUILD_TYPE
 
-  RECOVERY_NAME="$(_detect_recovery_name)" || RECOVERY_NAME='unknown'
-
   # Some recoveries have a fake system folder when nothing is mounted with just bin, etc and lib / lib64 or, in some rare cases, just bin and usr.
   # Usable binaries are under the fake /system/bin so the /system mountpoint mustn't be used while in this recovery.
   if test "${BOOTMODE:?}" != 'true' &&
@@ -1044,15 +1048,17 @@ initialize()
   else
     SLOT='no slot'
   fi
-  if VIRTUAL_AB="$(simple_getprop 'ro.virtual_ab.enabled')" && is_valid_prop "${VIRTUAL_AB?}"; then :; else VIRTUAL_AB='false'; fi
+  VIRTUAL_AB="$(simple_getprop 'ro.virtual_ab.enabled')" || VIRTUAL_AB='false'
+  is_valid_prop "${VIRTUAL_AB:?}" || VIRTUAL_AB='false'
   readonly SLOT_SUFFIX SLOT VIRTUAL_AB
   export SLOT_SUFFIX SLOT VIRTUAL_AB
 
-  DEVICE_STATE="$(_detect_device_state)"
-  VERIFIED_BOOT_STATE="$(_detect_verified_boot_state)"
+  BOOT_REASON="$(parse_boot_value 'bootreason')" || BOOT_REASON='unknown'
+  DEVICE_STATE="$(parse_boot_value 'vbmeta.device_state')" || DEVICE_STATE='unknown'
+  VERIFIED_BOOT_STATE="$(parse_boot_value 'verifiedbootstate')" || VERIFIED_BOOT_STATE='unknown'
   VERITY_MODE="$(_detect_verity_state)"
-  readonly DEVICE_STATE VERIFIED_BOOT_STATE VERITY_MODE
-  export DEVICE_STATE VERIFIED_BOOT_STATE VERITY_MODE
+  readonly BOOT_REASON DEVICE_STATE VERIFIED_BOOT_STATE VERITY_MODE
+  export BOOT_REASON DEVICE_STATE VERIFIED_BOOT_STATE VERITY_MODE
 
   if test -e '/dev/block/mapper'; then readonly DYNAMIC_PARTITIONS='true'; else readonly DYNAMIC_PARTITIONS='false'; fi
   export DYNAMIC_PARTITIONS
@@ -1060,6 +1066,13 @@ initialize()
   BATTERY_LEVEL="$(_detect_battery_level)" || BATTERY_LEVEL=''
   readonly BATTERY_LEVEL
   export BATTERY_LEVEL
+
+  RECOVERY_NAME="$(_detect_recovery_name)" || RECOVERY_NAME='unknown'
+  ENCRYPTION_STATE="$(simple_getprop 'ro.crypto.state')" || ENCRYPTION_STATE='unknown'
+  ENCRYPTION_TYPE="$(simple_getprop 'ro.crypto.type')" || ENCRYPTION_TYPE='unknown'
+  ENCRYPTION_OPTIONS="$(_detect_encryption_options)" || ENCRYPTION_OPTIONS='unknown'
+  readonly RECOVERY_NAME ENCRYPTION_STATE ENCRYPTION_TYPE ENCRYPTION_OPTIONS
+  export RECOVERY_NAME ENCRYPTION_STATE ENCRYPTION_TYPE ENCRYPTION_OPTIONS
 
   if test -n "${BATTERY_LEVEL?}" && test "${BATTERY_LEVEL:?}" -lt 15; then
     ui_error "The battery is too low. Current level: ${BATTERY_LEVEL?}%" 108
@@ -1099,7 +1112,7 @@ initialize()
     *) ;;
   esac
 
-  if is_string_starting_with 'sdk_google_phone_' "${BUILD_PRODUCT?}" || is_valid_prop "$(simple_getprop 'ro.leapdroid.version' || :)"; then
+  if is_string_starting_with 'sdk_google_phone_' "${BUILD_PRODUCT?}" || is_valid_prop "$(simple_getprop 'ro.leapdroid.version' || printf '%s\n' 'unknown' || :)"; then
     IS_EMU='true'
   fi
 
@@ -1858,15 +1871,31 @@ build_getprop()
   grep "^ro\.$1=" "${TMP_PATH}/build.prop" | head -n1 | cut -d '=' -f 2
 }
 
+list_props()
+{
+  if test -n "${DEVICE_GETPROP?}" && PATH="${PREVIOUS_PATH:?}" "${DEVICE_GETPROP:?}"; then
+    :
+  elif command 1> /dev/null -v 'getprop' && getprop; then
+    :
+  else
+    return 2
+  fi
+}
+
 simple_getprop()
 {
-  if test -n "${DEVICE_GETPROP?}"; then
-    PATH="${PREVIOUS_PATH:?}" "${DEVICE_GETPROP:?}" "${@}" || return "${?}"
-  elif command 1> /dev/null -v getprop; then
-    getprop "${@}" || return "${?}"
+  local _val
+
+  if test -n "${DEVICE_GETPROP?}" && _val="$(PATH="${PREVIOUS_PATH:?}" "${DEVICE_GETPROP:?}" "${@}")"; then
+    :
+  elif command 1> /dev/null -v 'getprop' && _val="$(getprop "${@}")"; then
+    :
   else
-    return 1
+    return 2
   fi
+
+  test -n "${_val?}" || return 1
+  printf '%s\n' "${_val:?}"
 }
 
 simple_file_getprop()
@@ -1877,17 +1906,17 @@ simple_file_getprop()
 
 is_valid_prop()
 {
-  if test -z "${1?}" || test "${1?}" = 'unknown'; then return 1; fi
-  return 0 # Valid
+  test "${1?}" != 'unknown' || return 1
+  return 0
 }
 
 sys_getprop()
 {
   local _val
 
-  if _val="$(simple_file_getprop "${1:?}" "${TMP_PATH:?}/build.prop")" && is_valid_prop "${_val?}"; then
+  if _val="$(simple_file_getprop "${1:?}" "${TMP_PATH:?}/build.prop")" && test -n "${_val?}" && is_valid_prop "${_val:?}"; then
     :
-  elif _val="$(simple_getprop "${1:?}")" && is_valid_prop "${_val?}"; then
+  elif _val="$(simple_getprop "${1:?}")" && is_valid_prop "${_val:?}"; then
     :
   else
     return 1
@@ -3025,11 +3054,25 @@ write_separator_line()
 
 _live_setup_key_test()
 {
+  local _count
+
+  ui_msg_empty_line
+  if test "${INPUT_FROM_TERMINAL:?}" = 'true'; then
+    ui_msg 'Using: read'
+  elif "${KEYCHECK_ENABLED:?}"; then
+    ui_msg 'Using: keycheck'
+  else
+    ui_msg 'Using: input event'
+  fi
   ui_msg_empty_line
 
-  while :; do
-    choose 'Press any key' '' ''
+  _count=0
+  while test "${_count:?}" -lt 10 && _count="$((_count + 1))"; do
+    choose "${_count:?}) Press any key" '' ''
   done
+
+  deinitialize
+  exit 250
 }
 
 _live_setup_choice_msg()
@@ -3057,11 +3100,6 @@ live_setup_choice()
 {
   LIVE_SETUP_ENABLED='false'
   test "${KEY_TEST_ONLY:?}" -eq 0 || _live_setup_key_test
-
-  # Currently we don't handle this case properly so return in this case
-  if test "${RECOVERY_OUTPUT:?}" != 'true' && test "${DEBUG_LOG_ENABLED}" -eq 1; then
-    return
-  fi
 
   if test "${LIVE_SETUP_ALLOWED:?}" = 'true'; then
     if test "${LIVE_SETUP_DEFAULT:?}" -ne 0; then

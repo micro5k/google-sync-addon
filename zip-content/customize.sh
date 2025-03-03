@@ -136,7 +136,7 @@ _send_text_to_recovery()
   if test "${RECOVERY_OUTPUT:?}" != 'true'; then return; fi # Nothing to do here
 
   if test -n "${RECOVERY_PIPE?}"; then
-    printf 'ui_print %s\nui_print\n' "${1?}" >> "${RECOVERY_PIPE:?}"
+    printf 'ui_print %s\nui_print\n' "${1?}" 1>> "${RECOVERY_PIPE:?}"
   else
     printf 'ui_print %s\nui_print\n' "${1?}" 1>&"${OUTFD:?}"
   fi
@@ -152,6 +152,8 @@ _print_text()
     # shellcheck disable=SC2059
     printf "${1:?}\n" "${2?}"
   fi
+
+  if test "${DEBUG_LOG_ENABLED:?}" = '1' && test -n "${ORIGINAL_STDERR_FD_PATH?}"; then printf '%s\n' "${2?}" 1>> "${ORIGINAL_STDERR_FD_PATH:?}"; fi
 }
 
 ui_error()
@@ -183,18 +185,19 @@ ui_msg()
   if test "${RECOVERY_OUTPUT:?}" = 'true'; then
     _send_text_to_recovery "${1:?}"
   else
-    printf '%s\n' "${1:?}"
+    _print_text '%s' "${1:?}"
   fi
 }
 
 ui_debug()
 {
-  printf 1>&2 '%s\n' "${1?}"
+  _print_text 1>&2 '%s' "${1?}"
 }
 
 enable_debug_log()
 {
   if test "${DEBUG_LOG_ENABLED}" -eq 1; then return; fi
+  local _backup_stderr
 
   ui_debug "Creating log: ${LOG_PATH:?}"
   _send_text_to_recovery "Creating log: ${LOG_PATH:?}"
@@ -205,9 +208,6 @@ enable_debug_log()
     return
   }
 
-  export NO_COLOR=1
-  export DEBUG_LOG_ENABLED=1
-
   # If they are already in use, then use alternatives
   if {
     command 1>&6 || command 1>&7
@@ -215,16 +215,31 @@ enable_debug_log()
     export ALTERNATIVE_FDS=1
     # shellcheck disable=SC3023
     exec 88>&1 89>&2 # Backup stdout and stderr
+    _backup_stderr=89
   else
     export ALTERNATIVE_FDS=0
     exec 6>&1 7>&2 # Backup stdout and stderr
+    _backup_stderr=7
   fi
+
   exec 1>> "${LOG_PATH:?}" 2>&1
+
+  export NO_COLOR=1
+  if test -e "/proc/$$/fd/${_backup_stderr:?}"; then
+    export ORIGINAL_STDERR_FD_PATH="/proc/$$/fd/${_backup_stderr:?}"
+  else
+    export ORIGINAL_STDERR_FD_PATH=''
+  fi
+  export DEBUG_LOG_ENABLED=1
 }
 
 disable_debug_log()
 {
   if test "${DEBUG_LOG_ENABLED}" -ne 1; then return; fi
+
+  export DEBUG_LOG_ENABLED=0
+  unset ORIGINAL_STDERR_FD_PATH
+  unset NO_COLOR
 
   if test "${ALTERNATIVE_FDS:?}" -eq 0; then
     exec 1>&6 2>&7 # Restore stdout and stderr
@@ -234,9 +249,6 @@ disable_debug_log()
     # shellcheck disable=SC3023
     exec 88>&- 89>&-
   fi
-
-  export DEBUG_LOG_ENABLED=0
-  unset NO_COLOR
 }
 
 set_perm()
@@ -384,32 +396,29 @@ fi
 
 ui_debug 'Parsing common settings...'
 
-_simple_getprop()
-{
-  if test -n "${DEVICE_GETPROP?}"; then
-    "${DEVICE_GETPROP:?}" "${1:?}" || return "${?}"
-  elif command -v getprop 1> /dev/null; then
-    getprop "${1:?}" || return "${?}"
-  else
-    return 1
-  fi
-}
-_get_common_setting()
+simple_getprop()
 {
   local _val
-  if _val="$(_simple_getprop "zip.common.${1:?}")" && test -n "${_val?}"; then
-    printf '%s\n' "${_val:?}"
-    return
+
+  if test -n "${DEVICE_GETPROP?}" && _val="$(PATH="${PREVIOUS_PATH:?}" "${DEVICE_GETPROP:?}" "${@}")"; then
+    :
+  elif command 1> /dev/null -v 'getprop' && _val="$(getprop "${@}")"; then
+    :
+  else
+    return 2
   fi
 
-  # Fallback to the default value
-  printf '%s\n' "${2?}"
+  test -n "${_val?}" || return 1
+  printf '%s\n' "${_val:?}"
+}
+
+_get_common_setting()
+{
+  simple_getprop "zip.common.${1:?}" ||
+    printf '%s\n' "${2?}" # Fallback to the default value
 }
 
 DEBUG_LOG="$(_get_common_setting 'DEBUG_LOG' "${DEBUG_LOG:-0}")"
-
-unset -f _simple_getprop
-unset -f _get_common_setting
 
 test "${DEBUG_LOG:?}" -ne 0 && enable_debug_log # Enable file logging if needed
 
