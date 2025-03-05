@@ -21,7 +21,7 @@ unset CDPATH
 ### INIT OPTIONS ###
 
 export DRY_RUN="${DRY_RUN:-0}"
-export KEY_TEST_ONLY=0
+export KEY_TEST_ONLY="${KEY_TEST_ONLY:-0}"
 
 readonly ROLLBACK_TEST='false'
 
@@ -1087,6 +1087,7 @@ initialize()
   fi
 
   _find_and_mount_system
+  _timeout_check
   cp -pf "${SYS_PATH:?}/build.prop" "${TMP_PATH:?}/build.prop" # Cache the file for faster access
 
   BUILD_BRAND="$(sys_getprop 'ro.product.brand')"
@@ -1096,11 +1097,6 @@ initialize()
   BUILD_PRODUCT="$(sys_getprop 'ro.product.name')"
   readonly BUILD_BRAND BUILD_MANUFACTURER BUILD_MODEL BUILD_DEVICE BUILD_PRODUCT
   export BUILD_BRAND BUILD_MANUFACTURER BUILD_MODEL BUILD_DEVICE BUILD_PRODUCT
-
-  verify_keycheck_compatibility
-
-  _timeout_check
-  live_setup_choice
 
   API="$(sys_getprop 'ro.build.version.sdk')" || API=0
   readonly API
@@ -1118,6 +1114,9 @@ initialize()
 
   readonly IS_EMU
   export IS_EMU
+
+  verify_keycheck_compatibility
+  live_setup_choice
 
   MODULE_NAME="$(simple_file_getprop 'name' "${TMP_PATH:?}/module.prop")" || ui_error 'Failed to parse name'
   MODULE_VERSION="$(simple_file_getprop 'version' "${TMP_PATH:?}/module.prop")" || ui_error 'Failed to parse version'
@@ -2474,7 +2473,7 @@ _find_input_device()
     elif test "${line_type?}" = 'H' && test "${_last_device_name?}" = "Name=\"${1:?}\""; then
 
       local _found=0
-      printf '%s' "${full_line?}" | cut -d '=' -f 2 | while IFS='' read -r my_line; do
+      printf '%s' "${full_line?}" | cut -d '=' -f '2-' -s | while IFS='' read -r my_line; do
         IFS=' '
         for elem in ${my_line:?}; do
           printf '%s' "${elem:?}" | grep -e '^event' && {
@@ -2494,7 +2493,7 @@ _find_input_device()
 
 _find_hardware_keys()
 {
-  if test -n "${INPUT_DEVICE_NAME:-}" && test -n "${INPUT_DEVICE_PATH:-}"; then return 0; fi
+  if test -n "${INPUT_DEVICE_NAME-}" && test -n "${INPUT_DEVICE_PATH-}"; then return 0; fi
 
   INPUT_DEVICE_NAME=''
   INPUT_DEVICE_PATH=''
@@ -2503,13 +2502,15 @@ _find_hardware_keys()
   if _input_device_event="$(_find_input_device "${1:?}")" && test -r "/dev/input/${_input_device_event:?}"; then
     INPUT_DEVICE_NAME="${1:?}"
     INPUT_DEVICE_PATH="/dev/input/${_input_device_event:?}"
-    if test "${DEBUG_LOG_ENABLED:?}" -eq 1 || test "${RECOVERY_OUTPUT:?}" = 'true'; then ui_debug "Found ${INPUT_DEVICE_NAME:-} device at: ${INPUT_DEVICE_PATH:-}"; fi
+    if test "${DEBUG_LOG_ENABLED:?}" -eq 1 || test "${RECOVERY_OUTPUT:?}" = 'true'; then ui_debug "Found ${INPUT_DEVICE_NAME?} device at: ${INPUT_DEVICE_PATH?}"; fi
 
     # Set the default values, useful when the parsing of keylayout fails
     INPUT_CODE_VOLUME_UP='115'
     INPUT_CODE_VOLUME_DOWN='114'
     INPUT_CODE_POWER='116'
+    INPUT_CODE_BACK='158'
     INPUT_CODE_HOME='102'
+    INPUT_CODE_APP_SWITCH='221' # Recent apps
 
     # Example file:
     ## key 115 VOLUME_UP
@@ -2550,7 +2551,7 @@ _find_hardware_keys()
     return 0
   fi
 
-  return 2
+  return 1
 }
 
 kill_pid_from_file()
@@ -2564,7 +2565,7 @@ kill_pid_from_file()
 
   if _pid="$(cat "${TMP_PATH:?}/${1:?}")" && test -n "${_pid?}"; then
     #if test "${DEBUG_LOG_ENABLED:?}" -eq 1; then ui_debug "Killing: ${_pid?}"; fi
-    kill -s 'KILL' "${_pid:?}" || kill "${_pid:?}" || ui_warning "Failed to kill PID => ${_pid?}"
+    kill "${_pid:?}" || ui_warning "Failed to kill PID => ${_pid?}"
   else
     ui_warning "Unable to read PID from => ${1?}"
   fi
@@ -2579,8 +2580,7 @@ hex_to_dec()
 
 _prepare_hexdump_output()
 {
-  cut -d ' ' -f '2-' -s | LC_ALL=C tr '[:cntrl:]' ' ' || return "${?}"
-  printf '\n'
+  cut -d ' ' -f '2-' -s | LC_ALL=C tr '[:cntrl:]' ' ' && printf '\n'
 }
 
 _get_input_event()
@@ -2594,12 +2594,12 @@ _get_input_event()
     _var="$({
       cat -u "${INPUT_DEVICE_PATH:?}" &
       printf '%s' "${!}" > "${TMP_PATH:?}/pid-to-kill.dat"
-    } | _timeout_compat "${1:?}" hexdump -x -v -n 24)" || _status="${?}"
+    } | _timeout_compat "${1:?}" hexdump -x -v -n "${INPUT_EVENT_SIZE:-24}")" || _status="${?}"
   else
     _var="$({
       cat -u "${INPUT_DEVICE_PATH:?}" &
       printf '%s' "${!}" > "${TMP_PATH:?}/pid-to-kill.dat"
-    } | hexdump -x -v -n 24)" || _status="${?}"
+    } | hexdump -x -v -n "${INPUT_EVENT_SIZE:-24}")" || _status="${?}"
   fi
   kill_pid_from_file 'pid-to-kill.dat'
 
@@ -2614,35 +2614,86 @@ _get_input_event()
   return 0
 }
 
+# 64-bit input event:
+#   struct timeval time = 16 bytes (time at which the event occurs)
+#   unsigned short type =  2 bytes (event type: 1 is the one that we need)
+#   unsigned short code =  2 bytes (key code)
+#   int value           =  4 bytes (key action: 1=pressed, 0=released, 2=held) # NOTE: The "held" action never occurs, need testing
+#
+#   Total size          = 24 bytes
+
+# 32-bit input event:
+#   struct timeval time =  8 bytes (time at which the event occurs)
+#   unsigned short type =  2 bytes (event type: 1 is the one that we need)
+#   unsigned short code =  2 bytes (key code)
+#   int value           =  4 bytes (key action: 1=pressed, 0=released, 2=held) # NOTE: The "held" action never occurs, need testing
+#
+#   Total size          = 16 bytes
+
+_detect_input_event_size()
+{
+  printf "%s\n" "${1?}" | _prepare_hexdump_output | while IFS=' ' read -r _ _ _ _ part5 _ _ part8 part9 _ _ part12 _; do
+    if test -n "${part9?}" && test "$(hex_to_dec "${part9:?}" || :)" -eq 1 && test -n "${part12?}" && test "$(hex_to_dec "${part12:?}" || printf '%s' '9' || :)" -eq 0; then
+      ui_debug 'Input event is 64-bit'
+      printf '%s\n' 24
+      return 4
+    elif test -n "${part5?}" && test "$(hex_to_dec "${part5:?}" || :)" -eq 1 && test -n "${part8?}" && test "$(hex_to_dec "${part8:?}" || printf '%s' '9' || :)" -eq 0; then
+      ui_debug 'Input event is 32-bit'
+      printf '%s\n' 16
+      return 4
+    else
+      ui_warning "Unknown input event, type: ${part5:-''} ${part9:-''}"
+    fi
+  done
+
+  if test "${?}" -eq 4; then
+    test "${KEY_TEST_ONLY:?}" -eq 0 || ui_debug ''
+    return 0 # OK
+  fi
+
+  return 127 # Fail
+}
+
 _parse_input_event()
 {
-  printf "%s\n" "${1}" | _prepare_hexdump_output | while IFS=' ' read -r _ _ _ _ ev_type32 key_code32 key_down32 zero32 ev_type64 key_code64 key_down64 zero64 _; do
-    if test "$(hex_to_dec "${ev_type64:-9}" || true)" -eq 1 && test "$(hex_to_dec "${zero64:-9}" || printf '9' || true)" -eq 0; then
-      key_code="${key_code64?}"
-      key_down="$(hex_to_dec "${key_down64:-9}")"
-    elif test "$(hex_to_dec "${ev_type32:-9}" || true)" -eq 1 && test "$(hex_to_dec "${zero32:-9}" || printf '9' || true)" -eq 0; then
-      key_code="${key_code32?}"
-      key_down="$(hex_to_dec "${key_down32:-9}")"
+  printf "%s\n" "${1?}" | _prepare_hexdump_output | while IFS=' ' read -r _ _ _ _ ev_type32 key_code32 key_action32 _ ev_type64 key_code64 key_action64 _; do
+    if test "${INPUT_EVENT_SIZE:?}" -eq 24; then
+      event_type="$(hex_to_dec "${ev_type64:?}")" || return 123
+      key_code="${key_code64:?}"
+      key_action="$(hex_to_dec "${key_action64:?}")" || return 123
+    elif test "${INPUT_EVENT_SIZE:?}" -eq 16; then
+      event_type="$(hex_to_dec "${ev_type32:?}")" || return 123
+      key_code="${key_code32:?}"
+      key_action="$(hex_to_dec "${key_action32:?}")" || return 123
     else
-      ui_warning "Invalid event type: ${ev_type32:-''} ${ev_type64:-''}"
-      continue
+      ui_warning "Invalid input event size: ${INPUT_EVENT_SIZE?}"
+      return 127
     fi
 
-    if test "${key_down?}" -ne 1 && test "${key_down?}" -ne 0; then
-      return 125
+    if test "${event_type:?}" -ne 1; then
+      if test "${DEBUG_LOG_ENABLED:?}" -eq 1 || test "${KEY_TEST_ONLY:?}" -eq 1; then
+        ui_warning "Unsupported event type: ${event_type?}"
+      fi
+      return 115
     fi
-    if test -z "${key_code?}"; then
-      return 126
+
+    if test "${key_code:?}" = '014a'; then # 0x014a (330)
+      ui_warning 'Touch screen action ignored'
+      return 115
+    fi
+
+    # Only 0 and 1 are accepted
+    if test "${key_action:?}" -lt 0 || test "${key_action:?}" -gt 1; then
+      ui_warning "Unsupported action: ${key_action?}"
+      return 115
     fi
 
     hex_to_dec "${key_code:?}" || return 126
 
-    if test "${key_down:?}" -eq 1; then
-      return 3
-    else
-      return 4
-    fi
-  done || return "${?}"
+    return "$((key_action + 10))"
+
+  done ||
+    return "${?}"
 
   return 127
 }
@@ -2902,21 +2953,40 @@ choose_read()
   return "${?}"
 }
 
+_inputevent_keycode_to_key()
+{
+  case "${1?}" in
+    '') return 123 ;;
+
+    "${INPUT_CODE_VOLUME_UP?}") printf '%s\n' '+' ;;
+    "${INPUT_CODE_VOLUME_DOWN?}") printf '%s\n' '-' ;;
+    "${INPUT_CODE_POWER?}") printf '%s\n' 'POWER' ;;
+    "${INPUT_CODE_BACK?}") printf '%s\n' 'BACK' ;;
+    "${INPUT_CODE_HOME?}") printf '%s\n' 'HOME' ;;
+    "${INPUT_CODE_APP_SWITCH?}") printf '%s\n' 'APP SWITCH' ;;
+
+    *) return 123 ;; # All other keys
+  esac
+}
+
 choose_inputevent()
 {
-  local _key _status _last_key_pressed
+  local _key _status _last_key_pressed _key_desc _ret
 
-  _find_hardware_keys 'gpio-keys' || {
-    _status="${?}"
+  if _find_hardware_keys 'gpio-keys'; then
+    :
+  elif test "${IS_EMU:?}" = 'true' && _find_hardware_keys 'qwerty2'; then
+    :
+  else
     ui_msg_empty_line
-    ui_warning "Key detection failed (input event), status code: ${_status:-}"
+    ui_warning "Key detection failed (input event)"
     ui_msg_empty_line
     return 1
-  }
+  fi
 
   _last_key_pressed=''
   while true; do
-    _get_input_event "${1:-}" || {
+    _get_input_event "${1-}" || {
       _status="${?}"
 
       if test "${_status:?}" -eq 124; then
@@ -2926,36 +2996,49 @@ choose_inputevent()
         return 0
       fi
 
-      ui_warning "Key detection failed 2 (input event), status code: ${_status:-}"
+      ui_warning "Key detection failed - get (input event), status code: ${_status?}"
       return 1
     }
 
+    # $INPUT_EVENT_CURRENT is set inside _get_input_event()
+    if test -z "${INPUT_EVENT_SIZE-}"; then
+      INPUT_EVENT_SIZE="$(_detect_input_event_size "${INPUT_EVENT_CURRENT?}")" || {
+        ui_warning "Key detection failed - size check (input event), status code: ${?}"
+        return 1
+      }
+    fi
+
     if test "${KEY_TEST_ONLY:?}" -eq 1; then
-      ui_msg "EVENT DEBUG:$(printf '%s\n' "${INPUT_EVENT_CURRENT?}" | _prepare_hexdump_output | LC_ALL=C tr -d -s '\n' '[:blank:]' || :)"
+      ui_msg "EVENT DEBUG:$(printf '%s\n' "${INPUT_EVENT_CURRENT?}" | _prepare_hexdump_output | LC_ALL=C tr -s -- ' ' || :)"
     elif test "${DEBUG_LOG_ENABLED:?}" -eq 1; then
       ui_debug ''
-      ui_debug "EVENT DEBUG:$(printf '%s\n' "${INPUT_EVENT_CURRENT?}" | _prepare_hexdump_output | LC_ALL=C tr -d -s '\n' '[:blank:]' || :)"
+      ui_debug "EVENT DEBUG:$(printf '%s\n' "${INPUT_EVENT_CURRENT?}" | _prepare_hexdump_output | LC_ALL=C tr -s -- ' ' || :)"
     fi
 
     _status=0
     _key="$(_parse_input_event "${INPUT_EVENT_CURRENT?}")" || _status="${?}"
 
     case "${_status:?}" in
-      3) ;; # Key down event read (allowed)
-      4) ;; # Key up event read (allowed)
-      *)    # Event read failed
-        ui_warning "Key detection failed 3 (input event), status code: ${_status:-}"
+      11) ;;           # Key down event read (allowed)
+      10) ;;           # Key up event read (allowed)
+      115) continue ;; # We got an unsupported event type or action (ignored)
+      *)               # Event read failed
+        ui_warning "Key detection failed - parse (input event), status code: ${_status?}"
         return 1
         ;;
     esac
 
-    if test "${DEBUG_LOG_ENABLED:?}" -eq 1 || test "${RECOVERY_OUTPUT:?}" = 'true'; then
+    if test "${_key?}" = "${INPUT_CODE_POWER:?}" && test "${KEY_TEST_ONLY:?}" -eq 0; then continue; fi # Power key (ignored completely)
+
+    if test "${KEY_TEST_ONLY:?}" -eq 1; then
+      ui_msg "Event { Event type: 1, Key code: ${_key?}, Action: $((_status - 10)) }"
+    elif test "${DEBUG_LOG_ENABLED:?}" -eq 1; then
       ui_debug ''
-      ui_debug "Key code: ${_key:-}, Action: ${_status:-}"
+      ui_debug "Event { Event type: 1, Key code: ${_key?}, Action: $((_status - 10)) }"
     fi
 
     if true; then
-      if test "${_status:?}" -eq 3; then
+      if test "${_status:?}" -eq 11; then
         # Key down
         if test "${_last_key_pressed?}" = ''; then
           _last_key_pressed="${_key?}"
@@ -2977,15 +3060,13 @@ choose_inputevent()
       _last_key_pressed=''
     fi
 
-    case "${_key?}" in
-      "${INPUT_CODE_VOLUME_UP:?}") ;;   # Vol + key (allowed)
-      "${INPUT_CODE_VOLUME_DOWN:?}") ;; # Vol - key (allowed)
-      "${INPUT_CODE_POWER:?}")
-        continue # Power key (ignored)
-        ;;
+    _key_desc="$(_inputevent_keycode_to_key "${_key?}")" || _key_desc='Unknown'
+    case "${_key_desc?}" in
+      '+' | '-') ;; # Volume keys (allowed)
+      'BACK') ui_error 'Installation forcefully terminated' 143 ;;
       *)
         test "${KEY_TEST_ONLY:?}" -eq 1 || {
-          ui_msg "Invalid choice!!! Key code: ${_key:-}"
+          ui_msg "Invalid choice!!! Key: ${_key_desc?} (${_key?})"
           continue
         }
         ;;
@@ -2994,25 +3075,17 @@ choose_inputevent()
     break
   done
 
-  : "UNUSED ${INPUT_CODE_HOME:?}"
+  _ret=1
+  case "${_key_desc?}" in
+    '+') _ret=3 ;;
+    '-') _ret=2 ;;
+    *) test "${KEY_TEST_ONLY:?}" -eq 1 || ui_error "choose_inputevent failed, key code: ${_key?}" ;;
+  esac
 
-  if test "${_key?}" = "${INPUT_CODE_VOLUME_UP:?}"; then
-    ui_msg_empty_line
-    ui_msg "Key press: + (${INPUT_CODE_VOLUME_UP:-})"
-    ui_msg_empty_line
-    return 3
-  elif test "${_key?}" = "${INPUT_CODE_VOLUME_DOWN:?}"; then
-    ui_msg_empty_line
-    ui_msg "Key press: - (${INPUT_CODE_VOLUME_DOWN:-})"
-    ui_msg_empty_line
-    return 2
-  elif test "${KEY_TEST_ONLY:?}" -eq 1; then
-    ui_msg_empty_line
-    ui_msg "Key press: (${_key?})"
-    ui_msg_empty_line
-  else
-    ui_error "choose_inputevent failed, key code: ${_key:-}"
-  fi
+  ui_msg_empty_line
+  ui_msg "Key press: ${_key_desc?} (${_key?})"
+  ui_msg_empty_line
+  return "${_ret:?}"
 
   #ui_msg "Key code: ${_key:-}"
   #_choose_inputevent_remapper "${_key:?}"
