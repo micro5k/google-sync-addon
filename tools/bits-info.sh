@@ -6,14 +6,14 @@
 # shellcheck disable=SC3043 # In POSIX sh, local is undefined
 
 SCRIPT_NAME='Bits info'
-SCRIPT_VERSION='1.5.23'
+SCRIPT_VERSION='1.5.30'
 
 ### CONFIGURATION ###
 
 set -u 2> /dev/null || :
 
 # shellcheck disable=SC3040 # Ignore: In POSIX sh, set option pipefail is undefined
-case "$(set 2> /dev/null -o || set || :)" in *'pipefail'*) set -o pipefail || printf 1>&2 '%s\n' 'Failed: pipefail' ;; *) ;; esac
+case "$(set 2> /dev/null -o || set || :)" in *'pipefail'*) set -o pipefail || echo 1>&2 'Failed: pipefail' ;; *) ;; esac
 
 # The "obosh" shell does NOT support "command" while the "posh" shell does NOT support "type"
 {
@@ -288,6 +288,7 @@ extract_bytes_and_swap()
 detect_bitness_of_single_file()
 {
   local _dbf_first_bytes _dbf_first_2_bytes _dbf_size _dbf_bytes_swap _dbf_pos _header _dbf_exe_type _dbf_cpu_type _dbf_i _dbf_tmp
+  local _pe_size_optional_header _pe_size_all_headers _pe_size_initializ_data
 
   if test ! -f "${1}" || ! _dbf_first_bytes="$(dump_hex "${1}" '0' '64')"; then # Cache bytes at pos 0x00 - 0x40
     printf '%s\n' 'failed'
@@ -296,14 +297,14 @@ detect_bitness_of_single_file()
   _dbf_first_2_bytes="$(extract_bytes "${_dbf_first_bytes}" '0' '2')" || _dbf_first_2_bytes=''
 
   if test "${_dbf_first_2_bytes}" = '4d5a'; then
-    # MZ - Executable binaries for Windows / DOS (.exe) - Start with: MZ (0x4D 0x5A)
+    # MZ - Executable binaries for Windows / DOS (.exe) | Offset: 0x00 - Magic: MZ (0x4D 0x5A)
     # More info: https://wiki.osdev.org/MZ
 
     _dbf_bytes_swap='true'
     _dbf_exe_type=''
     _dbf_pos=''
 
-    # APE - Actually Portable Executables - Start with: MZ (0x4D 0x5A) + qFpD (0x71 0x46 0x70 0x44)
+    # APE - Actually Portable Executables | Offset: 0x00 - Magic: MZ (0x4D 0x5A), qFpD (0x71 0x46 0x70 0x44)
     if compare_hex_bytes "${_dbf_first_bytes}" '2' '4' '71467044'; then _dbf_exe_type='APE '; fi
 
     # The smallest possible PE file is 97 bytes: http://www.phreedom.org/research/tinype/
@@ -311,7 +312,7 @@ detect_bitness_of_single_file()
     if
       _dbf_pos="$(extract_bytes "${_dbf_first_bytes}" '60' '4')" && _dbf_pos="$(hex_bytes_to_int "${_dbf_pos?}" '4' "${_dbf_bytes_swap:?}")" &&
         test "${_dbf_pos:?}" -ge 4 && test "${_dbf_pos:?}" -le 536870912 &&
-        _header="$(dump_hex "${1:?}" "${_dbf_pos:?}" '26')"
+        _header="$(dump_hex "${1:?}" "${_dbf_pos:?}" '88')"
     then
       :
     else _header=''; fi
@@ -321,22 +322,37 @@ detect_bitness_of_single_file()
         # PE header => PE (0x50 0x45) + 0x00 + 0x00 + Machine field
         # More info: https://www.aldeid.com/wiki/PE-Portable-executable
         # More info: https://learn.microsoft.com/en-us/windows/win32/debug/pe-format
-        _dbf_exe_type="${_dbf_exe_type?}PE"
 
-        # PE header pos + 0x14 (decimal: 20) = SizeOfOptionalHeader
         if
-          _dbf_tmp="$(extract_bytes "${_header?}" '20' '2')" && _dbf_tmp="$(hex_bytes_to_int "${_dbf_tmp?}" '2' "${_dbf_bytes_swap:?}")" &&
-            test "${_dbf_tmp:?}" -ge 2
+          # SizeOfOptionalHeader => Offset: PE header pos + 0x14 (dec: 20)
+          _pe_size_optional_header="$(extract_bytes "${_header?}" '20' '2')" &&
+            _pe_size_optional_header="$(hex_bytes_to_int "${_pe_size_optional_header}" '2' "${_dbf_bytes_swap:?}")"
         then
-          # PE header pos + 0x18 (decimal: 24) = PE type magic
+
+          if
+            test "${_pe_size_optional_header}" -ge 64 &&
+              # SizeOfHeaders => Offset: PE header pos + 0x54 (dec: 84)
+              _pe_size_all_headers="$(extract_bytes "${_header?}" '84' '4')" && _pe_size_all_headers="$(hex_bytes_to_int "${_pe_size_all_headers}" '4' "${_dbf_bytes_swap:?}")" &&
+              # SizeOfInitializedData => Offset: PE header pos + 0x20 (dec: 32)
+              _pe_size_initializ_data="$(extract_bytes "${_header?}" '32' '4')" && _pe_size_initializ_data="$(hex_bytes_to_int "${_pe_size_initializ_data}" '4' "${_dbf_bytes_swap:?}")"
+          then
+            # IMPORTANT: Initial code (not compatible with all files)
+            if _dbf_tmp="$(dump_hex "${1:?}" "$((_pe_size_all_headers + _pe_size_initializ_data))" '6')" && compare_hex_bytes "${_dbf_tmp}" '0' '6' '377abcaf271c'; then
+              _dbf_exe_type="${_dbf_exe_type?}7z "
+            fi
+          fi
+
+          # PE type magic => Offset: PE header pos + 0x18 (dec: 24)
           if _dbf_tmp="$(extract_bytes "${_header?}" '24' '2')" && _dbf_tmp="$(switch_endianness_2 "${_dbf_tmp?}")"; then
             case "${_dbf_tmp?}" in
-              '010b') _dbf_exe_type="${_dbf_exe_type:?}32" ;;
-              '020b') _dbf_exe_type="${_dbf_exe_type:?}32+" ;;
-              '0107') _dbf_exe_type="${_dbf_exe_type:?} ROM image" ;;
-              *) ;;
+              '010b') _dbf_exe_type="${_dbf_exe_type?}PE32" ;;
+              '020b') _dbf_exe_type="${_dbf_exe_type?}PE32+" ;;
+              '0107') _dbf_exe_type="${_dbf_exe_type?}PE ROM image" ;;
+              *) _dbf_exe_type="${_dbf_exe_type?}Unknown PE" ;;
             esac
           fi
+        else
+          _dbf_exe_type="${_dbf_exe_type?}Invalid PE"
         fi
 
         _dbf_cpu_type="$(extract_bytes "${_header:?}" '4' '2')" || _dbf_cpu_type=''
@@ -404,7 +420,7 @@ detect_bitness_of_single_file()
   fi
 
   if compare_hex_bytes "${_dbf_first_bytes}" '0' '4' '7f454c46'; then
-    # ELF - Executable binaries for Linux / Android - Start with: 0x7F + ELF (0x45 0x4C 0x46) + 0x01 for 32-bit or 0x02 for 64-bit
+    # ELF - Executable binaries for Linux / Android | Offset: 0x00 - Magic: 0x7F, ELF (0x45 0x4C 0x46), 0x01 for 32-bit or 0x02 for 64-bit
 
     _header="$(extract_bytes "${_dbf_first_bytes}" '4' '1')" || _header=''
     case "${_header}" in
@@ -533,9 +549,48 @@ detect_bitness_of_single_file()
     return 7
   fi
 
+  if compare_hex_bytes "${_dbf_first_bytes}" '0' '4' 'ffffffff'; then
+    # DOS device driver (.dos, .sys, .dev, .bin) | Offset: 0x00 - Magic: 0xFF, 0xFF, 0xFF, 0xFF
+    # More info: http://fileformats.archiveteam.org/wiki/DOS_device_driver
+
+    printf '%s\n' '16-bit DOS device driver'
+    return 0
+  fi
+
+  if compare_hex_bytes "${_dbf_first_bytes}" '0' '8' 'd0cf11e0a1b11ae1'; then
+    # CFBF - Compound File Binary Format (.msi / .msp) | Offset: 0x00 - Magic: 0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1
+
+    printf '%s\n' 'Bit-independent CFBF'
+    return 0
+  fi
+
+  if compare_hex_bytes "${_dbf_first_bytes}" '0' '4' '504b0304'; then
+    # PKZip archive (.zip / .jar / .apk) | Offset: 0x00 - Magic: PK (0x50 0x4B), 0x03, 0x04
+    # More info: https://users.cs.jmu.edu/buchhofp/forensics/formats/pkzip.html
+
+    printf '%s\n' 'Bit-independent PKZip archive'
+    return 0
+  fi
+
+  if compare_hex_bytes "${_dbf_first_bytes}" '0' '6' '377abcaf271c'; then
+    # 7z archive (.7z) | Offset: 0x00 - Magic: 7z (0x37 0x7A), 0xBC, 0xAF, 0x27, 0x1C
+    # More info: https://py7zr.readthedocs.io/en/latest/archive_format.html
+
+    printf '%s\n' 'Bit-independent 7z archive'
+    return 0
+  fi
+
   if test "${_dbf_first_2_bytes?}" = '2321'; then
-    # Scripts (often shell scripts) - Start with: #! (0x23 0x21)
+    # Scripts (often shell scripts) | Offset: 0x00 - Magic: #! (0x23 0x21)
     printf '%s\n' 'Bit-independent script'
+    return 0
+  fi
+
+  if compare_hex_bytes "${_dbf_first_bytes}" '4' '4' '50413330'; then
+    # Windows Patch Delta | Offset: 0x04 - Magic: PA30 (0x50 0x41 0x33 0x30)
+    # More info: https://wumb0.in/extracting-and-diffing-ms-patches-in-2020.html
+
+    printf '%s\n' 'Bit-independent Windows Patch Delta'
     return 0
   fi
 
@@ -546,6 +601,20 @@ detect_bitness_of_single_file()
 
   if test "${_dbf_size}" = 0; then
     printf '%s\n' 'Empty file'
+    return 0
+  elif test "${_dbf_size}" -gt 0; then
+    : # OK
+  else
+    # It overflowed, probably the file is too big to be handled by this shell
+    printf '%s\n' 'failed'
+    return 1
+  fi
+
+  if test "${_dbf_size}" -ge 512 && test "$(dump_hex "${1:?}" "$((_dbf_size - 512))" '4' || :)" = '6b6f6c79'; then
+    # DMG - Apple Disk Image | Offset: 512 from end - Magic: koly (0x6B 0x6F 0x6C 0x79)
+    # More info: https://newosxbook.com/DMG.html
+
+    printf '%s\n' 'Bit-independent DMG'
     return 0
   fi
 
