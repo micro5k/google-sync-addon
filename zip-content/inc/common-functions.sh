@@ -2662,7 +2662,7 @@ _get_input_event()
   if test -n "${1-}"; then _max_cycles="$((${1:?} * 4))" || return 120; fi
 
   while true; do
-    _file_size="$(get_size_of_file "${TMP_PATH:?}/working-files/input/input-events/0")" || return 121
+    _file_size="$(get_size_of_file 2> /dev/null "${TMP_PATH:?}/working-files/input/input-events/0")" || return 121
 
     if test "${_file_size:?}" -ge "${_expected_file_size:?}"; then
       _val="$(hexdump -x -v -s "${INPUT_EVENT_START_OFFSET:?}" -n "${_size:?}" -- "${TMP_PATH:?}/working-files/input/input-events/0" | _prepare_hexdump_output)" || return "${?}"
@@ -2721,19 +2721,27 @@ _detect_input_event_size()
 
 _parse_input_event()
 {
-  printf "%s\n" "${1?}" | while IFS=' ' read -r _ _ _ _ ev_type32 key_code32 key_action32 _ ev_type64 key_code64 key_action64 _; do
+  printf "%s\n" "${1?}" | while IFS=' ' read -r _ _ _ _ ev_type32 key_code32 key_action32p2 key_action32p1 ev_type64 key_code64 key_action64p2 key_action64p1 _; do
     if test "${INPUT_EVENT_SIZE:?}" -eq 24; then
-      event_type="$(hex_to_dec "${ev_type64:?}")" || return 123
-      key_code="${key_code64:?}"
-      key_action="$(hex_to_dec "${key_action64:?}")" || return 123
+      event_type="${ev_type64?}"
+      key_code="${key_code64?}"
+      key_action="${key_action64p1?}${key_action64p2?}"
     elif test "${INPUT_EVENT_SIZE:?}" -eq 16; then
-      event_type="$(hex_to_dec "${ev_type32:?}")" || return 123
-      key_code="${key_code32:?}"
-      key_action="$(hex_to_dec "${key_action32:?}")" || return 123
+      event_type="${ev_type32?}"
+      key_code="${key_code32?}"
+      key_action="${key_action32p1?}${key_action32p2?}"
     else
       ui_warning "Invalid input event size: ${INPUT_EVENT_SIZE?}"
       return 127
     fi
+
+    if test -z "${event_type?}" || test -z "${key_code?}" || test -z "${key_action?}"; then
+      ui_warning "Corrupted event data"
+      return 122
+    fi
+
+    event_type="$(hex_to_dec "${event_type:?}")" || return 123
+    key_action="$(hex_to_dec "${key_action:?}")" || return 123
 
     if test "${event_type:?}" -eq 0; then return 115; fi # Event type 0 (EV_SYN) is useless, ignore it earlier and never report it
 
@@ -3059,6 +3067,7 @@ choose_inputevent()
   }
 
   _last_key_pressed=''
+
   while true; do
     _get_input_event "${1-}" || { # It set ${INPUT_EVENT_CURRENT}
       _status="${?}"
@@ -3077,9 +3086,9 @@ choose_inputevent()
 
     if test -z "${INPUT_EVENT_SIZE-}"; then
       INPUT_EVENT_SIZE="$(_detect_input_event_size "${INPUT_EVENT_CURRENT?}")" || {
-        ui_warning "Key detection failed (input event) - size check, status code: ${?}"
+        _status="${?}"
         input_device_listener_stop
-        return 1
+        ui_error "Key detection failed (input event) - size check, status code: ${_status?}"
       }
       if test "${INPUT_EVENT_SIZE:?}" -ne 24; then INPUT_EVENT_START_OFFSET="$((INPUT_EVENT_START_OFFSET - 24 + INPUT_EVENT_SIZE))"; fi
     fi
@@ -3093,8 +3102,7 @@ choose_inputevent()
       115) continue ;; # We got an unsupported event type or action (ignored)
       *)               # Event parsing failed (fail)
         input_device_listener_stop
-        ui_warning "Key detection failed (input event) - parse, status code: ${_status?}"
-        return 1
+        ui_error "Key detection failed (input event) - parse, status code: ${_status?}"
         ;;
     esac
 
@@ -3107,27 +3115,25 @@ choose_inputevent()
       ui_debug "Event { Event type: 1, Key code: ${_key?}, Action: $((_status - 10)) }"
     fi
 
-    if true; then
+    if :; then
       if test "${_status:?}" -eq 11; then
         # Key down
         if test "${_last_key_pressed?}" = ''; then
-          _last_key_pressed="${_key?}"
+          _last_key_pressed="${_key?}" # One key pressed (waiting release)
         else
-          _last_key_pressed='' # Two buttons pressed simultaneously (ignored)
+          _last_key_pressed=''
+          ui_msg 'Key mismatch, ignored!!!' # Two keys pressed simultaneously (ignored)
         fi
         continue
       else
         # Key up
-        if test -n "${_key?}" && test "${_key:?}" = "${_last_key_pressed?}"; then
+        if test -n "${_last_key_pressed?}" && test "${_key?}" = "${_last_key_pressed:?}"; then
           : # OK
         else
-          _last_key_pressed=''
-          ui_msg 'Key mismatch, ignored!!!' # Key mismatch (ignored)
+          _last_key_pressed='' # Key mismatch from earlier (ignored)
           continue
         fi
       fi
-
-      _last_key_pressed=''
     fi
 
     _key_desc="$(_inputevent_keycode_to_key "${_key?}")" || _key_desc='Unknown'
@@ -3138,6 +3144,7 @@ choose_inputevent()
         ui_error 'Installation forcefully terminated' 143
         ;;
       *)
+        _last_key_pressed=''
         test "${KEY_TEST_ONLY:?}" -eq 1 || {
           ui_msg "Invalid choice!!! Key: ${_key_desc?} (${_key?})"
           continue
