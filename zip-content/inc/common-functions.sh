@@ -440,7 +440,7 @@ is_mounted_read_only()
 
 _remount_read_write_helper()
 {
-  test "${DRY_RUN:?}" -lt 2 || return 0
+  test "${DRY_RUN:?}" -lt 2 || return 2
 
   {
     test -n "${DEVICE_MOUNT-}" && PATH="${PREVIOUS_PATH:?}" "${DEVICE_MOUNT:?}" 2> /dev/null -o 'remount,rw' "${1:?}"
@@ -711,6 +711,7 @@ _get_local_settings()
   if test "${LOCAL_SETTINGS_READ:-false}" = 'true'; then return; fi
 
   ui_debug 'Parsing local settings...'
+  ui_debug ''
   LOCAL_SETTINGS="$(list_props | grep -e "^\[zip\.${MODULE_ID:?}\.")" || LOCAL_SETTINGS=''
   LOCAL_SETTINGS_READ='true'
 
@@ -748,12 +749,37 @@ parse_setting()
   printf '%s\n' "${2?}"
 }
 
-remount_read_write_if_needed()
+remount_read_write()
+{
+  if is_mounted_read_only "${1:?}"; then
+    test "${DRY_RUN:?}" -lt 2 || {
+      ui_msg "INFO: The '${1?}' mountpoint is read-only"
+      return 0
+    }
+
+    ui_msg "INFO: The '${1?}' mountpoint is read-only, it will be remounted"
+    _remount_read_write_helper "${1:?}" || {
+      return 1
+    }
+  fi
+
+  return 0
+}
+
+remount_read_write_if_possible()
 {
   local _required
   _required="${2:-true}"
 
   if is_mounted_read_only "${1:?}"; then
+    test "${DRY_RUN:?}" -lt 2 || {
+      ui_msg "INFO: The '${1?}' mountpoint is read-only"
+      case "${_required:?}" in
+        'true') return 0 ;;
+        *) return 2 ;;
+      esac
+    }
+
     ui_msg "INFO: The '${1?}' mountpoint is read-only, it will be remounted"
     _remount_read_write_helper "${1:?}" || {
       if test "${_required:?}" = 'true'; then
@@ -924,6 +950,16 @@ _generate_architectures_list()
   export ARCH_LIST
 }
 
+display_basic_info()
+{
+  ui_msg "$(write_separator_line "${#MODULE_NAME}" '-' || :)"
+  ui_msg "${MODULE_NAME:?}"
+  ui_msg "${MODULE_VERSION:?}"
+  ui_msg "${BUILD_TYPE:?}"
+  ui_msg "(by ${MODULE_AUTHOR:?})"
+  ui_msg "$(write_separator_line "${#MODULE_NAME}" '-' || :)"
+}
+
 display_info()
 {
   ui_msg "Brand: ${BUILD_BRAND?}"
@@ -932,7 +968,10 @@ display_info()
   ui_msg "Device: ${BUILD_DEVICE?}"
   ui_msg "Product: ${BUILD_PRODUCT?}"
   ui_msg "Emulator: ${IS_EMU:?}"
-  ui_msg "Battery level: ${BATTERY_LEVEL:-unknown}"
+  ui_msg "Fake signature permission: ${FAKE_SIGN_PERMISSION?}"
+  ui_msg_empty_line
+  ui_msg "Recovery: ${RECOVERY_NAME?}"
+  ui_msg "Recovery API version: ${RECOVERY_API_VER-}"
   ui_msg_empty_line
   ui_msg "First installation: ${FIRST_INSTALLATION:?}"
   ui_msg "Boot mode: ${BOOTMODE:?}"
@@ -942,15 +981,16 @@ display_info()
   else
     ui_msg "Zip install: ${ZIP_INSTALL?}"
   fi
-  ui_msg "Fake signature perm.: ${FAKE_SIGN_PERMISSION?}"
-  ui_msg_empty_line
-  ui_msg "Recovery: ${RECOVERY_NAME?}"
-  ui_msg "Recovery API version: ${RECOVERY_API_VER-}"
+  ui_msg "Battery level: ${BATTERY_LEVEL:?}"
   ui_msg_empty_line
   ui_msg "Android API: ${API:?}"
-  ui_msg "64-bit CPU arch: ${CPU64:?}"
-  ui_msg "32-bit CPU arch: ${CPU:?}"
-  ui_msg "ABI list: ${ARCH_LIST?}"
+  if test -n "${CPU-}" && test -n "${CPU64-}"; then
+    ui_msg "64-bit CPU arch: ${CPU64:?}"
+    ui_msg "32-bit CPU arch: ${CPU:?}"
+  fi
+  if test -n "${ARCH_LIST-}"; then
+    ui_msg "ABI list: ${ARCH_LIST?}"
+  fi
   ui_msg_empty_line
   ui_msg "Boot reason: ${BOOT_REASON?}"
   ui_msg "Current slot: ${SLOT?}$(test "${VIRTUAL_AB?}" != 'true' || printf '%s\n' ' (Virtual A/B)' || :)"
@@ -973,7 +1013,7 @@ display_info()
 
 initialize()
 {
-  local _raw_arch_list
+  local _raw_arch_list _additional_data_mountpoint
 
   UNMOUNT_SYSTEM=0
   UNMOUNT_PRODUCT=0
@@ -981,6 +1021,12 @@ initialize()
   UNMOUNT_SYS_EXT=0
   UNMOUNT_ODM=0
   UNMOUNT_DATA=0
+
+  # Make sure that the commands are still overridden here (most shells don't have the ability to export functions)
+  if test "${TEST_INSTALL:-false}" != 'false' && test -f "${RS_OVERRIDE_SCRIPT:?}"; then
+    # shellcheck source=SCRIPTDIR/../../recovery-simulator/inc/configure-overrides.sh
+    . "${RS_OVERRIDE_SCRIPT:?}" || exit "${?}"
+  fi
 
   PRODUCT_PATH=''
   VENDOR_PATH=''
@@ -992,16 +1038,21 @@ initialize()
   VENDOR_USABLE='false'
   SYS_EXT_USABLE='false'
 
-  # Make sure that the commands are still overridden here (most shells don't have the ability to export functions)
-  if test "${TEST_INSTALL:-false}" != 'false' && test -f "${RS_OVERRIDE_SCRIPT:?}"; then
-    # shellcheck source=SCRIPTDIR/../../recovery-simulator/inc/configure-overrides.sh
-    . "${RS_OVERRIDE_SCRIPT:?}" || exit "${?}"
-  fi
+  BASE_SYSCONFIG_XML=''
 
   package_extract_file 'module.prop' "${TMP_PATH:?}/module.prop"
   MODULE_ID="$(simple_file_getprop 'id' "${TMP_PATH:?}/module.prop")" || ui_error 'Failed to parse id'
-  readonly MODULE_ID
-  export MODULE_ID
+  MODULE_NAME="$(simple_file_getprop 'name' "${TMP_PATH:?}/module.prop")" || ui_error 'Failed to parse name'
+  MODULE_VERSION="$(simple_file_getprop 'version' "${TMP_PATH:?}/module.prop")" || ui_error 'Failed to parse version'
+  MODULE_VERCODE="$(simple_file_getprop 'versionCode' "${TMP_PATH:?}/module.prop")" || ui_error 'Failed to parse version code'
+  MODULE_AUTHOR="$(simple_file_getprop 'author' "${TMP_PATH:?}/module.prop")" || ui_error 'Failed to parse author'
+  readonly MODULE_ID MODULE_NAME MODULE_VERSION MODULE_VERCODE MODULE_AUTHOR
+  export MODULE_ID MODULE_NAME MODULE_VERSION MODULE_VERCODE MODULE_AUTHOR
+
+  package_extract_file 'info.prop' "${TMP_PATH:?}/info.prop"
+  BUILD_TYPE="$(simple_file_getprop 'buildType' "${TMP_PATH:?}/info.prop")" || ui_error 'Failed to parse build type'
+  readonly BUILD_TYPE
+  export BUILD_TYPE
 
   _get_local_settings
 
@@ -1011,36 +1062,40 @@ initialize()
   LIVE_SETUP_DEFAULT="$(parse_setting 'LIVE_SETUP_DEFAULT' "${LIVE_SETUP_DEFAULT:?}" 'false')"
   LIVE_SETUP_TIMEOUT="$(parse_setting 'LIVE_SETUP_TIMEOUT' "${LIVE_SETUP_TIMEOUT:?}" 'false')"
 
-  ui_debug ''
-
   case "${KEY_TEST_ONLY?}" in '' | *[!0-1]*) KEY_TEST_ONLY=1 ;; *) ;; esac
   if test "${KEY_TEST_ONLY:?}" -eq 1; then DRY_RUN=2; fi
   readonly KEY_TEST_ONLY
+  export KEY_TEST_ONLY
 
-  case "${DRY_RUN?}" in '' | *[!0-2]*) DRY_RUN=1 ;; *) ;; esac
+  case "${DRY_RUN?}" in '' | *[!0-2]*) DRY_RUN=2 ;; *) ;; esac
   readonly DRY_RUN
+  export DRY_RUN
+
   if test "${DRY_RUN:?}" -gt 0; then
-    ui_warning "DRY RUN mode ${DRY_RUN?} enabled!!! No files on your device will be modified"
+    ui_warning "DRY RUN mode ${DRY_RUN?} enabled. No files on your device will be modified!!!"
     ui_debug ''
   fi
 
-  package_extract_file 'info.prop' "${TMP_PATH:?}/info.prop"
-  BUILD_TYPE="$(simple_file_getprop 'buildType' "${TMP_PATH:?}/info.prop")" || ui_error 'Failed to parse build type'
-  readonly BUILD_TYPE
-  export BUILD_TYPE
-
-  # Some recoveries have a fake system folder when nothing is mounted with just bin, etc and lib / lib64 or, in some rare cases, just bin and usr.
+  # Some recoveries have a "system" folder under "/" when "/system" is NOT mounted with just bin, etc and lib / lib64 or, in some rare cases, just bin and usr.
   # Usable binaries are under the fake /system/bin so the /system mountpoint mustn't be used while in this recovery.
-  if test "${BOOTMODE:?}" != 'true' &&
-    test -e '/system/bin/sh' &&
-    test ! -e '/system/app' &&
-    test ! -e '/system/build.prop' &&
-    test ! -e '/system/system/build.prop'; then
-    readonly RECOVERY_FAKE_SYSTEM='true'
+  if
+    test "${BOOTMODE:?}" != 'true' &&
+      test -e '/system/bin/sh' &&
+      test ! -e '/system/app' &&
+      test ! -e '/system/build.prop' &&
+      test ! -e '/system/system/build.prop'
+  then
+    RECOVERY_FAKE_SYSTEM='true'
   else
-    readonly RECOVERY_FAKE_SYSTEM='false'
+    RECOVERY_FAKE_SYSTEM='false'
   fi
+  readonly RECOVERY_FAKE_SYSTEM
   export RECOVERY_FAKE_SYSTEM
+
+  RECOVERY_NAME="$(_detect_recovery_name)" || RECOVERY_NAME='unknown'
+  BATTERY_LEVEL="$(_detect_battery_level)" || BATTERY_LEVEL='unknown'
+  readonly RECOVERY_NAME BATTERY_LEVEL
+  export RECOVERY_NAME BATTERY_LEVEL
 
   SLOT_SUFFIX="$(_detect_slot_suffix)" || SLOT_SUFFIX=''
   if test -n "${SLOT_SUFFIX?}"; then
@@ -1057,24 +1112,17 @@ initialize()
   DEVICE_STATE="$(parse_boot_value 'vbmeta.device_state')" || DEVICE_STATE='unknown'
   VERIFIED_BOOT_STATE="$(parse_boot_value 'verifiedbootstate')" || VERIFIED_BOOT_STATE='unknown'
   VERITY_MODE="$(_detect_verity_state)"
-  readonly BOOT_REASON DEVICE_STATE VERIFIED_BOOT_STATE VERITY_MODE
-  export BOOT_REASON DEVICE_STATE VERIFIED_BOOT_STATE VERITY_MODE
+  if test -e '/dev/block/mapper'; then DYNAMIC_PARTITIONS='true'; else DYNAMIC_PARTITIONS='false'; fi
+  readonly BOOT_REASON DEVICE_STATE VERIFIED_BOOT_STATE VERITY_MODE DYNAMIC_PARTITIONS
+  export BOOT_REASON DEVICE_STATE VERIFIED_BOOT_STATE VERITY_MODE DYNAMIC_PARTITIONS
 
-  if test -e '/dev/block/mapper'; then readonly DYNAMIC_PARTITIONS='true'; else readonly DYNAMIC_PARTITIONS='false'; fi
-  export DYNAMIC_PARTITIONS
-
-  BATTERY_LEVEL="$(_detect_battery_level)" || BATTERY_LEVEL=''
-  readonly BATTERY_LEVEL
-  export BATTERY_LEVEL
-
-  RECOVERY_NAME="$(_detect_recovery_name)" || RECOVERY_NAME='unknown'
   ENCRYPTION_STATE="$(simple_getprop 'ro.crypto.state')" || ENCRYPTION_STATE='unknown'
   ENCRYPTION_TYPE="$(simple_getprop 'ro.crypto.type')" || ENCRYPTION_TYPE='unknown'
   ENCRYPTION_OPTIONS="$(_detect_encryption_options)" || ENCRYPTION_OPTIONS='unknown'
-  readonly RECOVERY_NAME ENCRYPTION_STATE ENCRYPTION_TYPE ENCRYPTION_OPTIONS
-  export RECOVERY_NAME ENCRYPTION_STATE ENCRYPTION_TYPE ENCRYPTION_OPTIONS
+  readonly ENCRYPTION_STATE ENCRYPTION_TYPE ENCRYPTION_OPTIONS
+  export ENCRYPTION_STATE ENCRYPTION_TYPE ENCRYPTION_OPTIONS
 
-  if test -n "${BATTERY_LEVEL?}" && test "${BATTERY_LEVEL:?}" -lt 15; then
+  if test "${BATTERY_LEVEL:?}" != 'unknown' && test "${BATTERY_LEVEL:?}" -lt 15; then
     ui_error "The battery is too low. Current level: ${BATTERY_LEVEL?}%" 108
   fi
 
@@ -1090,6 +1138,31 @@ initialize()
   _timeout_check
   cp -pf "${SYS_PATH:?}/build.prop" "${TMP_PATH:?}/build.prop" # Cache the file for faster access
 
+  PREV_INSTALL_FAILED='false'
+  if test -f "${SYS_PATH:?}/etc/zips/${MODULE_ID:?}.failed"; then
+    PREV_INSTALL_FAILED='true'
+    ui_warning 'The previous installation has failed!!!'
+    ui_msg_empty_line
+  fi
+  readonly PREV_INSTALL_FAILED
+  export PREV_INSTALL_FAILED
+
+  # Previously installed version code (0 if not already installed or broken)
+  PREV_MODULE_VERCODE="$(simple_file_getprop 'install.version.code' "${SYS_PATH:?}/etc/zips/${MODULE_ID:?}.prop")" || PREV_MODULE_VERCODE=''
+  case "${PREV_MODULE_VERCODE?}" in
+    '') PREV_MODULE_VERCODE='0' ;; # Empty (not installed)
+    *[!0-9]*)                      # Broken data
+      PREV_MODULE_VERCODE='0'
+      ui_warning 'Previously installed version code is NOT valid!!!'
+      ui_msg_empty_line
+      ;;
+    *) ;; # Valid
+  esac
+  FIRST_INSTALLATION='true'
+  test "${PREV_MODULE_VERCODE:?}" -eq 0 || FIRST_INSTALLATION='false'
+  readonly FIRST_INSTALLATION PREV_MODULE_VERCODE
+  export FIRST_INSTALLATION PREV_MODULE_VERCODE
+
   BUILD_BRAND="$(sys_getprop 'ro.product.brand')"
   BUILD_MANUFACTURER="$(sys_getprop 'ro.product.manufacturer')" || BUILD_MANUFACTURER="$(sys_getprop 'ro.product.brand')"
   BUILD_MODEL="$(sys_getprop 'ro.product.model')"
@@ -1098,56 +1171,41 @@ initialize()
   readonly BUILD_BRAND BUILD_MANUFACTURER BUILD_MODEL BUILD_DEVICE BUILD_PRODUCT
   export BUILD_BRAND BUILD_MANUFACTURER BUILD_MODEL BUILD_DEVICE BUILD_PRODUCT
 
-  API="$(sys_getprop 'ro.build.version.sdk')" || API=0
-  readonly API
-  export API
-
   IS_EMU='false'
   case "${BUILD_DEVICE?}" in
     'windows_x86_64' | 'emu64'*) IS_EMU='true' ;;
     *) ;;
   esac
-
   if is_string_starting_with 'sdk_google_phone_' "${BUILD_PRODUCT?}" || is_valid_prop "$(simple_getprop 'ro.leapdroid.version' || printf '%s\n' 'unknown' || :)"; then
     IS_EMU='true'
   fi
-
   readonly IS_EMU
   export IS_EMU
 
-  verify_keycheck_compatibility
-  live_setup_choice
-
-  MODULE_NAME="$(simple_file_getprop 'name' "${TMP_PATH:?}/module.prop")" || ui_error 'Failed to parse name'
-  MODULE_VERSION="$(simple_file_getprop 'version' "${TMP_PATH:?}/module.prop")" || ui_error 'Failed to parse version'
-  MODULE_VERCODE="$(simple_file_getprop 'versionCode' "${TMP_PATH:?}/module.prop")" || ui_error 'Failed to parse version code'
-  MODULE_AUTHOR="$(simple_file_getprop 'author' "${TMP_PATH:?}/module.prop")" || ui_error 'Failed to parse author'
-  test "${MODULE_VERCODE:?}" -gt 0 || ui_error 'Invalid version code'
-  readonly MODULE_NAME MODULE_VERSION MODULE_VERCODE MODULE_AUTHOR
-  export MODULE_NAME MODULE_VERSION MODULE_VERCODE MODULE_AUTHOR
-
-  PREV_INSTALL_FAILED='false'
-  if test -f "${SYS_PATH:?}/etc/zips/${MODULE_ID:?}.failed"; then
-    PREV_INSTALL_FAILED='true'
-    ui_warning 'The previous installation has failed!!!'
-    ui_msg_empty_line
+  FAKE_SIGN_PERMISSION='false'
+  zip_extract_file "${SYS_PATH:?}/framework/framework-res.apk" 'AndroidManifest.xml' "${TMP_PATH:?}/framework-res"
+  XML_MANIFEST="${TMP_PATH:?}/framework-res/AndroidManifest.xml"
+  # Detect the presence of the fake signature permission
+  # NOTE: It won't detect it if signature spoofing doesn't require a permission, but it is still fine for our case
+  if search_ascii_string_as_utf16_in_file 'android.permission.FAKE_PACKAGE_SIGNATURE' "${XML_MANIFEST}"; then
+    FAKE_SIGN_PERMISSION='true'
   fi
 
-  # Previously installed version code (0 if not already installed)
-  PREV_MODULE_VERCODE="$(simple_file_getprop 'install.version.code' "${SYS_PATH:?}/etc/zips/${MODULE_ID:?}.prop")" || PREV_MODULE_VERCODE=''
-  case "${PREV_MODULE_VERCODE?}" in
-    '' | *[!0-9]*) # Empty (not installed) or invalid data
-      test -z "${PREV_MODULE_VERCODE?}" || ui_warning 'Previously installed version code is NOT valid!!!'
-      PREV_MODULE_VERCODE='0'
-      ;;
-    *) ;; # Valid
-  esac
+  API="$(sys_getprop 'ro.build.version.sdk')" || API=0
+  readonly API
+  export API
 
-  FIRST_INSTALLATION='true'
-  test "${PREV_MODULE_VERCODE:?}" -eq 0 || FIRST_INSTALLATION='false'
+  if test "${API:?}" -ge 19; then # KitKat or higher
+    PRIVAPP_DIRNAME='priv-app'
+  else
+    PRIVAPP_DIRNAME='app'
+  fi
+  readonly PRIVAPP_DIRNAME
+  export PRIVAPP_DIRNAME
 
-  readonly FIRST_INSTALLATION PREV_MODULE_VERCODE PREV_INSTALL_FAILED
-  export FIRST_INSTALLATION PREV_MODULE_VERCODE PREV_INSTALL_FAILED
+  live_setup_choice
+
+  test "${MODULE_VERCODE:?}" -gt 0 || ui_error 'Invalid version code'
 
   if test "${MODULE_VERCODE:?}" -lt "${PREV_MODULE_VERCODE:?}"; then
     ui_error 'Downgrade not allowed!!!' 95
@@ -1167,86 +1225,84 @@ initialize()
   readonly IS_INSTALLATION
   export IS_INSTALLATION
 
-  if is_mounted_read_only "${SYS_MOUNTPOINT:?}"; then
-    ui_msg "INFO: The '${SYS_MOUNTPOINT?}' mountpoint is read-only, it will be remounted"
-    _remount_read_write_helper "${SYS_MOUNTPOINT:?}" || {
-      deinitialize
+  remount_read_write "${SYS_MOUNTPOINT:?}" || {
+    deinitialize
 
-      ui_msg_empty_line
-      ui_msg "Device: ${BUILD_DEVICE?}"
-      ui_msg_empty_line
-      ui_msg "Current slot: ${SLOT?}"
-      ui_msg "Device locked state: ${DEVICE_STATE?}"
-      ui_msg "Verified boot state: ${VERIFIED_BOOT_STATE?}"
-      ui_msg "Verity mode: ${VERITY_MODE?} (detection is unreliable)"
-      ui_msg "Dynamic partitions: ${DYNAMIC_PARTITIONS?}"
-      ui_msg "Recovery fake system: ${RECOVERY_FAKE_SYSTEM?}"
-      ui_msg_empty_line
+    ui_msg_empty_line
+    ui_msg "Device: ${BUILD_DEVICE?}"
+    ui_msg_empty_line
+    ui_msg "Current slot: ${SLOT?}"
+    ui_msg "Device locked state: ${DEVICE_STATE?}"
+    ui_msg "Verified boot state: ${VERIFIED_BOOT_STATE?}"
+    ui_msg "Verity mode: ${VERITY_MODE?} (detection is unreliable)"
+    ui_msg "Dynamic partitions: ${DYNAMIC_PARTITIONS?}"
+    ui_msg "Recovery fake system: ${RECOVERY_FAKE_SYSTEM?}"
+    ui_msg_empty_line
 
-      if is_verity_enabled; then
-        ui_error "Remounting '${SYS_MOUNTPOINT?}' failed, it is possible that Verity is enabled. If this is the case you should DISABLE it!!!" 30
-      else
-        ui_error "Remounting '${SYS_MOUNTPOINT?}' failed!!!" 30
-      fi
-    }
-  fi
+    if is_verity_enabled; then
+      ui_error "Remounting '${SYS_MOUNTPOINT?}' failed, it is possible that Verity is enabled. If this is the case you should DISABLE it!!!" 30
+    else
+      ui_error "Remounting '${SYS_MOUNTPOINT?}' failed!!!" 30
+    fi
+  }
 
   if mount_partition_if_possible 'product' "${SLOT_SUFFIX:+product}${SLOT_SUFFIX-}${NL:?}product${NL:?}"; then
     PRODUCT_PATH="${LAST_MOUNTPOINT:?}"
     UNMOUNT_PRODUCT="${LAST_PARTITION_MUST_BE_UNMOUNTED:?}"
-    remount_read_write_if_needed "${LAST_MOUNTPOINT:?}" false && PRODUCT_USABLE='true'
+    remount_read_write_if_possible "${LAST_MOUNTPOINT:?}" false && PRODUCT_USABLE='true'
   fi
   if mount_partition_if_possible 'vendor' "${SLOT_SUFFIX:+vendor}${SLOT_SUFFIX-}${NL:?}vendor${NL:?}"; then
     VENDOR_PATH="${LAST_MOUNTPOINT:?}"
     UNMOUNT_VENDOR="${LAST_PARTITION_MUST_BE_UNMOUNTED:?}"
-    remount_read_write_if_needed "${LAST_MOUNTPOINT:?}" false && VENDOR_USABLE='true'
+    remount_read_write_if_possible "${LAST_MOUNTPOINT:?}" false && VENDOR_USABLE='true'
   fi
   if mount_partition_if_possible 'system_ext' "${SLOT_SUFFIX:+system_ext}${SLOT_SUFFIX-}${NL:?}system_ext${NL:?}"; then
     SYS_EXT_PATH="${LAST_MOUNTPOINT:?}"
     UNMOUNT_SYS_EXT="${LAST_PARTITION_MUST_BE_UNMOUNTED:?}"
-    remount_read_write_if_needed "${LAST_MOUNTPOINT:?}" false && SYS_EXT_USABLE='true'
+    remount_read_write_if_possible "${LAST_MOUNTPOINT:?}" false && SYS_EXT_USABLE='true'
   fi
   if mount_partition_if_possible 'odm' "${SLOT_SUFFIX:+odm}${SLOT_SUFFIX-}${NL:?}odm${NL:?}"; then
     ODM_PATH="${LAST_MOUNTPOINT:?}"
     UNMOUNT_ODM="${LAST_PARTITION_MUST_BE_UNMOUNTED:?}"
-    remount_read_write_if_needed "${LAST_MOUNTPOINT:?}" false
+    remount_read_write_if_possible "${LAST_MOUNTPOINT:?}" false
   fi
   readonly PRODUCT_PATH VENDOR_PATH SYS_EXT_PATH ODM_PATH
   export PRODUCT_PATH VENDOR_PATH SYS_EXT_PATH ODM_PATH
   readonly PRODUCT_USABLE VENDOR_USABLE SYS_EXT_USABLE
   export PRODUCT_USABLE VENDOR_USABLE SYS_EXT_USABLE
 
-  local _additional_data_mountpoint=''
+  _additional_data_mountpoint=''
   if test -n "${ANDROID_DATA-}" && test "${ANDROID_DATA:?}" != '/data'; then _additional_data_mountpoint="${ANDROID_DATA:?}"; fi
 
   if mount_partition_if_possible 'data' "userdata${NL:?}DATAFS${NL:?}" "$(generate_mountpoint_list 'data' "${_additional_data_mountpoint?}" || :)"; then
     DATA_PATH="${LAST_MOUNTPOINT:?}"
     UNMOUNT_DATA="${LAST_PARTITION_MUST_BE_UNMOUNTED:?}"
-    remount_read_write_if_needed "${LAST_MOUNTPOINT:?}"
+    remount_read_write_if_possible "${LAST_MOUNTPOINT:?}"
   else
     ui_warning "The data partition cannot be mounted, so updates of installed / removed apps cannot be automatically deleted and their Dalvik cache cannot be automatically cleaned. I suggest to manually do a factory reset after flashing this ZIP."
   fi
   readonly DATA_PATH
   export DATA_PATH
 
+  # Display header
+  display_basic_info
+
   DEST_PATH="${SYS_PATH:?}"
   readonly DEST_PATH
 
+  if test "${API:?}" -lt 1; then
+    ui_error 'Invalid API level'
+  fi
+
   if test ! -w "${SYS_PATH:?}"; then
-    ui_error "The '${SYS_PATH?}' partition is NOT writable"
+    ui_error "The '${SYS_PATH?}' folder is NOT writable"
   fi
 
   if test "${DEST_PATH:?}" != "${SYS_PATH:?}" && test ! -w "${DEST_PATH:?}"; then
-    ui_error "The '${DEST_PATH?}' partition is NOT writable"
+    ui_error "The '${DEST_PATH?}' folder is NOT writable"
   fi
 
-  # Display header
-  ui_msg "$(write_separator_line "${#MODULE_NAME}" '-' || :)"
-  ui_msg "${MODULE_NAME:?}"
-  ui_msg "${MODULE_VERSION:?}"
-  ui_msg "${BUILD_TYPE:?}"
-  ui_msg "(by ${MODULE_AUTHOR:?})"
-  ui_msg "$(write_separator_line "${#MODULE_NAME}" '-' || :)"
+  ###
 
   # shellcheck disable=SC2312
   _raw_arch_list=','"$(sys_getprop 'ro.product.cpu.abi')"','"$(sys_getprop 'ro.product.cpu.abi2')"','"$(sys_getprop 'ro.product.cpu.upgradeabi')"','"$(sys_getprop 'ro.product.cpu.abilist')"','
@@ -1262,31 +1318,6 @@ initialize()
 
   if test "${CPU64:?}" = 'false' && test "${CPU:?}" = 'false'; then
     ui_error "Unsupported CPU, ABI list => $(printf '%s\n' "${_raw_arch_list?}" | LC_ALL=C tr -s -- ',' || true)"
-  fi
-
-  if test "${API:?}" -lt 1; then
-    ui_error 'Invalid API level'
-  fi
-
-  if test "${API:?}" -ge 19; then # KitKat or higher
-    PRIVAPP_DIRNAME='priv-app'
-  else
-    PRIVAPP_DIRNAME='app'
-  fi
-  readonly PRIVAPP_DIRNAME
-  export PRIVAPP_DIRNAME
-
-  if test ! -d "${SYS_PATH:?}/${PRIVAPP_DIRNAME:?}"; then
-    ui_error "The ${PRIVAPP_DIRNAME?} folder does NOT exist"
-  fi
-
-  FAKE_SIGN_PERMISSION='false'
-  zip_extract_file "${SYS_PATH}/framework/framework-res.apk" 'AndroidManifest.xml' "${TMP_PATH}/framework-res"
-  XML_MANIFEST="${TMP_PATH}/framework-res/AndroidManifest.xml"
-  # Detect the presence of the fake signature permission
-  # NOTE: It won't detect it if signature spoofing doesn't require a permission, but it is still fine for our case
-  if search_ascii_string_as_utf16_in_file 'android.permission.FAKE_PACKAGE_SIGNATURE' "${XML_MANIFEST}"; then
-    FAKE_SIGN_PERMISSION='true'
   fi
 
   unset LAST_MOUNTPOINT
@@ -1421,6 +1452,7 @@ prepare_installation()
     echo '# SPDX-License-Identifier: CC0-1.0'
     echo ''
     echo 'install.type=system'
+    echo "install.build.type=${BUILD_TYPE:?}"
     echo "install.version.code=${MODULE_VERCODE:?}"
     echo "install.version=${MODULE_VERSION:?}"
   } 1> "${TMP_PATH:?}/files/etc/zips/${MODULE_ID:?}.prop" || ui_error 'Failed to generate the prop file of this zip'
@@ -1826,11 +1858,9 @@ perform_installation()
   fi
 }
 
-finalize_and_report_success()
+finalize_correctly()
 {
-  if test "${DRY_RUN:?}" -eq 0; then
-    rm -f -- "${SYS_PATH:?}/etc/zips/${MODULE_ID:?}.failed" || :
-  fi
+  test "${DRY_RUN:?}" -ne 0 || rm -f -- "${SYS_PATH:?}/etc/zips/${MODULE_ID:?}.failed" || :
   deinitialize
   touch "${TMP_PATH:?}/installed"
 
@@ -1838,7 +1868,6 @@ finalize_and_report_success()
     ui_msg 'Installation finished.'
   else
     ui_msg 'Uninstallation finished.'
-    exit 0
   fi
 }
 
@@ -2248,6 +2277,12 @@ string_split()
   printf '%s' "${1:?}" | cut -d '|' -sf "${2:?}" || return "${?}"
 }
 
+set_filename_of_base_sysconfig_xml()
+{
+  BASE_SYSCONFIG_XML="etc/sysconfig/${1:?}"
+  test -e "${TMP_PATH:?}/files/${BASE_SYSCONFIG_XML:?}" || ui_error "You have set the wrong filename for the base sysconfig XML => ${BASE_SYSCONFIG_XML?}"
+}
+
 # @description Configure an app for later installation.
 # (it automatically handle the API compatibility)
 #
@@ -2324,7 +2359,8 @@ setup_app()
         _installed_file_list="${_installed_file_list?}|etc/default-permissions/default-permissions-${_output_name:?}.xml"
       fi
       if test "${_url_handling:?}" != 'false' && test "${CURRENTLY_ROLLBACKING:-false}" != 'true'; then
-        add_line_in_file_after_string "${TMP_PATH:?}/files/etc/sysconfig/google.xml" '<!-- %CUSTOM_APP_LINKS-START% -->' "    <app-link package=\"${_internal_name:?}\" />" || ui_error "Failed to auto-enable URL handling for '${_vanity_name?}'"
+        test -n "${BASE_SYSCONFIG_XML?}" || ui_error 'You have NOT set the filename of the base sysconfig XML'
+        add_line_in_file_after_string "${TMP_PATH:?}/files/${BASE_SYSCONFIG_XML:?}" '<!-- %CUSTOM_APP_LINKS-START% -->' "    <app-link package=\"${_internal_name:?}\" />" || ui_error "Failed to auto-enable URL handling for '${_vanity_name?}'"
       fi
       move_rename_file "${TMP_PATH:?}/origin/${_dir:?}/${_filename:?}.apk" "${TMP_PATH:?}/files/${_output_dir:?}/${_output_name:?}.apk" || ui_error "Failed to setup the app => '${_vanity_name?}'"
 
@@ -2505,7 +2541,7 @@ inputevent_initialize()
 
   INPUT_DEVICE_LIST=''
 
-  for _device in 'gpio-keys' 'qpnp_pon' 'sec_touchkey' 'qwerty' 'qwerty2'; do
+  for _device in 'gpio-keys' 'qpnp_pon' 'sec_key' 'sec_touchkey' 'qwerty' 'qwerty2'; do
     if test "${IS_EMU:?}" != 'true'; then
       case "${_device:?}" in 'qwerty' | 'qwerty2') continue ;; *) ;; esac
     fi
@@ -2600,11 +2636,16 @@ _parse_keylayout()
           test -z "${INPUT_CODE_HOME?}" || continue
           INPUT_CODE_HOME="${key_code:?}"
           ;;
+        'MENU')
+          test -z "${INPUT_CODE_MENU?}" || continue
+          test "${1?}" != 'qwerty' || continue # Since there are multiple MENU values in 'qwerty', skip it
+          INPUT_CODE_MENU="${key_code:?}"
+          ;;
 
-        'MENU') continue ;; # Do NOT parse MENU since there can be multiple ones
-        'ASSIST' | 'FOCUS' | 'CAMERA' | 'AI' | 'APP_SWITCH') ;;
+        'ASSIST' | 'FOCUS' | 'CAMERA' | 'AI' | 'APP_SWITCH') ;;                                       # ToDO: Check later
+        'ENDCALL' | 'DPAD_LEFT' | 'DPAD_RIGHT' | 'DPAD_UP' | 'DPAD_DOWN' | 'DPAD_CENTER') continue ;; # Always ignore
         *)
-          ui_debug "Unknown key: ${key_name?}"
+          case "${1?}" in 'qwerty') ;; *) ui_debug "Unknown key: ${key_name?}" ;; esac
           continue
           ;;
       esac
@@ -2659,7 +2700,10 @@ _get_input_event()
   _size="${INPUT_EVENT_SIZE:-24}"
   _expected_file_size="$((INPUT_EVENT_START_OFFSET + _size))"
   _max_cycles=''
-  if test -n "${1-}"; then _max_cycles="$((${1:?} * 4))" || return 120; fi
+  if test -n "${1-}"; then
+    test "${1:?}" -gt 0 || return 124 # Timed out
+    _max_cycles="$((${1:?} * 10))" || return 120
+  fi
 
   while true; do
     _file_size="$(get_size_of_file 2> /dev/null "${TMP_PATH:?}/working-files/input/input-events/0")" || return 121
@@ -2670,7 +2714,7 @@ _get_input_event()
     fi
 
     if test -n "${_max_cycles?}" && test "$((_max_cycles = _max_cycles - 1))" -le 0; then return 124; fi # Timed out
-    sleep '0.25'
+    sleep '0.1'
   done
 
   INPUT_EVENT_START_OFFSET="$((INPUT_EVENT_START_OFFSET + _size))"
@@ -2699,11 +2743,11 @@ _detect_input_event_size()
 {
   printf "%s\n" "${1?}" | while IFS=' ' read -r _ _ _ _ part5 _ _ part8 part9 _ _ part12 _; do
     if test -n "${part9?}" && test "$(hex_to_dec "${part9:?}" || :)" -eq 1 && test -n "${part12?}" && test "$(hex_to_dec "${part12:?}" || printf '%s' '9' || :)" -eq 0; then
-      ui_debug 'Input event is 64-bit'
+      test "${DEBUG_LOG_ENABLED:?}" != 1 || ui_debug 'Input event is 64-bit'
       printf '%s\n' 24
       return 4
     elif test -n "${part5?}" && test "$(hex_to_dec "${part5:?}" || :)" -eq 1 && test -n "${part8?}" && test "$(hex_to_dec "${part8:?}" || printf '%s' '9' || :)" -eq 0; then
-      ui_debug 'Input event is 32-bit'
+      test "${DEBUG_LOG_ENABLED:?}" != 1 || ui_debug 'Input event is 32-bit'
       printf '%s\n' 16
       return 4
     else
@@ -3041,23 +3085,38 @@ _inputevent_keycode_to_key()
   case "${1?}" in
     '') return 123 ;;
 
-    "${INPUT_CODE_VOLUMEUP?}" | '115') printf '%s\n' '+' ;;
-    "${INPUT_CODE_VOLUMEDOWN?}" | '114') printf '%s\n' '-' ;;
-    "${INPUT_CODE_POWER?}" | '116') printf '%s\n' 'POWER' ;;
+    "${INPUT_CODE_VOLUMEUP?}") printf '%s\n' '+' ;;
+    "${INPUT_CODE_VOLUMEDOWN?}") printf '%s\n' '-' ;;
+    "${INPUT_CODE_POWER?}") printf '%s\n' 'POWER' ;;
 
-    "${INPUT_CODE_BACK?}" | '158') printf '%s\n' 'BACK' ;;
-    "${INPUT_CODE_HOME?}" | '102') printf '%s\n' 'HOME' ;;
-    "${INPUT_CODE_MENU?}" | '139') printf '%s\n' 'MENU' ;;
+    "${INPUT_CODE_BACK?}") printf '%s\n' 'BACK' ;;
+    "${INPUT_CODE_HOME?}") printf '%s\n' 'HOME' ;;
+    "${INPUT_CODE_MENU?}") printf '%s\n' 'MENU' ;;
+    "${INPUT_CODE_APP_SWITCH?}") printf '%s\n' 'APP SWITCH' ;; # Recent apps
 
-    "${INPUT_CODE_APP_SWITCH?}" | '221') printf '%s\n' 'APP SWITCH' ;; # Recent apps
+    *)
+      case "${1?}" in
+        '115') printf '%s\n' '+' ;;
+        '114') printf '%s\n' '-' ;;
+        '116') printf '%s\n' 'POWER' ;;
 
-    *) return 123 ;; # All other keys
+        '158') printf '%s\n' 'BACK' ;;
+        '102') printf '%s\n' 'HOME' ;;
+        '139') printf '%s\n' 'MENU' ;;
+        '221') printf '%s\n' 'APP SWITCH' ;; # Recent apps
+
+        *) return 123 ;; # All other keys
+      esac
+      ;;
+
   esac
 }
 
 choose_inputevent()
 {
   local _key _status _last_key_pressed _key_desc _ret
+
+  test "${#}" -le 1 || ui_error "Key detection failed (input event) - invalid number of arguments"
 
   input_device_listener_start || {
     ui_msg_empty_line
@@ -3107,6 +3166,8 @@ choose_inputevent()
     esac
 
     if test "${_key?}" = "${INPUT_CODE_POWER:-116}" && test "${KEY_TEST_ONLY:?}" -eq 0; then continue; fi # Power key (ignored completely)
+
+    test "${#}" -eq 0 || shift # Remove timeout after the first successful key press / release event (excluding power key)
 
     if test "${KEY_TEST_ONLY:?}" -eq 1; then
       ui_msg "Event { Event type: 1, Key code: ${_key?}, Action: $((_status - 10)) }"
@@ -3204,10 +3265,8 @@ write_separator_line()
   printf '%*s\n' "${1:?}" '' | tr -- ' ' "${2:?}"
 }
 
-_live_setup_key_test()
+_live_setup_initialize()
 {
-  local _count
-
   ui_msg_empty_line
   if test "${INPUT_FROM_TERMINAL:?}" = 'true'; then
     ui_msg 'Using: read'
@@ -3216,14 +3275,26 @@ _live_setup_key_test()
   else
     ui_msg 'Using: input event'
     inputevent_initialize
-    sleep '0.1'
   fi
   ui_msg_empty_line
+}
+
+_live_setup_key_test()
+{
+  local _count
+
+  display_basic_info
+  display_info
+
+  _live_setup_initialize
+  sleep '0.05'
 
   _count=0
-  while test "${_count:?}" -lt 10 && _count="$((_count + 1))"; do
-    choose "${_count:?}) Press any key" '' ''
+  while test "${_count:?}" -lt 8 && _count="$((_count + 1))"; do
+    choose "${_count:?}/8) Press any key" '' ''
   done
+
+  ui_msg 'Many keys have been pressed, now you can rest ;-)'
 
   deinitialize
   exit 250
@@ -3243,8 +3314,8 @@ _live_setup_choice_msg()
   ui_msg "${_msg:?}"
   ui_msg "${_sep:?}"
 
-  if test -n "${1:-}"; then
-    ui_msg "Waiting input for ${1:?} seconds..."
+  if test -n "${1-}"; then
+    ui_msg "Waiting input for ${1?} seconds..."
   else
     ui_msg "Waiting input..."
   fi
@@ -3253,6 +3324,7 @@ _live_setup_choice_msg()
 live_setup_choice()
 {
   LIVE_SETUP_ENABLED='false'
+  verify_keycheck_compatibility
   test "${KEY_TEST_ONLY:?}" -eq 0 || _live_setup_key_test
 
   if test "${LIVE_SETUP_ALLOWED:?}" = 'true'; then
@@ -3260,21 +3332,17 @@ live_setup_choice()
       LIVE_SETUP_ENABLED='true'
     elif test "${LIVE_SETUP_TIMEOUT:?}" -gt 0; then
 
-      ui_msg_empty_line
+      _live_setup_initialize
+      _live_setup_choice_msg "${LIVE_SETUP_TIMEOUT}"
+
       if test "${INPUT_FROM_TERMINAL:?}" = 'true'; then
-        ui_msg 'Using: read'
-        _live_setup_choice_msg "${LIVE_SETUP_TIMEOUT}"
         choose_read_with_timeout "${LIVE_SETUP_TIMEOUT}"
       elif "${KEYCHECK_ENABLED:?}"; then
-        ui_msg 'Using: keycheck'
-        _live_setup_choice_msg "${LIVE_SETUP_TIMEOUT}"
         choose_keycheck_with_timeout "${LIVE_SETUP_TIMEOUT}"
       else
-        ui_msg 'Using: input event'
-        inputevent_initialize
-        _live_setup_choice_msg "${LIVE_SETUP_TIMEOUT}"
         choose_inputevent "${LIVE_SETUP_TIMEOUT}"
       fi
+
       if test "${?}" = '3'; then LIVE_SETUP_ENABLED='true'; fi
 
     fi
@@ -3372,4 +3440,4 @@ find_test()
 
 ### INITIALIZATION ###
 
-initialize
+initialize || exit "${?}"

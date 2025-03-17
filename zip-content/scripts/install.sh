@@ -70,7 +70,8 @@ if test "${IS_INSTALLATION:?}" != 'true'; then
   clear_app 'com.google.android.syncadapters.contacts'
   clear_app 'com.google.android.backuptransport'
 
-  finalize_and_report_success
+  finalize_correctly
+  exit 0
 fi
 
 # Prepare installation
@@ -112,4 +113,4 @@ if test "${DRY_RUN:?}" -eq 0; then
   fi
 fi
 
-finalize_and_report_success
+finalize_correctly

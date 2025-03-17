@@ -8,26 +8,49 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # shellcheck enable=all
 
-readonly ZIPINSTALL_VERSION='1.2.8'
+readonly ZIPINSTALL_VERSION='1.3.2'
 
-umask 022 || :
+END_OF_SCRIPT=0
 PATH="${PATH:-/system/bin}:."
-END_OF_SCRIPT_REACHED=0
+umask 022 || :
 
 ### PREVENTIVE CHECKS ###
 
+command 1> /dev/null -v 'echo' || {
+  echo || :
+  exit 99
+}
+
+case "$(:)" in '') ;; *)
+  echo 1>&2 'ERROR: Command substitution NOT supported by your shell'
+  exit 100
+  ;;
+esac
+
 _busybox_executability_check()
 {
-  if test ! -x busybox; then
-    chmod 0755 'busybox' || {
-      echo 1>&2 'ERROR: chmod failed on busybox'
-      exit 100
-    }
+  test -x 'busybox' || chmod 0755 'busybox' || {
+    echo 1>&2 'ERROR: chmod failed on busybox'
+    exit 100
+  }
+}
+
+_is_head_functional()
+{
+  command 1> /dev/null -v 'head' || return 1
+  case "$(echo 2> /dev/null 'ABCD' | head 2> /dev/null -c 2 || :)" in 'AB') return 0 ;; *) ;; esac # Some versions of head are broken or incomplete
+  return 2
+}
+
+command 1> /dev/null -v 'head' || {
+  if command 1> /dev/null -v 'busybox'; then
+    _busybox_executability_check
+    eval ' head() { busybox head "${@}"; } '
   fi
 }
 
-command 1> /dev/null -v printf || {
-  if command 1> /dev/null -v busybox; then
+command 1> /dev/null -v 'printf' || {
+  if command 1> /dev/null -v 'busybox'; then
     _busybox_executability_check
     eval ' printf() { busybox printf "${@}"; } '
   else
@@ -38,19 +61,19 @@ command 1> /dev/null -v printf || {
       case "${1-unset}" in
         '%s')
           _printf_backup_ifs="${IFS-unset}"
-          shift && IFS='' && echo "${*}" | head -c '-1'
+          if _is_head_functional; then
+            shift && IFS='' && echo "${*}" | head -c '-1'
+          else
+            shift && IFS='' && echo "${*}"
+          fi
           if test "${_printf_backup_ifs}" = 'unset'; then unset IFS; else IFS="${_printf_backup_ifs}"; fi
           unset _printf_backup_ifs
           ;;
         '%s\n')
-          shift && for _printf_val in "${@}"; do
-            echo "${_printf_val}"
-          done
+          shift && for _printf_val in "${@}"; do echo "${_printf_val}"; done
           ;;
         '%s\n\n')
-          shift && for _printf_val in "${@}"; do
-            echo "${_printf_val}" && echo ''
-          done
+          shift && for _printf_val in "${@}"; do echo "${_printf_val}" && echo ''; done
           ;;
         '\n') echo '' ;;
         '\n\n') echo '' && echo '' ;;
@@ -62,7 +85,7 @@ command 1> /dev/null -v printf || {
           ;;
       esac
 
-      unset _printf_val
+      unset _printf_val || :
       return 0
     }
   fi
@@ -89,13 +112,6 @@ command 1> /dev/null -v unzip || {
   fi
 }
 
-command 1> /dev/null -v head || {
-  if command 1> /dev/null -v busybox; then
-    _busybox_executability_check
-    alias head='busybox head'
-  fi
-}
-
 ### FUNCTIONS AND CODE ###
 
 ui_info_msg()
@@ -118,12 +134,6 @@ ui_error_msg()
   else
     printf 1>&2 '\033[1;31m%s\033[0m\n' "ERROR: ${1}"
   fi
-}
-
-is_head_functional()
-{
-  command 1> /dev/null -v 'head' || return 1
-  test "$(printf 2> /dev/null '%s\n' 'ABCD' | head 2> /dev/null -c 2 || :)" = 'AB' || return 2 # Some versions of head are broken or incomplete
 }
 
 if test -n "${*}"; then
@@ -241,7 +251,7 @@ test -s "${SCRIPT_NAME:?}" || {
 unzip -p -qq "${ZIPFILE:?}" 'META-INF/com/google/android/updater-script' 1> "${UPD_SCRIPT_NAME:?}" || : # Not strictly needed
 
 STATUS=0
-if ! is_head_functional || test '#!' = "$(head -c 2 -- "${SCRIPT_NAME:?}" || :)"; then
+if ! _is_head_functional || test '#!' = "$(head -c 2 -- "${SCRIPT_NAME:?}" || :)"; then
   printf '%s\n' 'Executing script...'
 
   # Use STDERR (2) for recovery messages to avoid possible problems with subshells intercepting output
@@ -256,7 +266,7 @@ else
   }
   "${SCRIPT_NAME:?}" 3 2 "${ZIPFILE:?}" 'zip-install' "${ZIPINSTALL_VERSION:?}" || STATUS="${?}"
 fi
-END_OF_SCRIPT_REACHED=1
+END_OF_SCRIPT=1
 
 _clean_at_exit
 trap - 0 2 3 6 15 || : # Already cleaned, so unset traps
@@ -267,7 +277,7 @@ if test "${STATUS:-20}" != '0'; then
 fi
 
 # This should theoretically never happen, but it's just to protect against unknown shell bugs
-if test "${END_OF_SCRIPT_REACHED:-0}" != '1'; then
+if test "${END_OF_SCRIPT:-0}" != '1'; then
   ui_error_msg "ZIP installation failed with an unknown error"
   exit 120
 fi
