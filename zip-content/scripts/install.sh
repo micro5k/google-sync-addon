@@ -30,7 +30,7 @@ INSTALL_CALENDARSYNC="$(parse_setting 'INSTALL_CALENDARSYNC' "${INSTALL_CALENDAR
 display_info
 ui_msg_empty_line
 
-if test "${IS_INSTALLATION:?}" = 'true'; then
+if test "${SETUP_TYPE:?}" = 'install'; then
   ui_msg 'Starting installation...'
   ui_msg_empty_line
 
@@ -56,7 +56,7 @@ else
   ui_msg_empty_line
 fi
 
-if test "${IS_INSTALLATION:?}" = 'true'; then
+if test "${SETUP_TYPE:?}" = 'install'; then
   disable_app 'com.google.android.syncadapters.calendar'
   disable_app 'com.google.android.syncadapters.contacts'
   disable_app 'com.google.android.backuptransport'
@@ -65,7 +65,7 @@ fi
 # Clean previous installations
 clean_previous_installations
 
-if test "${IS_INSTALLATION:?}" != 'true'; then
+if test "${SETUP_TYPE:?}" = 'uninstall'; then
   clear_app 'com.google.android.syncadapters.calendar'
   clear_app 'com.google.android.syncadapters.contacts'
   clear_app 'com.google.android.backuptransport'
