@@ -9,7 +9,7 @@ TMP_PATH="${2:?}"
 ### FUNCTIONS ###
 
 # shellcheck source=SCRIPTDIR/../inc/common-functions.sh
-. "${TMP_PATH:?}/inc/common-functions.sh" || exit "${?}"
+command . "${TMP_PATH:?}/inc/common-functions.sh" || exit "${?}"
 
 ### CODE ###
 
@@ -23,8 +23,8 @@ else
   ui_error "Your Android version is too old, API: ${API?}"
 fi
 
-INSTALL_CONTACTSSYNC="$(parse_setting 'INSTALL_CONTACTSSYNC' "${INSTALL_CONTACTSSYNC:?}")"
-INSTALL_CALENDARSYNC="$(parse_setting 'INSTALL_CALENDARSYNC' "${INSTALL_CALENDARSYNC:?}")"
+APP_CONTACTSSYNC="$(parse_setting 'app' 'CONTACTSSYNC' "${APP_CONTACTSSYNC:?}")"
+APP_CALENDARSYNC="$(parse_setting 'app' 'CALENDARSYNC' "${APP_CALENDARSYNC:?}")"
 
 # Display info
 display_info
@@ -45,12 +45,12 @@ if test "${SETUP_TYPE:?}" = 'install'; then
 
   setup_app 1 '' 'Google Backup Transport 4.4' 'GoogleBackupTransport44' 'priv-app' false false
 
-  setup_app "${INSTALL_CONTACTSSYNC:?}" 'INSTALL_CONTACTSSYNC' 'Google Contacts Sync 12' 'GoogleContactsSyncAdapter12' 'priv-app' ||
-    setup_app "${INSTALL_CONTACTSSYNC:?}" 'INSTALL_CONTACTSSYNC' 'Google Contacts Sync 8' 'GoogleContactsSyncAdapter8' 'priv-app' ||
-    setup_app "${INSTALL_CONTACTSSYNC:?}" 'INSTALL_CONTACTSSYNC' 'Google Contacts Sync 4.4' 'GoogleContactsSyncAdapter44' 'app'
+  setup_app "${APP_CONTACTSSYNC:?}" 'APP_CONTACTSSYNC' 'Google Contacts Sync 12' 'GoogleContactsSyncAdapter12' 'priv-app' ||
+    setup_app "${APP_CONTACTSSYNC:?}" 'APP_CONTACTSSYNC' 'Google Contacts Sync 8' 'GoogleContactsSyncAdapter8' 'priv-app' ||
+    setup_app "${APP_CONTACTSSYNC:?}" 'APP_CONTACTSSYNC' 'Google Contacts Sync 4.4' 'GoogleContactsSyncAdapter44' 'app'
 
-  setup_app "${INSTALL_CALENDARSYNC:?}" 'INSTALL_CALENDARSYNC' 'Google Calendar Sync 6' 'GoogleCalendarSyncAdapter6' 'app' ||
-    setup_app "${INSTALL_CALENDARSYNC:?}" 'INSTALL_CALENDARSYNC' 'Google Calendar Sync 5' 'GoogleCalendarSyncAdapter5' 'app'
+  setup_app "${APP_CALENDARSYNC:?}" 'APP_CALENDARSYNC' 'Google Calendar Sync 6' 'GoogleCalendarSyncAdapter6' 'app' ||
+    setup_app "${APP_CALENDARSYNC:?}" 'APP_CALENDARSYNC' 'Google Calendar Sync 5' 'GoogleCalendarSyncAdapter5' 'app'
 else
   ui_msg 'Starting uninstallation...'
   ui_msg_empty_line

@@ -28,9 +28,17 @@ unset RANDOM_IS_SEEDED
 
 ### PREVENTIVE CHECKS ###
 
-command 1> /dev/null -v printf || {
+_redirect_command()
+{
+  eval " ${1:?}() { busybox '${1:?}' \"\${@}\"; } " || {
+    echo 1>&2 "ERROR: Replacing ${1?} failed"
+    exit 100
+  }
+}
+
+command 1> /dev/null -v 'printf' || {
   if command 1> /dev/null -v busybox; then
-    alias printf='busybox printf'
+    _redirect_command 'printf'
   else
     {
       printf()
@@ -48,7 +56,7 @@ command 1> /dev/null -v printf || {
 
 command 1> /dev/null -v uname || {
   if command 1> /dev/null -v busybox; then
-    alias uname='busybox uname'
+    _redirect_command 'uname'
   elif command 1> /dev/null -v getprop; then
     {
       uname()
@@ -69,20 +77,24 @@ command 1> /dev/null -v uname || {
   fi
 }
 
-command 1> /dev/null -v dirname || {
+command 1> /dev/null -v 'dirname' || {
   dirname()
   {
     printf '%s\n' "${1%/*}"
   }
 }
 
-command 1> /dev/null -v unzip || {
+command 1> /dev/null -v 'unzip' || {
   if command 1> /dev/null -v busybox; then
-    alias unzip='busybox unzip'
+    _redirect_command 'unzip'
   else
     printf 1>&2 '\033[1;31m%s\033[0m\n' "ERROR: Missing => unzip"
     exit 100
   fi
+}
+
+command 1> /dev/null -v 'grep' || {
+  if command 1> /dev/null -v busybox; then _redirect_command 'grep'; fi
 }
 
 ### FUNCTIONS AND CODE ###
@@ -243,8 +255,11 @@ package_extract_file 'customize.sh' "${_ub_our_main_script:?}"
 
 echo "Loading ${LAST_RANDOM:?}-customize.sh..."
 # shellcheck source=SCRIPTDIR/../../../../customize.sh
-. "${_ub_our_main_script:?}" || ui_error "Failed to source customize.sh"
-rm -f "${_ub_our_main_script:?}" || ui_error "Failed to delete customize.sh"
+command . "${_ub_our_main_script:?}" || ui_error "Failed to source '${_ub_our_main_script?}'"
+
+if test -f "${_ub_our_main_script:?}"; then
+  rm "${_ub_our_main_script:?}" || ui_error "Failed to delete '${_ub_our_main_script?}'"
+fi
 unset _ub_our_main_script
 
 if test "${_ub_we_mounted_tmp:?}" = true; then

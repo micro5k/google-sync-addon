@@ -708,7 +708,7 @@ mount_partition_if_possible()
 
 _get_local_settings()
 {
-  if test "${LOCAL_SETTINGS_READ:-false}" = 'true'; then return; fi
+  test "${LOCAL_SETTINGS_READ:-false}" = 'false' || return
 
   ui_debug 'Parsing local settings...'
   ui_debug ''
@@ -719,34 +719,53 @@ _get_local_settings()
   export LOCAL_SETTINGS LOCAL_SETTINGS_READ
 }
 
+_parse_setting_helper()
+{
+  local _val
+
+  # If the length is 2 it is empty: []
+  if _val="$(printf '%s\n' "${LOCAL_SETTINGS?}" | grep -m 1 -F -e "[${1:?}]" | cut -d ':' -f '2-' -s)" && _val="${_val# }" && test "${#_val}" -gt 2; then
+    printf '%s\n' "${_val?}" | cut -c "2-$((${#_val} - 1))"
+    return 0
+  fi
+
+  return 1
+}
+
 parse_setting()
 {
-  local _var _use_last_choice
+  local _var _sett_type _sett_name _sett_default_val _sett_use_prev_choice
 
-  _use_last_choice="${3:-true}"
+  _sett_type="${1:-app}"
+  _sett_name="${2:?}"
+  _sett_default_val="${3?}"
+  _sett_use_prev_choice="${4:-true}"
+
   _get_local_settings
 
-  _var="$(printf '%s\n' "${LOCAL_SETTINGS?}" | grep -m 1 -F -e "[zip.${MODULE_ID:?}.${1:?}]" | cut -d ':' -f '2-' -s)" || _var=''
-  _var="${_var# }"
-  if test "${#_var}" -gt 2; then
-    printf '%s\n' "${_var?}" | cut -c "2-$((${#_var} - 1))"
+  if test "${_sett_type:?}" = 'app'; then
+    if _parse_setting_helper "zip.${MODULE_ID:?}.APP_${_sett_name:?}" || _parse_setting_helper "zip.${MODULE_ID:?}.INSTALL_${_sett_name:?}"; then
+      return
+    fi
+    _sett_name="APP_${_sett_name:?}"
+  elif _parse_setting_helper "zip.${MODULE_ID:?}.${_sett_name:?}"; then
     return
   fi
 
   # Fallback to the last choice
-  if test "${_use_last_choice:?}" = 'true' && _var="$(simple_file_getprop "${1:?}" "${SYS_PATH:?}/etc/zips/${MODULE_ID:?}.prop")" && test -n "${_var?}"; then
+  if test "${_sett_use_prev_choice:?}" = 'true' && _var="$(simple_file_getprop "${_sett_name:?}" "${SYS_PATH:?}/etc/zips/${MODULE_ID:?}.prop")" && test -n "${_var?}"; then
     printf '%s\n' "${_var:?}"
     return
-  elif test "${_use_last_choice:?}" = 'custom' && _var="$(simple_file_getprop "${4:?}" "${SYS_PATH:?}/etc/zips/${MODULE_ID:?}.prop")" && test -n "${_var?}"; then
+  elif test "${_sett_use_prev_choice:?}" = 'custom' && _var="$(simple_file_getprop "${5:?}" "${SYS_PATH:?}/etc/zips/${MODULE_ID:?}.prop")" && test -n "${_var?}"; then
     case "${_var:?}" in
-      "${5:?}") printf '1\n' ;;
-      *) printf '0\n' ;;
+      "${6:?}") printf '%s\n' '1' ;;
+      *) printf '%s\n' '0' ;;
     esac
     return
   fi
 
   # Fallback to the default value
-  printf '%s\n' "${2?}"
+  printf '%s\n' "${_sett_default_val?}"
 }
 
 remount_read_write()
@@ -1025,7 +1044,7 @@ initialize()
   # Make sure that the commands are still overridden here (most shells don't have the ability to export functions)
   if test "${TEST_INSTALL:-false}" != 'false' && test -f "${RS_OVERRIDE_SCRIPT:?}"; then
     # shellcheck source=SCRIPTDIR/../../recovery-simulator/inc/configure-overrides.sh
-    . "${RS_OVERRIDE_SCRIPT:?}" || exit "${?}"
+    command . "${RS_OVERRIDE_SCRIPT:?}" || ui_error "Sourcing override script failed with error: ${?}"
   fi
 
   PRODUCT_PATH=''
@@ -1056,11 +1075,11 @@ initialize()
 
   _get_local_settings
 
-  DRY_RUN="$(parse_setting 'DRY_RUN' "${DRY_RUN:?}" 'false')"
-  KEY_TEST_ONLY="$(parse_setting 'KEY_TEST_ONLY' "${KEY_TEST_ONLY:?}" 'false')"
+  DRY_RUN="$(parse_setting 'general' 'DRY_RUN' "${DRY_RUN:?}" 'false')"
+  KEY_TEST_ONLY="$(parse_setting 'general' 'KEY_TEST_ONLY' "${KEY_TEST_ONLY:?}" 'false')"
 
-  LIVE_SETUP_DEFAULT="$(parse_setting 'LIVE_SETUP_DEFAULT' "${LIVE_SETUP_DEFAULT:?}" 'false')"
-  LIVE_SETUP_TIMEOUT="$(parse_setting 'LIVE_SETUP_TIMEOUT' "${LIVE_SETUP_TIMEOUT:?}" 'false')"
+  LIVE_SETUP_DEFAULT="$(parse_setting 'general' 'LIVE_SETUP_DEFAULT' "${LIVE_SETUP_DEFAULT:?}" 'false')"
+  LIVE_SETUP_TIMEOUT="$(parse_setting 'general' 'LIVE_SETUP_TIMEOUT' "${LIVE_SETUP_TIMEOUT:?}" 'false')"
 
   case "${KEY_TEST_ONLY?}" in '' | *[!0-1]*) KEY_TEST_ONLY=1 ;; *) ;; esac
   if test "${KEY_TEST_ONLY:?}" -eq 1; then DRY_RUN=2; fi
@@ -1173,12 +1192,17 @@ initialize()
 
   IS_EMU='false'
   case "${BUILD_DEVICE?}" in
-    'windows_x86_64' | 'emu64'*) IS_EMU='true' ;;
-    *) ;;
+    'windows_'* | 'emu64'*) IS_EMU='true' ;;
+    'generic_'*) if is_string_starting_with 'EMULATOR' "$(sys_getprop 'ro.serialno' || :)"; then IS_EMU='true'; fi ;;
+    *)
+      if
+        is_string_starting_with 'sdk_google_phone_' "${BUILD_PRODUCT?}" ||
+          is_valid_prop "$(simple_getprop 'ro.leapdroid.version' || printf '%s\n' 'unknown' || :)"
+      then
+        IS_EMU='true'
+      fi
+      ;;
   esac
-  if is_string_starting_with 'sdk_google_phone_' "${BUILD_PRODUCT?}" || is_valid_prop "$(simple_getprop 'ro.leapdroid.version' || printf '%s\n' 'unknown' || :)"; then
-    IS_EMU='true'
-  fi
   readonly IS_EMU
   export IS_EMU
 
@@ -1360,7 +1384,7 @@ clean_previous_installations()
   readonly IS_INCLUDED='true'
   export IS_INCLUDED
   # shellcheck source=SCRIPTDIR/../scripts/uninstall.sh
-  . "${TMP_PATH:?}/uninstall.sh"
+  command . "${TMP_PATH:?}/uninstall.sh" || ui_error "Sourcing uninstall script failed with error: ${?}"
 
   delete "${SYS_PATH:?}/etc/zips/${MODULE_ID:?}.prop"
 
@@ -1451,7 +1475,7 @@ prepare_installation()
     echo '# SPDX-FileCopyrightText: none'
     echo '# SPDX-License-Identifier: CC0-1.0'
     echo ''
-    echo 'install.type=system'
+    echo 'install.destination=system'
     echo "install.build.type=${BUILD_TYPE:?}"
     echo "install.version.code=${MODULE_VERCODE:?}"
     echo "install.version=${MODULE_VERSION:?}"
@@ -2121,7 +2145,7 @@ copy_file()
 
 move_file()
 {
-  mv -f "$1" "$2"/ || ui_error "Failed to move the file '$1' to '$2'" 100
+  mv -f "$1" "$2"/ || ui_error "Failed to move the file '$1' to '$2'" 101
 }
 
 move_rename_file()
@@ -2175,10 +2199,29 @@ delete_temp()
 {
   for filename in "${@}"; do
     if test -e "${TMP_PATH:?}/${filename?}"; then
-      #ui_debug "Deleting '${TMP_PATH?}/${filename?}'..."
-      rm -rf -- "${TMP_PATH:?}/${filename:?}" || ui_error 'Failed to delete temp files/folders' 103
+      # ui_debug "Deleting '${TMP_PATH?}/${filename?}'..."
+      rm -rf -- "${TMP_PATH:?}/${filename:?}" || ui_error 'Failed to delete temp files/folders in delete_temp()' 103
     fi
   done
+}
+
+delete_if_sha256_match()
+{
+  local _filename _filehash _hash
+
+  if test -f "${1:?}"; then
+    _filename="${1:?}"
+    _filehash="$(sha256sum -- "${_filename:?}" | cut -d ' ' -f '1' -s)" || ui_error 'Failed to calculate SHA256 hash' 103
+    shift
+    for _hash in "${@}"; do
+      if test "${_hash:?}" = "${_filehash:?}"; then
+        ui_debug "Deleting '${_filename:?}'..."
+        rm -f -- "${_filename:?}" || ui_error 'Failed to delete file in delete_if_sha256_match()' 103
+        return
+      fi
+    done
+    ui_debug "Deletion of '${_filename:?}' skipped due to hash mismatch!"
+  fi
 }
 
 delete_dir_if_empty()
