@@ -14,7 +14,7 @@ Google sync add-on
 
 Description
 -----------
-Google sync add-on is a flashable zip created by ale5000 for a simple installation of microG on Android from 4.4 to 15 (excluding Android 6.x).
+Google sync add-on is a flashable zip created by ale5000 for a simple installation of Google sync adapters on Android from 4.4 to 15 (excluding Android 6.x).
 
 This project is available on GitHub_, on GitLab_ as well as on XDA_.
 
