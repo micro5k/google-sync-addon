@@ -11,4 +11,4 @@ plugins {
     id 'com.gradle.develocity' version "${gradleDevelocityVersion}"  /* New name of com.gradle.build-scan */
 }
 
-rootProject.name = 'Google Sync add-on'
+rootProject.name = 'Google sync add-on'

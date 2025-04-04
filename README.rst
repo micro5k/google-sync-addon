@@ -2,7 +2,7 @@
    SPDX-FileType: DOCUMENTATION
 
 ==================
-Google Sync add-on
+Google sync add-on
 ==================
 :Author: `ale5000 <https://github.com/ale5000-git>`_
 :License: `GPLv3.0 or later <LICENSE.rst>`_
@@ -14,7 +14,7 @@ Google Sync add-on
 
 Description
 -----------
-Google Sync add-on is a flashable zip created for a simple installation of Google sync adapters on Android.
+Google sync add-on is a flashable zip created by ale5000 for a simple installation of microG on Android from 4.4 to 15 (excluding Android 6.x).
 
 This project is available on GitHub_, on GitLab_ as well as on XDA_.
 

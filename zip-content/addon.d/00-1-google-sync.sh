@@ -18,7 +18,7 @@ EOF
 
 case "${1}" in
   backup)
-    printf '%s\n' 'Backup of Google Sync add-on in progress...'
+    printf '%s\n' 'Backup of Google sync add-on in progress...'
     list_files | while IFS='|' read -r FILE _; do
       if test -z "${FILE?}"; then continue; fi
       printf ' %s\n' "${S:?}/${FILE:?}"
@@ -27,7 +27,7 @@ case "${1}" in
     printf '%s\n' 'Done.'
     ;;
   restore)
-    printf '%s\n' 'Restore of Google Sync add-on in progress...'
+    printf '%s\n' 'Restore of Google sync add-on in progress...'
     list_files | while IFS='|' read -r FILE REPLACEMENT; do
       if test -z "${FILE?}"; then continue; fi
       R=''
