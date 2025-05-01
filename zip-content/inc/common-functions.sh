@@ -22,6 +22,7 @@ unset CDPATH
 
 export DRY_RUN="${DRY_RUN:-0}"
 export KEY_TEST_ONLY="${KEY_TEST_ONLY:-0}"
+export INPUT_TYPE="${INPUT_TYPE:-auto}"
 
 readonly ROLLBACK_TEST='false'
 
@@ -124,34 +125,6 @@ ui_msg()
   else
     _print_text '%s' "${1:?}"
   fi
-}
-
-ui_msg_sameline_start()
-{
-  if test "${RECOVERY_OUTPUT:?}" = 'false'; then
-    printf '%s ' "${1:?}"
-    return
-  elif test -n "${RECOVERY_PIPE?}"; then
-    printf 'ui_print %s' "${1:?}" >> "${RECOVERY_PIPE:?}"
-  else
-    printf 'ui_print %s' "${1:?}" 1>&"${OUTFD:?}"
-  fi
-
-  if test "${DEBUG_LOG_ENABLED:?}" = '1'; then printf 1>&2 '%s\n' "${1:?}"; fi
-}
-
-ui_msg_sameline_end()
-{
-  if test "${RECOVERY_OUTPUT:?}" = 'false'; then
-    printf '%s\n' "${1:?}"
-    return
-  elif test -n "${RECOVERY_PIPE?}"; then
-    printf '%s\nui_print\n' "${1:?}" >> "${RECOVERY_PIPE:?}"
-  else
-    printf '%s\nui_print\n' "${1:?}" 1>&"${OUTFD:?}"
-  fi
-
-  if test "${DEBUG_LOG_ENABLED:?}" = '1'; then printf 1>&2 '%s\n' "${1:?}"; fi
 }
 
 ui_debug()
@@ -611,22 +584,30 @@ _find_and_mount_system()
 
 generate_mountpoint_list()
 {
-  local _mp_list _mp
+  local _mp_list _use_dummy _mp
 
   _mp_list=''
+  _use_dummy='false'
   for _mp in "${2-}" "/mnt/${1:?}" "${3-}" "/${1:?}"; do
     test -n "${_mp?}" || continue
 
     if test -L "${_mp:?}"; then
-      # It detect the case where there is NO real partition but only a symbolic link to a folder under /system (example: /product -> '/system/product').
-      # It works when inside Android but when inside recovery the symbolic link is missing, so the other case is handled directly inside mount_partition_if_possible()
+      # It detect the case where there is NO real partition but only a symbolic link to a folder under /system (example: /product -> '/system/product')
       ui_debug "INFO: ${_mp?} is a symlink to $(readlink "${_mp?}" || :)"
+      _use_dummy='true'
     elif test -r "${_mp:?}"; then
       _mp="$(_canonicalize "${_mp:?}")"
       _mp_list="${_mp_list?}${_mp:?}${NL:?}"
     fi
   done
-  test -n "${_mp_list?}" || return 1 # Empty list
+
+  if test -z "${_mp_list?}"; then
+    if test "${_use_dummy:?}" = 'true'; then
+      _mp_list='dummy'
+    else
+      return 1 # Empty list
+    fi
+  fi
 
   printf '%s' "${_mp_list:?}"
   return 0
@@ -646,14 +627,18 @@ mount_partition_if_possible()
   if test "${_mp_list?}" = 'auto'; then
     _mp_list="$(generate_mountpoint_list "${_partition_name:?}" || :)"
   fi
-  test -n "${_mp_list?}" || return 1 # No usable mountpoint found
+  case "${_mp_list?}" in
+    '') return 1 ;; # No usable mountpoint found
+    'dummy') _mp_list='' ;;
+    *) ;;
+  esac
 
   _backup_ifs="${IFS-}"
   IFS="${NL:?}"
 
   set -f || :
   # shellcheck disable=SC2086 # Word splitting is intended
-  set -- ${_mp_list:?} || ui_error "Failed expanding \${_mp_list} inside mount_partition_if_possible()"
+  set -- ${_mp_list?} || ui_error "Failed expanding \${_mp_list} inside mount_partition_if_possible()"
   set +f || :
 
   IFS="${_backup_ifs?}"
@@ -668,7 +653,7 @@ mount_partition_if_possible()
     fi
   done
 
-  if _manual_partition_mount "${_block_search_list:?}" "${_mp_list:?}" && test -n "${LAST_MOUNTPOINT?}"; then
+  if _manual_partition_mount "${_block_search_list:?}" "${_mp_list?}" && test -n "${LAST_MOUNTPOINT?}"; then
     LAST_PARTITION_MUST_BE_UNMOUNTED=1
     ui_debug "Mounted: ${LAST_MOUNTPOINT?}"
     return 0 # Successfully mounted
@@ -821,20 +806,6 @@ is_string_starting_with()
     *) ;;
   esac
   return 1 # NOT found
-}
-
-verify_keycheck_compatibility()
-{
-  if test "${BUILD_MANUFACTURER?}" = 'OnePlus' && test "${BUILD_DEVICE?}" = 'OnePlus6'; then
-    : # OnePlus 6
-  elif test "${BUILD_MANUFACTURER?}" = 'Google' && test "${BUILD_DEVICE?}" = 'blueline'; then
-    : # Google Pixel 3
-  else
-    return # OK
-  fi
-
-  # It doesn't work properly on these devices
-  export KEYCHECK_ENABLED='false'
 }
 
 _write_test()
@@ -1081,12 +1052,12 @@ initialize()
   LIVE_SETUP_DEFAULT="$(parse_setting 'general' 'LIVE_SETUP_DEFAULT' "${LIVE_SETUP_DEFAULT:?}" 'false')"
   LIVE_SETUP_TIMEOUT="$(parse_setting 'general' 'LIVE_SETUP_TIMEOUT' "${LIVE_SETUP_TIMEOUT:?}" 'false')"
 
-  case "${KEY_TEST_ONLY?}" in '' | *[!0-1]*) KEY_TEST_ONLY=1 ;; *) ;; esac
+  case "${KEY_TEST_ONLY?}" in 0 | 1) ;; *) KEY_TEST_ONLY=1 ;; esac
   if test "${KEY_TEST_ONLY:?}" -eq 1; then DRY_RUN=2; fi
   readonly KEY_TEST_ONLY
   export KEY_TEST_ONLY
 
-  case "${DRY_RUN?}" in '' | *[!0-2]*) DRY_RUN=2 ;; *) ;; esac
+  case "${DRY_RUN?}" in 0 | 1 | 2) ;; *) DRY_RUN=2 ;; esac
   readonly DRY_RUN
   export DRY_RUN
 
@@ -1308,8 +1279,9 @@ initialize()
   readonly DATA_PATH
   export DATA_PATH
 
-  # Display header
   display_basic_info
+  test "${DEBUG_LOG_ENABLED:?}" -ne 1 || display_info
+  ui_msg_empty_line
 
   DEST_PATH="${SYS_PATH:?}"
   readonly DEST_PATH
@@ -1346,7 +1318,7 @@ initialize()
 
   unset LAST_MOUNTPOINT
   unset LAST_PARTITION_MUST_BE_UNMOUNTED
-  unset CURRENTLY_ROLLBACKING
+  unset CURRENTLY_ROLLING_BACK
 }
 
 deinitialize()
@@ -1369,6 +1341,10 @@ clean_previous_installations()
 {
   local _initial_free_space
 
+  if test "${SETUP_TYPE?}" = 'uninstall'; then
+    ui_msg 'Uninstalling...'
+  fi
+
   test "${DRY_RUN:?}" -eq 0 || return
 
   if _write_test "${SYS_PATH:?}/etc"; then
@@ -1388,9 +1364,11 @@ clean_previous_installations()
 
   delete "${SYS_PATH:?}/etc/zips/${MODULE_ID:?}.prop"
 
-  ui_debug ''
-  _wait_free_space_changes 5 "${_initial_free_space:?}" # Reclaiming free space may take some time
-  ui_debug ''
+  if test "${SETUP_TYPE?}" != 'uninstall'; then
+    ui_debug ''
+    _wait_free_space_changes 5 "${_initial_free_space:?}" # Reclaiming free space may take some time
+    ui_debug ''
+  fi
 }
 
 _move_app_into_subfolder()
@@ -1594,9 +1572,9 @@ _do_rollback_last_app_internal()
   sed -ie '$ d' "${TMP_PATH:?}/processed-${1:?}s.log" || ui_error "Failed to remove the last line from processed-${1?}s.log"
 
   if command 1> /dev/null -v 'rollback_complete_callback'; then
-    export CURRENTLY_ROLLBACKING='true'
+    export CURRENTLY_ROLLING_BACK='true'
     rollback_complete_callback "${_vanity_name:?}"
-    unset CURRENTLY_ROLLBACKING
+    unset CURRENTLY_ROLLING_BACK
   else
     ui_warning "The function 'rollback_complete_callback' is missing"
   fi
@@ -1875,24 +1853,27 @@ perform_installation()
   perform_secure_copy_to_device 'framework'
   if test "${PRIVAPP_DIRNAME:?}" != 'app'; then perform_secure_copy_to_device "${PRIVAPP_DIRNAME:?}"; fi
   perform_secure_copy_to_device 'app'
-
-  if test -d "${TMP_PATH:?}/files/bin"; then
-    ui_msg 'Installing utilities...'
-    perform_secure_copy_to_device 'bin'
-  fi
+  perform_secure_copy_to_device 'bin'
 }
 
 finalize_correctly()
 {
   test "${DRY_RUN:?}" -ne 0 || rm -f -- "${SYS_PATH:?}/etc/zips/${MODULE_ID:?}.failed" || :
-  deinitialize
-  touch "${TMP_PATH:?}/installed"
 
   case "${SETUP_TYPE?}" in
     'install') ui_msg 'Installation finished.' ;;
-    'uninstall') ui_msg 'Uninstallation finished.' ;;
-    *) ui_error 'Invalid setup type' ;;
+    'uninstall')
+      delete_dir_if_empty "${SYS_PATH:?}/etc/zips"
+      ui_msg 'Uninstallation finished.'
+      ;;
+    *)
+      deinitialize
+      ui_error 'Invalid setup type'
+      ;;
   esac
+
+  deinitialize
+  touch "${TMP_PATH:?}/installed"
 }
 
 # Error checking functions
@@ -2070,6 +2051,18 @@ package_extract_file()
   unzip -opq "${ZIPFILE:?}" "${1:?}" 1> "${2:?}" || ui_error "Failed to extract the file '${1}' from this archive" 94
 }
 
+package_extract_file_may_fail()
+{
+  {
+    unzip -o -p -qq "${ZIPFILE:?}" "${1:?}" 1> "${2:?}" && test -s "${2:?}"
+  } ||
+    {
+      rm -f -- "${2:?}" || :
+      ui_warning "Failed to extract the file '${1}' from this archive"
+      return 1
+    }
+}
+
 custom_package_extract_dir()
 {
   mkdir -p "${2:?}" || ui_error "Failed to create the dir '${2}' for extraction"
@@ -2106,21 +2099,21 @@ reset_gms_data_of_all_apps()
 }
 
 # Hash related functions
-verify_sha1()
+verify_sha1_hash()
 {
-  if ! test -e "$1"; then
-    ui_debug "The file to verify is missing => '$1'"
-    return 1 # Failed
+  local _v_filename _v_file_hash
+
+  _v_filename="${2:?}/${1:?}"
+  test -f "${_v_filename:?}" || ui_error "The file to verify is missing => '${_v_filename?}'"
+
+  _v_file_hash="$(sha1sum -- "${_v_filename:?}" | cut -d ' ' -f '1' -s)" || ui_error "Failed to calculate SHA1 hash of '${_v_filename?}'"
+  if test -z "${_v_file_hash?}" || test "${_v_file_hash:?}" != "${3?}"; then
+    ui_msg "  Verifying ${1?}... ERROR"
+    return 1
   fi
-  ui_debug "$1"
 
-  local file_name="$1"
-  local hash="$2"
-  local file_hash
-
-  file_hash="$(sha1sum "${file_name}" | cut -d ' ' -f 1)"
-  if test -z "${file_hash}" || test "${hash}" != "${file_hash}"; then return 1; fi # Failed
-  return 0                                                                         # Success
+  ui_msg "  Verifying ${1?}... OK"
+  return 0
 }
 
 # File / folder related functions
@@ -2226,9 +2219,10 @@ delete_if_sha256_match()
 
 delete_dir_if_empty()
 {
-  if test -d "$1"; then
-    ui_debug "Deleting '$1' folder (if empty)..."
-    rmdir --ignore-fail-on-non-empty -- "$1" || ui_error "Failed to delete the '$1' folder" 104
+  if test -d "${1:?}"; then
+    ui_debug "Deleting '${1?}' folder (if empty)..."
+    test "${DRY_RUN:?}" -eq 0 || return
+    rmdir --ignore-fail-on-non-empty -- "${1:?}" || ui_error "Failed to delete the '${1?}' folder" 104
   fi
 }
 
@@ -2261,7 +2255,7 @@ extract_libs()
 {
   local _lib_selected _curr_arch _backup_ifs
 
-  ui_msg "Extracting libs from ${1:?}/${2:?}.apk..."
+  ui_msg "  Extracting libs..."
   create_dir "${TMP_PATH:?}/libs"
   zip_extract_dir "${TMP_PATH:?}/files/${1:?}/${2:?}.apk" 'lib' "${TMP_PATH:?}/libs"
 
@@ -2289,7 +2283,7 @@ extract_libs()
 
     if test "${_lib_selected:?}" = 'true'; then
       move_rename_dir "${TMP_PATH:?}/selected-libs" "${TMP_PATH:?}/files/${1:?}/lib"
-    elif test "${MAIN_ABI:?}" = 'arm64-v8a' || test "${MAIN_ABI:?}" = 'mips64' || test "${MAIN_ABI:?}" = 'mips'; then
+    elif test "${MAIN_ABI:?}" = 'mips64' || test "${MAIN_ABI:?}" = 'mips'; then
       : # Tolerate missing libraries
     else
       ui_error "Failed to select library"
@@ -2364,25 +2358,19 @@ setup_app()
   _output_dir=''
   _installed_file_list=''
 
-  ui_debug ''
-
   if test "${API:?}" -ge "${_min_api:?}" && test "${API:?}" -le "${_max_api:-999}"; then
     if test "${_optional:?}" = 'true' && test "${LIVE_SETUP_ENABLED:?}" = 'true'; then
       choose "Do you want to install ${_vanity_name:?}?" '+) Yes' '-) No'
       if test "${?}" -eq 3; then _install='1'; else _install='0'; fi
     fi
 
-    if test -n "${_chosen_option_name?}" && test "${CURRENTLY_ROLLBACKING:-false}" != 'true' && test "${_optional:?}" = 'true'; then
+    if test -n "${_chosen_option_name?}" && test "${CURRENTLY_ROLLING_BACK:-false}" != 'true' && test "${_optional:?}" = 'true'; then
       printf '%s\n' "${_chosen_option_name:?}=${_install:?}" 1>> "${TMP_PATH:?}/saved-choices.dat" || ui_error 'Failed to update saved-choices.dat'
     fi
 
     if test "${_install:?}" -ne 0 || test "${_optional:?}" != 'true'; then
       ui_msg "Enabling: ${_vanity_name:?}"
-
-      ui_msg_sameline_start 'Verifying... '
-      ui_debug ''
-      verify_sha1 "${TMP_PATH:?}/origin/${_dir:?}/${_filename:?}.apk" "${_file_hash:?}" || ui_error "Failed hash verification of '${_vanity_name?}'"
-      ui_msg_sameline_end 'OK'
+      verify_sha1_hash "${_filename:?}.apk" "${TMP_PATH:?}/origin/${_dir:?}" "${_file_hash:?}" || ui_error "Failed hash verification of '${_vanity_name?}'"
 
       if test "${API:?}" -ge 21; then
         _output_dir="${_dir:?}/${_output_name:?}"
@@ -2401,13 +2389,13 @@ setup_app()
         move_rename_file "${TMP_PATH:?}/origin/etc/default-permissions/default-permissions-${_filename:?}.xml" "${TMP_PATH:?}/files/etc/default-permissions/default-permissions-${_output_name:?}.xml" || ui_error "Failed to setup the default permissions xml of '${_vanity_name?}'"
         _installed_file_list="${_installed_file_list?}|etc/default-permissions/default-permissions-${_output_name:?}.xml"
       fi
-      if test "${_url_handling:?}" != 'false' && test "${CURRENTLY_ROLLBACKING:-false}" != 'true'; then
+      if test "${_url_handling:?}" != 'false' && test "${CURRENTLY_ROLLING_BACK:-false}" != 'true'; then
         test -n "${BASE_SYSCONFIG_XML?}" || ui_error 'You have NOT set the filename of the base sysconfig XML'
         add_line_in_file_after_string "${TMP_PATH:?}/files/${BASE_SYSCONFIG_XML:?}" '<!-- %CUSTOM_APP_LINKS-START% -->' "    <app-link package=\"${_internal_name:?}\" />" || ui_error "Failed to auto-enable URL handling for '${_vanity_name?}'"
       fi
       move_rename_file "${TMP_PATH:?}/origin/${_dir:?}/${_filename:?}.apk" "${TMP_PATH:?}/files/${_output_dir:?}/${_output_name:?}.apk" || ui_error "Failed to setup the app => '${_vanity_name?}'"
 
-      if test "${CURRENTLY_ROLLBACKING:-false}" != 'true' && test "${_optional:?}" = 'true' && test "$(get_size_of_file "${TMP_PATH:?}/files/${_output_dir:?}/${_output_name:?}.apk" || printf '0' || :)" -gt 102400; then
+      if test "${CURRENTLY_ROLLING_BACK:-false}" != 'true' && test "${_optional:?}" = 'true' && test "$(get_size_of_file "${TMP_PATH:?}/files/${_output_dir:?}/${_output_name:?}.apk" || printf '0' || :)" -gt 102400; then
         _installed_file_list="${_installed_file_list#|}"
         printf '%s\n' "${_vanity_name:?}|${_output_dir:?}/${_output_name:?}.apk|${_installed_file_list?}" 1>> "${TMP_PATH:?}/processed-${_dir:?}s.log" || ui_error "Failed to update processed-${_dir?}s.log"
       fi
@@ -2452,25 +2440,19 @@ setup_lib()
 
   _output_dir="${_dir:?}"
 
-  ui_debug ''
-
   if test "${API:?}" -ge "${_min_api:?}" && test "${API:?}" -le "${_max_api:-999}"; then
     if test "${_optional:?}" = 'true' && test "${LIVE_SETUP_ENABLED:?}" = 'true'; then
       choose "Do you want to install ${_vanity_name:?}?" '+) Yes' '-) No'
       if test "${?}" -eq 3; then _install='1'; else _install='0'; fi
     fi
 
-    if test -n "${_chosen_option_name?}" && test "${CURRENTLY_ROLLBACKING:-false}" != 'true' && test "${_optional:?}" = 'true'; then
+    if test -n "${_chosen_option_name?}" && test "${CURRENTLY_ROLLING_BACK:-false}" != 'true' && test "${_optional:?}" = 'true'; then
       printf '%s\n' "${_chosen_option_name:?}=${_install:?}" 1>> "${TMP_PATH:?}/saved-choices.dat" || ui_error 'Failed to update saved-choices.dat'
     fi
 
     if test "${_install:?}" -ne 0 || test "${_optional:?}" != 'true'; then
       ui_msg "Enabling: ${_vanity_name:?}"
-
-      ui_msg_sameline_start 'Verifying... '
-      ui_debug ''
-      verify_sha1 "${TMP_PATH:?}/origin/${_dir:?}/${_filename:?}.jar" "${_file_hash:?}" || ui_error "Failed hash verification of '${_vanity_name?}'"
-      ui_msg_sameline_end 'OK'
+      verify_sha1_hash "${_filename:?}.jar" "${TMP_PATH:?}/origin/${_dir:?}" "${_file_hash:?}" || ui_error "Failed hash verification of '${_vanity_name?}'"
 
       mkdir -p "${TMP_PATH:?}/files/${_output_dir:?}" || ui_error "Failed to create the folder for '${_vanity_name?}'"
 
@@ -2495,7 +2477,6 @@ setup_lib()
 
 setup_util()
 {
-  ui_debug ''
   ui_msg "Enabling utility: ${2?}"
 
   mkdir -p "${TMP_PATH:?}/files/bin" || ui_error "Failed to create the folder for '${2?}'"
@@ -2976,6 +2957,18 @@ _choose_remapper()
   esac
 }
 
+_keycheck_initialize()
+{
+  test "${TEST_INSTALL:-false}" = 'false' || return 1
+
+  KEYCHECK_PATH="${TMP_PATH:?}/bin/keycheck"
+  package_extract_file_may_fail 'misc/keycheck/keycheck-arm.bin' "${KEYCHECK_PATH:?}"
+
+  test -e "${KEYCHECK_PATH:?}" || return 2
+  chmod 0755 "${KEYCHECK_PATH:?}" || ui_error "chmod failed on keycheck" # Give execution rights
+  return 0
+}
+
 _keycheck_map_keycode_to_key()
 {
   case "${1:?}" in
@@ -3006,11 +2999,10 @@ choose_keycheck_with_timeout()
     ui_msg_empty_line
     return 0
   elif test "${_status:?}" -eq 127 || test "${_status:?}" -eq 132; then
-    export KEYCHECK_ENABLED='false'
+    ui_msg 'Fallbacking to manual input event parsing, waiting input...'
+    INPUT_TYPE='input event'
+    _live_setup_initialize
 
-    true # This is just to waste some time, otherwise the warning about the "timeout" failure may appear after the following message
-
-    ui_msg 'Fallbacking to manual input parsing, waiting input...'
     choose_inputevent "${@}"
     return "${?}"
   fi
@@ -3279,18 +3271,18 @@ choose()
 {
   local _last_status=0
 
+  ui_msg_empty_line
   ui_msg "QUESTION: ${1:?}"
   test -z "${2?}" || ui_msg "${2:?}"
   test -z "${3?}" || ui_msg "${3:?}"
   shift 3
 
-  if test "${INPUT_FROM_TERMINAL:?}" = 'true'; then
-    choose_read "${@}"
-  elif "${KEYCHECK_ENABLED:?}"; then
-    choose_keycheck "${@}"
-  else
-    choose_inputevent "${@}"
-  fi
+  case "${INPUT_TYPE?}" in
+    'read') choose_read "${@}" ;;
+    'input event') choose_inputevent "${@}" ;;
+    'keycheck') choose_keycheck "${@}" ;;
+    *) ;;
+  esac
   _last_status="${?}"
   if test "${_last_status:?}" -eq 123; then
     ui_msg 'Invalid choice!!!'
@@ -3310,16 +3302,24 @@ write_separator_line()
 
 _live_setup_initialize()
 {
-  ui_msg_empty_line
-  if test "${INPUT_FROM_TERMINAL:?}" = 'true'; then
-    ui_msg 'Using: read'
-  elif "${KEYCHECK_ENABLED:?}"; then
-    ui_msg 'Using: keycheck'
-  else
-    ui_msg 'Using: input event'
-    inputevent_initialize
+  if test "${INPUT_TYPE?}" = 'auto'; then
+    if test "${INPUT_FROM_TERMINAL:?}" = 'true'; then
+      INPUT_TYPE='read'
+    else
+      INPUT_TYPE='input event'
+    fi
   fi
+
   ui_msg_empty_line
+  ui_msg "Using: ${INPUT_TYPE?}"
+  ui_msg_empty_line
+
+  case "${INPUT_TYPE?}" in
+    'input event') inputevent_initialize ;;
+    'keycheck') _keycheck_initialize || ui_error 'Failed to initialize keycheck' ;;
+    'read') ;;
+    *) ui_error "Invalid input handling selected: ${INPUT_TYPE?}" ;;
+  esac
 }
 
 _live_setup_key_test()
@@ -3327,7 +3327,7 @@ _live_setup_key_test()
   local _count
 
   display_basic_info
-  display_info
+  test "${DEBUG_LOG_ENABLED:?}" -ne 1 || display_info
 
   _live_setup_initialize
   sleep '0.05'
@@ -3346,7 +3346,7 @@ _live_setup_key_test()
 _live_setup_choice_msg()
 {
   local _msg _sep
-  if test "${INPUT_FROM_TERMINAL:?}" = 'true'; then
+  if test "${INPUT_TYPE?}" = 'read'; then
     _msg='INFO: Press the + sign button on your keyboard to enable live setup.'
   else
     _msg='INFO: Press the VOLUME + key to enable live setup.'
@@ -3367,27 +3367,23 @@ _live_setup_choice_msg()
 live_setup_choice()
 {
   LIVE_SETUP_ENABLED='false'
-  verify_keycheck_compatibility
   test "${KEY_TEST_ONLY:?}" -eq 0 || _live_setup_key_test
 
   if test "${LIVE_SETUP_ALLOWED:?}" = 'true'; then
     if test "${LIVE_SETUP_DEFAULT:?}" -ne 0; then
+      _live_setup_initialize
       LIVE_SETUP_ENABLED='true'
     elif test "${LIVE_SETUP_TIMEOUT:?}" -gt 0; then
-
       _live_setup_initialize
+
       _live_setup_choice_msg "${LIVE_SETUP_TIMEOUT}"
-
-      if test "${INPUT_FROM_TERMINAL:?}" = 'true'; then
-        choose_read_with_timeout "${LIVE_SETUP_TIMEOUT}"
-      elif "${KEYCHECK_ENABLED:?}"; then
-        choose_keycheck_with_timeout "${LIVE_SETUP_TIMEOUT}"
-      else
-        choose_inputevent "${LIVE_SETUP_TIMEOUT}"
-      fi
-
+      case "${INPUT_TYPE?}" in
+        'read') choose_read_with_timeout "${LIVE_SETUP_TIMEOUT}" ;;
+        'input event') choose_inputevent "${LIVE_SETUP_TIMEOUT}" ;;
+        'keycheck') choose_keycheck_with_timeout "${LIVE_SETUP_TIMEOUT}" ;;
+        *) ;;
+      esac
       if test "${?}" = '3'; then LIVE_SETUP_ENABLED='true'; fi
-
     fi
   fi
   readonly LIVE_SETUP_ENABLED
@@ -3473,6 +3469,21 @@ remove_ext()
 {
   local str="${1}"
   printf '%s\n' "${str%.*}"
+}
+
+timing_start()
+{
+  START_TIME="$(date -u -- '+%s')" || return 1
+}
+
+timing_end()
+{
+  local _end_time
+
+  test -n "${START_TIME-}" || return 1
+  _end_time="$(date -u -- '+%s')" || return 2
+  printf '%s\n' "$((_end_time - START_TIME))"
+  unset START_TIME
 }
 
 # Find test: this is useful to test 'find' - if every file/folder, even the ones with spaces, is displayed in a single line then your version is good

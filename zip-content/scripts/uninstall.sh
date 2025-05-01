@@ -1,7 +1,6 @@
 #!/sbin/sh
 # SPDX-FileCopyrightText: (c) 2016 ale5000
 # SPDX-License-Identifier: GPL-3.0-or-later
-# SPDX-FileType: SOURCE
 
 list_app_data_to_remove()
 {
@@ -50,6 +49,23 @@ if test "${IS_INCLUDED:-false}" = 'false'; then
     done
   }
 
+  delete_if_sha256_match()
+  {
+    if test -f "${1:?}"; then
+      _filename="${1:?}"
+      _filehash="$(sha256sum -- "${_filename:?}" | cut -d ' ' -f '1' -s)" || ui_error 'Failed to calculate SHA256 hash'
+      shift
+      for _hash in "${@}"; do
+        if test "${_hash:?}" = "${_filehash:?}"; then
+          ui_debug "Deleting '${_filename:?}'..."
+          rm -f -- "${_filename:?}" || ui_error 'Failed to delete file in delete_if_sha256_match()'
+          return
+        fi
+      done
+      ui_debug "Deletion of '${_filename:?}' skipped due to hash mismatch!"
+    fi
+  }
+
   ui_debug 'Uninstalling...'
 
   # shellcheck disable=SC2034
@@ -67,7 +83,7 @@ fi
 delete_symlinks()
 {
   for filename in "${@}"; do
-    if test -h "${filename?}"; then
+    if test -L "${filename?}"; then
       ui_debug "Deleting symlink '${filename?}'...."
       rm -f -- "${filename:?}" || ui_debug 'Failed to delete symlink'
     fi
@@ -100,20 +116,20 @@ uninstall_list | while IFS='|' read -r FILENAME INTERNAL_NAME _; do
     delete "${SYS_PATH:?}/app/${FILENAME}.apk"
     delete "${SYS_PATH:?}/app/${FILENAME}.odex"
 
-    delete "${SYS_PATH:?}/system_ext/priv-app/${FILENAME}"
-    delete "${SYS_PATH:?}/system_ext/app/${FILENAME}"
-    delete "/system_ext/priv-app/${FILENAME}"
-    delete "/system_ext/app/${FILENAME}"
-
+    delete "${PRODUCT_PATH:-/product}/priv-app/${FILENAME}"
+    delete "${PRODUCT_PATH:-/product}/app/${FILENAME}"
     delete "${SYS_PATH:?}/product/priv-app/${FILENAME}"
     delete "${SYS_PATH:?}/product/app/${FILENAME}"
-    delete "/product/priv-app/${FILENAME}"
-    delete "/product/app/${FILENAME}"
 
+    delete "${VENDOR_PATH:-/vendor}/priv-app/${FILENAME}"
+    delete "${VENDOR_PATH:-/vendor}/app/${FILENAME}"
     delete "${SYS_PATH:?}/vendor/priv-app/${FILENAME}"
     delete "${SYS_PATH:?}/vendor/app/${FILENAME}"
-    delete "/vendor/priv-app/${FILENAME}"
-    delete "/vendor/app/${FILENAME}"
+
+    delete "${SYS_EXT_PATH:-/system_ext}/priv-app/${FILENAME}"
+    delete "${SYS_EXT_PATH:-/system_ext}/app/${FILENAME}"
+    delete "${SYS_PATH:?}/system_ext/priv-app/${FILENAME}"
+    delete "${SYS_PATH:?}/system_ext/app/${FILENAME}"
 
     # Dalvik cache
     delete "${DATA_PATH:?}"/dalvik-cache/system@priv-app@"${FILENAME}"[@\.]*@classes*
@@ -124,8 +140,8 @@ uninstall_list | while IFS='|' read -r FILENAME INTERNAL_NAME _; do
     # Delete legacy libs (very unlikely to be present but possible)
     delete "${SYS_PATH:?}/lib64/${FILENAME:?}"
     delete "${SYS_PATH:?}/lib/${FILENAME:?}"
-    delete "/vendor/lib64/${FILENAME:?}"
-    delete "/vendor/lib/${FILENAME:?}"
+    delete "${VENDOR_PATH:-/vendor}/lib64/${FILENAME:?}"
+    delete "${VENDOR_PATH:-/vendor}/lib/${FILENAME:?}"
     delete "${SYS_PATH:?}/vendor/lib64/${FILENAME:?}"
     delete "${SYS_PATH:?}/vendor/lib/${FILENAME:?}"
 
@@ -180,10 +196,10 @@ if test "${STATUS}" -ne 0; then exit "${STATUS}"; fi
 
 framework_uninstall_list | while IFS='|' read -r INTERNAL_NAME _; do
   if test -n "${INTERNAL_NAME}"; then
-    delete "${SYS_PATH:?}/etc/permissions/${INTERNAL_NAME:?}.xml"
     delete "${SYS_PATH:?}/framework/${INTERNAL_NAME:?}.jar"
     delete "${SYS_PATH:?}/framework/${INTERNAL_NAME:?}.odex"
     delete "${SYS_PATH:?}"/framework/oat/*/"${INTERNAL_NAME:?}.odex"
+    delete "${SYS_PATH:?}/etc/permissions/${INTERNAL_NAME:?}.xml"
 
     # Dalvik cache
     delete "${DATA_PATH:?}"/dalvik-cache/*/system@framework@"${INTERNAL_NAME:?}".jar@classes*

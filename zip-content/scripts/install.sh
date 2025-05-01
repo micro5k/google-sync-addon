@@ -26,22 +26,14 @@ fi
 APP_CONTACTSSYNC="$(parse_setting 'app' 'CONTACTSSYNC' "${APP_CONTACTSSYNC:?}")"
 APP_CALENDARSYNC="$(parse_setting 'app' 'CALENDARSYNC' "${APP_CALENDARSYNC:?}")"
 
-# Display info
-display_info
-ui_msg_empty_line
-
 if test "${SETUP_TYPE:?}" = 'install'; then
-  ui_msg 'Starting installation...'
-  ui_msg_empty_line
-
-  # Extracting
   ui_msg 'Extracting...'
   custom_package_extract_dir 'origin' "${TMP_PATH:?}"
   custom_package_extract_dir 'addon.d' "${TMP_PATH:?}"
   create_dir "${TMP_PATH:?}/files/etc"
 
-  # Configuring
   ui_msg 'Configuring...'
+  ui_msg_empty_line
 
   setup_app 1 '' 'Google Backup Transport 4.4' 'GoogleBackupTransport44' 'priv-app' false false
 
@@ -51,9 +43,6 @@ if test "${SETUP_TYPE:?}" = 'install'; then
 
   setup_app "${APP_CALENDARSYNC:?}" 'APP_CALENDARSYNC' 'Google Calendar Sync 6' 'GoogleCalendarSyncAdapter6' 'app' ||
     setup_app "${APP_CALENDARSYNC:?}" 'APP_CALENDARSYNC' 'Google Calendar Sync 5' 'GoogleCalendarSyncAdapter5' 'app'
-else
-  ui_msg 'Starting uninstallation...'
-  ui_msg_empty_line
 fi
 
 if test "${SETUP_TYPE:?}" = 'install'; then
@@ -105,11 +94,13 @@ if test "${DRY_RUN:?}" -eq 0; then
   fi
 
   # Install survival script
-  if test -e "${SYS_PATH:?}/addon.d"; then
+  if test -d "${SYS_PATH:?}/addon.d"; then
     ui_msg 'Installing survival script...'
     write_file_list "${TMP_PATH}/files" "${TMP_PATH}/files/" "${TMP_PATH}/backup-filelist.lst"
     replace_line_in_file_with_file "${TMP_PATH}/addon.d/00-1-google-sync.sh" '%PLACEHOLDER-1%' "${TMP_PATH}/backup-filelist.lst"
     copy_file "${TMP_PATH}/addon.d/00-1-google-sync.sh" "${SYS_PATH}/addon.d"
+  else
+    ui_warning 'addon.d scripts are not supported by your ROM'
   fi
 fi
 
