@@ -2565,7 +2565,7 @@ inputevent_initialize()
 
   INPUT_DEVICE_LIST=''
 
-  for _device in 'gpio-keys' 'qpnp_pon' 'sec_key' 'sec_touchkey' 'qwerty' 'qwerty2'; do
+  for _device in 'gpio-keys' 'gpio_keys' 'qpnp_pon' 'sec_key' 'sec_touchkey' 'qwerty' 'qwerty2'; do
     if test "${IS_EMU:?}" != 'true'; then
       case "${_device:?}" in 'qwerty' | 'qwerty2') continue ;; *) ;; esac
     fi
@@ -3271,7 +3271,7 @@ choose()
 {
   local _last_status=0
 
-  ui_msg_empty_line
+  test "${KEY_TEST_ONLY:?}" -eq 1 || ui_msg_empty_line
   ui_msg "QUESTION: ${1:?}"
   test -z "${2?}" || ui_msg "${2:?}"
   test -z "${3?}" || ui_msg "${3:?}"
