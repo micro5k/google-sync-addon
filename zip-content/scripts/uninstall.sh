@@ -100,6 +100,8 @@ delete_folder_content_silent()
 INTERNAL_MEMORY_PATH='/sdcard0'
 if test -e '/mnt/sdcard'; then INTERNAL_MEMORY_PATH='/mnt/sdcard'; fi
 
+delete "${SYS_PATH:?}"/addon.d/*-google-sync.sh
+
 uninstall_list | while IFS='|' read -r FILENAME INTERNAL_NAME _; do
   if test -n "${INTERNAL_NAME}"; then
     delete "${SYS_PATH:?}/${PRIVAPP_DIRNAME:?}/${INTERNAL_NAME}"
