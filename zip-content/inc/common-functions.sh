@@ -406,6 +406,16 @@ is_mounted_read_write()
   return 1
 }
 
+_disable_write_locks()
+{
+  test "${DRY_RUN:?}" -lt 2 || return 1
+
+  if test -d '/sys/kernel/security/sony_ric'; then
+    ui_msg 'Disabling Sony RIC...' # Sony RIC may prevent you to remount the system partition as read-write
+    printf '%s\n' '0' 1> '/sys/kernel/security/sony_ric/enable' || ui_warning 'Failed to disable Sony RIC'
+  fi
+}
+
 _remount_read_write_helper()
 {
   test "${DRY_RUN:?}" -lt 2 || return 2
@@ -833,19 +843,28 @@ reset_runtime_permissions_if_needed()
 
 _write_test()
 {
-  if test ! -d "${1:?}"; then
-    mkdir -p "${1:?}" || return 1
+  test "${DRY_RUN:?}" -lt 2 || return 0
+
+  test -d "${1:?}" || {
+    ui_warning "Missing folder => ${1?}"
+    mkdir -p "${1:?}" || return 4
     set_perm 0 0 0755 "${1:?}"
-  fi
+  }
 
-  touch 2> /dev/null "${1:?}/write-test-file.dat" || return 1
-
+  touch -- "${1:?}/write-test-file.dat" || return 1
   if test "${FIRST_INSTALLATION:?}" = 'true'; then
-    printf '%5120s' '' 1> "${1:?}/write-test-file.dat" || return 1
+    printf '%512s' '' 1> "${1:?}/write-test-file.dat" || return 2
   fi
+  sleep '0.1'
+  test -f "${1:?}/write-test-file.dat" || return 3
+  return 0
+}
 
-  test -e "${1:?}/write-test-file.dat" || return 1
+_write_test_cleaning()
+{
+  test "${DRY_RUN:?}" -lt 2 || return 0
 
+  rm -f -- "${1:?}/write-test-file.dat" || return 1
   return 0
 }
 
@@ -1021,6 +1040,8 @@ display_info()
   ui_msg "System path: ${SYS_PATH?}"
   ui_msg "Priv-app dir name: ${PRIVAPP_DIRNAME?}"
   #ui_msg "Android root ENV: ${ANDROID_ROOT-}"
+  ui_msg_empty_line
+  ui_msg "Input devices: $(_list_input_devices || :)"
   ui_msg "$(write_separator_line "${#MODULE_NAME}" '-' || :)"
 }
 
@@ -1029,8 +1050,8 @@ initialize()
   local _raw_arch_list _additional_data_mountpoint
 
   UNMOUNT_SYSTEM=0
-  UNMOUNT_PRODUCT=0
   UNMOUNT_VENDOR=0
+  UNMOUNT_PRODUCT=0
   UNMOUNT_SYS_EXT=0
   UNMOUNT_ODM=0
   UNMOUNT_DATA=0
@@ -1041,14 +1062,14 @@ initialize()
     command . "${RS_OVERRIDE_SCRIPT:?}" || ui_error "Sourcing override script failed with error: ${?}"
   fi
 
-  PRODUCT_PATH=''
   VENDOR_PATH=''
+  PRODUCT_PATH=''
   SYS_EXT_PATH=''
   ODM_PATH=''
   DATA_PATH='/data'
 
-  PRODUCT_RW='false'
   VENDOR_RW='false'
+  PRODUCT_RW='false'
   SYS_EXT_RW='false'
   ODM_RW='false'
 
@@ -1247,6 +1268,8 @@ initialize()
   readonly SETUP_TYPE
   export SETUP_TYPE
 
+  _disable_write_locks
+
   remount_read_write "${SYS_MOUNTPOINT:?}" || {
     deinitialize
 
@@ -1268,15 +1291,15 @@ initialize()
     fi
   }
 
-  if mount_partition_if_possible 'product' "${SLOT_SUFFIX:+product}${SLOT_SUFFIX-}${NL:?}product${NL:?}"; then
-    PRODUCT_PATH="${LAST_MOUNTPOINT:?}"
-    UNMOUNT_PRODUCT="${LAST_PARTITION_MUST_BE_UNMOUNTED:?}"
-    remount_read_write_if_possible "${LAST_MOUNTPOINT:?}" false && PRODUCT_RW='true'
-  fi
   if mount_partition_if_possible 'vendor' "${SLOT_SUFFIX:+vendor}${SLOT_SUFFIX-}${NL:?}vendor${NL:?}"; then
     VENDOR_PATH="${LAST_MOUNTPOINT:?}"
     UNMOUNT_VENDOR="${LAST_PARTITION_MUST_BE_UNMOUNTED:?}"
     remount_read_write_if_possible "${LAST_MOUNTPOINT:?}" false && VENDOR_RW='true'
+  fi
+  if mount_partition_if_possible 'product' "${SLOT_SUFFIX:+product}${SLOT_SUFFIX-}${NL:?}product${NL:?}"; then
+    PRODUCT_PATH="${LAST_MOUNTPOINT:?}"
+    UNMOUNT_PRODUCT="${LAST_PARTITION_MUST_BE_UNMOUNTED:?}"
+    remount_read_write_if_possible "${LAST_MOUNTPOINT:?}" false && PRODUCT_RW='true'
   fi
   if mount_partition_if_possible 'system_ext' "${SLOT_SUFFIX:+system_ext}${SLOT_SUFFIX-}${NL:?}system_ext${NL:?}"; then
     SYS_EXT_PATH="${LAST_MOUNTPOINT:?}"
@@ -1288,10 +1311,9 @@ initialize()
     UNMOUNT_ODM="${LAST_PARTITION_MUST_BE_UNMOUNTED:?}"
     #remount_read_write_if_possible "${LAST_MOUNTPOINT:?}" false && ODM_RW='true'
   fi
-  readonly PRODUCT_PATH VENDOR_PATH SYS_EXT_PATH ODM_PATH
-  export PRODUCT_PATH VENDOR_PATH SYS_EXT_PATH ODM_PATH
-  readonly PRODUCT_RW VENDOR_RW SYS_EXT_RW
-  export PRODUCT_RW VENDOR_RW SYS_EXT_RW ODM_RW
+  readonly VENDOR_PATH PRODUCT_PATH SYS_EXT_PATH ODM_PATH
+  export VENDOR_PATH PRODUCT_PATH SYS_EXT_PATH ODM_PATH
+  export VENDOR_RW PRODUCT_RW SYS_EXT_RW ODM_RW
 
   _additional_data_mountpoint=''
   if test -n "${ANDROID_DATA-}" && test "${ANDROID_DATA:?}" != '/data'; then _additional_data_mountpoint="${ANDROID_DATA:?}"; fi
@@ -1354,8 +1376,8 @@ deinitialize()
 
   if test "${UNMOUNT_ODM:?}" = '1' && test -n "${ODM_PATH?}"; then unmount_partition "${ODM_PATH:?}"; fi
   if test "${UNMOUNT_SYS_EXT:?}" = '1' && test -n "${SYS_EXT_PATH?}"; then unmount_partition "${SYS_EXT_PATH:?}"; fi
-  if test "${UNMOUNT_VENDOR:?}" = '1' && test -n "${VENDOR_PATH?}"; then unmount_partition "${VENDOR_PATH:?}"; fi
   if test "${UNMOUNT_PRODUCT:?}" = '1' && test -n "${PRODUCT_PATH?}"; then unmount_partition "${PRODUCT_PATH:?}"; fi
+  if test "${UNMOUNT_VENDOR:?}" = '1' && test -n "${VENDOR_PATH?}"; then unmount_partition "${VENDOR_PATH:?}"; fi
 
   if test "${UNMOUNT_SYSTEM:?}" = '1' && test -n "${SYS_MOUNTPOINT-}"; then unmount_partition "${SYS_MOUNTPOINT:?}"; fi
 
@@ -1374,19 +1396,18 @@ clean_previous_installations()
     ui_msg_empty_line
   fi
 
-  test "${DRY_RUN:?}" -eq 0 || return
-
-  if _write_test "${SYS_PATH:?}/etc"; then
-    : # Really writable
-  else
-    ui_error "Something is wrong because '${SYS_PATH?}' is NOT really writable!!!" 30
-  fi
+  # Is it really writable???
+  _write_test "${SYS_PATH:?}/etc" ||
+    ui_error "Something is wrong because '${SYS_PATH?}' ($(get_file_system "${SYS_PATH?}" || :)) is NOT really writable!!! Return code: ${?}" 30
 
   if test "${SETUP_TYPE?}" != 'uninstall'; then
     _initial_free_space="$(get_free_disk_space_of_partition "${SYS_PATH:?}")" || _initial_free_space='-1'
   fi
 
-  rm -f -- "${SYS_PATH:?}/etc/write-test-file.dat" || ui_error 'Failed to delete the test file'
+  _write_test_cleaning "${SYS_PATH:?}/etc" ||
+    ui_error 'Failed to delete the test file'
+
+  test "${DRY_RUN:?}" -eq 0 || return
 
   readonly IS_INCLUDED='true'
   export IS_INCLUDED
@@ -1676,6 +1697,11 @@ get_free_disk_space_of_partition()
   return 1
 }
 
+get_file_system()
+{
+  df -T -P -- "${1:?}" | tail -n 1 | tr -s ' ' | cut -d ' ' -f '2' -s
+}
+
 display_free_space()
 {
   local _free_space_mb _free_space_auto
@@ -1685,9 +1711,9 @@ display_free_space()
     _free_space_auto="$(convert_bytes_to_human_readable_format "${2:?}")"
 
     if test "${_free_space_auto?}" != "${_free_space_mb?} MB"; then
-      ui_msg "Free space on ${1?}: ${_free_space_mb?} MB (${_free_space_auto?}) - writable: ${3?}"
+      ui_msg "Free space on ${1?}: ${_free_space_mb?} MB (${_free_space_auto?}) - FS: $(get_file_system "${1?}" || :) - writable: ${3?}"
     else
-      ui_msg "Free space on ${1?}: ${_free_space_mb?} MB - writable: ${3?}"
+      ui_msg "Free space on ${1?}: ${_free_space_mb?} MB - FS: $(get_file_system "${1?}" || :) - writable: ${3?}"
     fi
     return 0
   fi
@@ -1765,8 +1791,8 @@ verify_disk_space()
   _free_space_bytes="$(get_free_disk_space_of_partition "${1:?}")" || _free_space_bytes='-1'
   display_free_space "${1:?}" "${_free_space_bytes?}" 'true'
 
-  if test -n "${PRODUCT_PATH?}"; then display_free_space "${PRODUCT_PATH:?}" "$(get_free_disk_space_of_partition "${PRODUCT_PATH:?}" || :)" "${PRODUCT_RW:?}"; fi
   if test -n "${VENDOR_PATH?}"; then display_free_space "${VENDOR_PATH:?}" "$(get_free_disk_space_of_partition "${VENDOR_PATH:?}" || :)" "${VENDOR_RW:?}"; fi
+  if test -n "${PRODUCT_PATH?}"; then display_free_space "${PRODUCT_PATH:?}" "$(get_free_disk_space_of_partition "${PRODUCT_PATH:?}" || :)" "${PRODUCT_RW:?}"; fi
   if test -n "${SYS_EXT_PATH?}"; then display_free_space "${SYS_EXT_PATH:?}" "$(get_free_disk_space_of_partition "${SYS_EXT_PATH:?}" || :)" "${SYS_EXT_RW:?}"; fi
   if test -n "${ODM_PATH?}"; then display_free_space "${ODM_PATH:?}" "$(get_free_disk_space_of_partition "${ODM_PATH:?}" || :)" "${ODM_RW:?}"; fi
 
@@ -2562,6 +2588,12 @@ _find_input_device()
   return 1                                # NOT found
 }
 
+_list_input_devices()
+{
+  test -r '/proc/bus/input/devices' || return 1
+  grep -e '^N:' -- '/proc/bus/input/devices' | cut -d '=' -f '2-' -s | tr -- '\n' ' '
+}
+
 inputevent_initialize()
 {
   local _device _path
@@ -2576,7 +2608,7 @@ inputevent_initialize()
 
   INPUT_DEVICE_LIST=''
 
-  for _device in 'gpio-keys' 'gpio_keys' 'qpnp_pon' 's2mpg12-power-keys' 'sec_key' 'sec_touchkey' 'qwerty' 'qwerty2'; do
+  for _device in 'gpio-keys' 'gpio_keys' 'qpnp_pon' 'mtk-kpd' 's2mpg12-power-keys' 'sec_key' 'sec_touchkey' 'qwerty' 'qwerty2'; do
     if test "${IS_EMU:?}" != 'true'; then
       case "${_device:?}" in 'qwerty' | 'qwerty2') continue ;; *) ;; esac
     fi
@@ -2588,6 +2620,8 @@ inputevent_initialize()
 
     _parse_keylayout "${_device:?}"
   done
+
+  test -n "${INPUT_DEVICE_LIST?}" || return 1
 }
 
 input_device_listener_start()
@@ -2605,7 +2639,7 @@ input_device_listener_start()
   IFS="${NL:?}"
   set -f
   # shellcheck disable=SC2086 # Word splitting is intended
-  set -- ${INPUT_DEVICE_LIST:?} || ui_error "Failed expanding \$INPUT_DEVICE_LIST inside input_device_listener_start()"
+  set -- ${INPUT_DEVICE_LIST:?} || ui_error "Failed expanding \${INPUT_DEVICE_LIST} inside input_device_listener_start()"
   set +f
   IFS="${_backup_ifs?}"
 
@@ -3165,11 +3199,11 @@ choose_inputevent()
 {
   local _key _status _last_key_pressed _key_desc _ret
 
-  test "${#}" -le 1 || ui_error "Key detection failed (input event) - invalid number of arguments"
+  test "${#}" -le 1 || ui_error "Key detection (input event) - too many arguments"
 
   input_device_listener_start || {
     ui_msg_empty_line
-    ui_warning "Key detection failed (input event)"
+    ui_warning "Key detection (input event) - listener startup failed"
     ui_msg_empty_line
     return 1
   }
@@ -3188,7 +3222,7 @@ choose_inputevent()
         return 0
       fi
 
-      ui_warning "Key detection failed (input event) - get, status code: ${_status?}"
+      ui_warning "Key detection (input event) - event get failed, status code: ${_status?}"
       return 1
     }
 
@@ -3196,7 +3230,7 @@ choose_inputevent()
       INPUT_EVENT_SIZE="$(_detect_input_event_size "${INPUT_EVENT_CURRENT?}")" || {
         _status="${?}"
         input_device_listener_stop
-        ui_error "Key detection failed (input event) - size check, status code: ${_status?}"
+        ui_error "Key detection (input event) - size check failed, status code: ${_status?}"
       }
       if test "${INPUT_EVENT_SIZE:?}" -ne 24; then INPUT_EVENT_START_OFFSET="$((INPUT_EVENT_START_OFFSET - 24 + INPUT_EVENT_SIZE))"; fi
     fi
@@ -3210,7 +3244,7 @@ choose_inputevent()
       115) continue ;; # We got an unsupported event type or action (ignored)
       *)               # Event parsing failed (fail)
         input_device_listener_stop
-        ui_error "Key detection failed (input event) - parse, status code: ${_status?}"
+        ui_error "Key detection (input event) - event parse failed, status code: ${_status?}"
         ;;
     esac
 
@@ -3271,7 +3305,7 @@ choose_inputevent()
   case "${_key_desc?}" in
     '+') _ret=3 ;;
     '-') _ret=2 ;;
-    *) test "${KEY_TEST_ONLY:?}" -eq 1 || ui_error "Key detection failed (input event) - key, key code: ${_key?}" ;;
+    *) test "${KEY_TEST_ONLY:?}" -eq 1 || ui_error "Key detection (input event) - wrong key received, key code: ${_key?}" ;;
   esac
 
   ui_msg_empty_line
@@ -3328,7 +3362,7 @@ _live_setup_initialize()
   ui_msg_empty_line
 
   case "${INPUT_TYPE?}" in
-    'input event') inputevent_initialize ;;
+    'input event') inputevent_initialize || ui_warning "Key detection (input event) - initialization failed" ;;
     'keycheck') _keycheck_initialize || ui_error 'Failed to initialize keycheck' ;;
     'read') ;;
     *) ui_error "Invalid input handling selected: ${INPUT_TYPE?}" ;;
