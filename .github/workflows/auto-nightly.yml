@@ -55,17 +55,16 @@ jobs:
           printf '%s\n' "::notice::SHA-256: ${ZIP_SHA256:-Missing}"
           printf '%s\n' "::notice::MD5: ${ZIP_MD5:-Missing}"
           : "${ZIP_FOLDER:?}" || exit "${?}"
-      - name: "Do we need to release the nightly?"
+      - name: "Do we need to publish the nightly build?"
         id: "nightly-logic"
         shell: bash
         run: |
-          # Do we need to release the nightly?
-          tag_count="$(git ls-remote --tags -- '${{ github.server_url }}/${{ github.repository }}.git' | wc -l)" || tag_count=0
+          # Do we need to publish the nightly build?
           CREATE_RELEASE='false'
-          if test "${tag_count?}" != 0 && '${{ github.run_attempt == '1' && steps.build.outputs.ZIP_BUILD_TYPE_SUPPORTED == 'true' && steps.build.outputs.ZIP_IS_ALPHA == 'true' }}'; then
+          if '${{ github.run_attempt == '1' && steps.build.outputs.ZIP_BUILD_TYPE_SUPPORTED == 'true' && steps.build.outputs.ZIP_IS_ALPHA == 'true' }}'; then
             CREATE_RELEASE='true'
           fi
-          printf 'CREATE_RELEASE=%s\n' "${CREATE_RELEASE:?}" >> "${GITHUB_OUTPUT?}"
+          printf 'CREATE_RELEASE=%s\n' "${CREATE_RELEASE:?}" 1>> "${GITHUB_OUTPUT?}"
           printf '%s\n' "${CREATE_RELEASE:?}"
       - name: "Delete previous nightly release"
         uses: actions/github-script@v7
@@ -90,7 +89,7 @@ jobs:
               console.log('Previous nightly release deleted: ' + response.data.name + ' (' + response.data.id + ')');
             } else {
               if(response && response.message) console.error('::error::' + response.message);
-              throw new Error('getReleaseByTag failed.');
+              throw new Error('getReleaseByTag failed: response is undefined or missing data.');
             }
             await github.rest.git.updateRef({
               owner: context.repo.owner,
@@ -122,7 +121,8 @@ jobs:
         uses: actions/upload-artifact@v4
         if: "${{ steps.build.outputs.ZIP_BUILD_TYPE_SUPPORTED == 'true' }}"
         with:
-          name: "${{ github.event.repository.name }}-${{ steps.build.outputs.ZIP_VERSION }}-${{ steps.build.outputs.ZIP_SHORT_COMMIT_ID }}-${{ steps.build.outputs.ZIP_BUILD_TYPE }} archive (extract it)"
+          name: "${{ github.event.repository.name }}-g${{ steps.build.outputs.ZIP_SHORT_COMMIT_ID }}-${{ steps.build.outputs.ZIP_BUILD_TYPE }} (extract it)"
           path: "${{ steps.build.outputs.ZIP_FOLDER }}/*.zip*"
           if-no-files-found: "error"
-          retention-days: 7
+          retention-days: 10
+          compression-level: 0
