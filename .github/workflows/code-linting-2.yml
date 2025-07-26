@@ -7,12 +7,15 @@ permissions: {}
 on:
   push:
     branches:
-      - main
+      - "main"
+  schedule:
+    # At 05:00 AM, every 365 days (UTC)
+    - cron: "0 5 */365 * *"
 jobs:
   codacy:
     name: "Codacy"
-    if: "${{ github.repository_owner == 'micro5k' }}"
     runs-on: ubuntu-latest
+    if: "${{ github.event_name == 'push' }}"
     concurrency:
       group: "${{ github.repository_id }}-${{ github.workflow }}-codacy"
       cancel-in-progress: false
@@ -20,6 +23,11 @@ jobs:
       security-events: write
 
     steps:
+      - name: "Verify token"
+        shell: bash
+        run: |
+          # Verifying token...
+          test -n '${{ secrets.CODACY_PROJECT_TOKEN }}' || exit 3
       - name: "Checkout sources"
         uses: actions/checkout@v4
       - name: "Codacy analysis"
@@ -27,26 +35,35 @@ jobs:
         with:
           project-token: "${{ secrets.CODACY_PROJECT_TOKEN }}"
           #verbose: true
-          output: results.sarif
-          format: sarif
+          output: "results.sarif"
+          format: "sarif"
           # Adjust severity of non-security issues
           gh-code-scanning-compat: true
           # Force 0 exit code to allow SARIF file generation
           # This will hand over control about PR rejection to the GitHub side
           max-allowed-issues: 2147483647
           upload: false
+      - name: "Combine multiple SARIF runs"
+        shell: bash
+        run: |
+          jq '.runs |= unique_by({tool, invocations, results})' 0< './results.sarif' 1> './results-combined.sarif'
       - name: "Upload SARIF results file"
         uses: github/codeql-action/upload-sarif@v3
         with:
-          sarif_file: "results.sarif"
+          sarif_file: "results-combined.sarif"
           category: "Codacy"
 
   sonarqube:
     name: "SonarQube"
-    if: "${{ github.repository_owner == 'micro5k' }}"
     runs-on: ubuntu-latest
+    if: "${{ github.event_name == 'push' }}"
 
     steps:
+      - name: "Verify token"
+        shell: bash
+        run: |
+          # Verifying token...
+          test -n '${{ secrets.SONAR_TOKEN }}' || exit 3
       - name: "Checkout sources"
         uses: actions/checkout@v4
         with:

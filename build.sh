@@ -8,9 +8,9 @@ set -e
 # shellcheck disable=SC3040,SC3041,SC2015 # Ignore: In POSIX sh, set option xxx is undefined. / In POSIX sh, set flag -X is undefined. / C may run when A is true.
 {
   # Unsupported set options may cause the shell to exit (even without set -e), so first try them in a subshell to avoid this issue
-  (set 2> /dev/null -o posix) && set -o posix || true
-  (set 2> /dev/null +H) && set +H || true
-  (set 2> /dev/null -o pipefail) && set -o pipefail || true
+  (set 2> /dev/null -o posix) && set -o posix || :
+  (set 2> /dev/null +H) && set +H || :
+  case "$(set 2> /dev/null -o || set || :)" in *'pipefail'*) if set -o pipefail; then export USING_PIPEFAIL='true'; else echo 1>&2 'Failed: pipefail'; fi ;; *) ;; esac
 }
 
 cat << 'LICENSE'
@@ -61,9 +61,11 @@ detect_script_dir()
 }
 detect_script_dir || return 1 2>&- || exit 1
 
+export BUILD_CACHE_DIR="${MAIN_DIR:?}/cache/build"
+
 unset DO_INIT_CMDLINE
 # shellcheck source=SCRIPTDIR/includes/common.sh
-if test "${A5K_FUNCTIONS_INCLUDED:-false}" = 'false'; then . "${MAIN_DIR}/includes/common.sh"; fi
+if test "${A5K_FUNCTIONS_INCLUDED:-false}" = 'false'; then . "${MAIN_DIR:?}/includes/common.sh"; fi
 
 if test -n "${OPENSOURCE_ONLY-}"; then
   ui_error 'You must set BUILD_TYPE instead of OPENSOURCE_ONLY'
@@ -108,12 +110,13 @@ OUT_DIR="${MAIN_DIR:?}/output"
 
 # Set short commit ID
 ZIP_SHORT_COMMIT_ID=''
-if command 1> /dev/null 2>&1 -v 'git'; then
-  if test "${GITHUB_JOB:-false}" != 'false'; then
-    ZIP_SHORT_COMMIT_ID="$(git 2> /dev/null rev-parse --short "${GITHUB_SHA:?}")" || ZIP_SHORT_COMMIT_ID=''
-  else
-    ZIP_SHORT_COMMIT_ID="$(git 2> /dev/null rev-parse --short HEAD)" || ZIP_SHORT_COMMIT_ID=''
-  fi
+if test "${CI:-false}" != 'false'; then
+  ZIP_SHORT_COMMIT_ID="${CI_COMMIT_SHA:-${GITHUB_SHA:?Missing commit ID}}" || ZIP_SHORT_COMMIT_ID=''
+else
+  ZIP_SHORT_COMMIT_ID="$(git 2> /dev/null rev-parse HEAD)" || ZIP_SHORT_COMMIT_ID=''
+fi
+if test -n "${ZIP_SHORT_COMMIT_ID?}"; then
+  ZIP_SHORT_COMMIT_ID="$(printf '%s' "${ZIP_SHORT_COMMIT_ID:?}" | cut -b '-8' || :)"
 fi
 
 if test "${OPENSOURCE_ONLY:?}" != 'false'; then
@@ -143,8 +146,15 @@ if test "${OPENSOURCE_ONLY:?}" != 'false'; then
 fi
 
 # Check dependencies
-command -v 'zip' 1> /dev/null || ui_error 'Zip is missing'
-command -v 'java' 1> /dev/null || ui_error 'Java is missing'
+command 1> /dev/null 2>&1 -v 'printf' || ui_error 'Missing: printf'
+command 1> /dev/null 2>&1 -v 'zip' || ui_error 'Missing: zip'
+command 1> /dev/null 2>&1 -v 'java' || ui_error 'Missing: java'
+command 1> /dev/null 2>&1 -v 'grep' || ui_error 'Missing: grep'
+
+command 1> /dev/null 2>&1 -v 'wget' || ui_error 'Missing: wget'
+command 1> /dev/null 2>&1 -v 'cut' || ui_error 'Missing: cut'
+command 1> /dev/null 2>&1 -v 'sed' || ui_error 'Missing: sed'
+command 1> /dev/null 2>&1 -v 'rev' || ui_error 'Missing: rev'
 
 # Create the output dir
 mkdir -p "${OUT_DIR:?}" || ui_error 'Failed to create the output dir'
@@ -164,9 +174,22 @@ MODULE_AUTHOR="$(simple_get_prop 'author' "${MAIN_DIR:?}/zip-content/module.prop
 FILENAME_COMMIT_ID="g${ZIP_SHORT_COMMIT_ID?}"
 test "${FILENAME_COMMIT_ID:?}" != 'g' || FILENAME_COMMIT_ID='NOGIT'
 FILENAME_START="${MODULE_ID:?}-${MODULE_VER:?}-"
+FILENAME_MIDDLE="${FILENAME_COMMIT_ID:?}"
 FILENAME_END="-${BUILD_TYPE:?}-by-${MODULE_AUTHOR:?}"
-FILENAME="${FILENAME_START:?}${FILENAME_COMMIT_ID:?}${FILENAME_END:?}"
 
+if test "${CI:-false}" != 'false'; then
+  if test -n "${CI_COMMIT_BRANCH-}" && test "${CI_COMMIT_BRANCH:?}" != "${CI_DEFAULT_BRANCH:-unknown}"; then
+    FILENAME_MIDDLE="${FILENAME_MIDDLE:?}-[${CI_COMMIT_BRANCH:?}]" # GitLab
+  fi
+  if test "${GITHUB_REF_TYPE-}" = 'branch' && test -n "${GITHUB_REF_NAME-}" && test "${GITHUB_REF_NAME:?}" != "${GITHUB_REPOSITORY_DEFAULT_BRANCH:-main}"; then
+    FILENAME_MIDDLE="${FILENAME_MIDDLE:?}-[${GITHUB_REF_NAME:?}]" # GitHub
+  fi
+  if test "${CI_PROJECT_NAMESPACE:-${GITHUB_REPOSITORY_OWNER:-unknown}}" != 'micro''5k'; then
+    FILENAME_MIDDLE="${FILENAME_MIDDLE:?}-[fork]" # GitLab / GitHub
+  fi
+fi
+
+FILENAME="${FILENAME_START:?}${FILENAME_MIDDLE:?}${FILENAME_END:?}"
 FILENAME_EXT='.zip'
 
 case "${MODULE_VER:?}" in
@@ -195,8 +218,6 @@ fi
 
 # Download files if they are missing
 {
-  mkdir -p "${MAIN_DIR:?}/cache" || ui_error 'Failed to create "cache" dir'
-
   current_dl_list="$(oss_files_to_download)" || ui_error 'Missing download list'
   dl_list "${current_dl_list?}" || ui_error 'Failed to download the necessary files'
 
@@ -241,7 +262,7 @@ printf '%s\n%s\n%s\n\n%s\n' '# -*- coding: utf-8; mode: conf-unix -*-' '# SPDX-F
 if test "${OPENSOURCE_ONLY:?}" = 'false'; then
   files_to_download | while IFS='|' read -r LOCAL_FILENAME LOCAL_PATH MIN_API MAX_API FINAL_FILENAME INTERNAL_NAME FILE_HASH _; do
     mkdir -p -- "${TEMP_DIR:?}/zip-content/origin/${LOCAL_PATH:?}"
-    cp -f -- "${MAIN_DIR:?}/cache/${LOCAL_PATH:?}/${LOCAL_FILENAME:?}.apk" "${TEMP_DIR:?}/zip-content/origin/${LOCAL_PATH:?}/" || ui_error "Failed to copy to the temp dir the file => '${LOCAL_PATH}/${LOCAL_FILENAME}.apk'"
+    cp -f -- "${BUILD_CACHE_DIR:?}/${LOCAL_PATH:?}/${LOCAL_FILENAME:?}.apk" "${TEMP_DIR:?}/zip-content/origin/${LOCAL_PATH:?}/" || ui_error "Failed to copy to the temp dir the file => '${LOCAL_PATH}/${LOCAL_FILENAME}.apk'"
 
     _extract_libs=''
     if test "${LOCAL_FILENAME:?}" = 'PlayStore' || test "${LOCAL_FILENAME:?}" = 'PlayStoreARM64'; then _extract_libs='libs'; fi
@@ -252,7 +273,7 @@ if test "${OPENSOURCE_ONLY:?}" = 'false'; then
   if test "${STATUS:?}" -ne 0; then return "${STATUS}" 2>&- || exit "${STATUS}"; fi
 
   mkdir -p "${TEMP_DIR}/zip-content/misc/keycheck"
-  cp -f "${MAIN_DIR}/cache/misc/keycheck/keycheck-arm.bin" "${TEMP_DIR}/zip-content/misc/keycheck/" || ui_error "Failed to copy to the temp dir the file => 'misc/keycheck/keycheck-arm'"
+  cp -f "${BUILD_CACHE_DIR:?}/misc/keycheck/keycheck-arm.bin" "${TEMP_DIR}/zip-content/misc/keycheck/" || ui_error "Failed to copy to the temp dir the file => 'misc/keycheck/keycheck-arm'"
 fi
 
 printf '%s\n' 'Setting name;Visibility;Type' 1> "${TEMP_DIR:?}/zip-content/setprop-settings-list.csv" || ui_error 'Failed to generate setprop settings list (1)'
@@ -268,8 +289,8 @@ done 0< "${TEMP_DIR:?}/zip-content/settings.conf" 1>> "${TEMP_DIR:?}/zip-content
 
 printf '\n'
 
-# Remove the cache folder only if it is empty
-rmdir --ignore-fail-on-non-empty "${MAIN_DIR}/cache" || ui_error 'Failed to remove the empty cache folder'
+# Remove the build cache folder only if it is empty
+test ! -d "${BUILD_CACHE_DIR:?}" || rmdir --ignore-fail-on-non-empty "${BUILD_CACHE_DIR:?}" || ui_error 'Failed to remove the empty build cache folder'
 
 # Prepare the data before compression (also uniform attributes - useful for reproducible builds)
 BASE_TMP_SCRIPT_DIR="${TEMP_DIR}/zip-content/META-INF/com/google/android"

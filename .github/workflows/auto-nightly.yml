@@ -7,10 +7,16 @@ permissions: {}
 on:
   push:
     branches:
-      - "main"
+      - "**"
+  schedule:
+    # At 03:00 AM, every 6 days (UTC)
+    - cron: "0 3 */6 * *"
 concurrency:
   group: "${{ github.repository_id }}-${{ github.workflow }}"
   cancel-in-progress: true
+env:
+  GITHUB_REPOSITORY_DEFAULT_BRANCH: "${{ github.event.repository.default_branch }}"
+
 jobs:
   nightly:
     name: "Nightly"
@@ -27,6 +33,13 @@ jobs:
         with:
           distribution: "temurin"
           java-version: "17"
+      - name: "Prepare cache"
+        uses: actions/cache@v4
+        with:
+          key: "build-${{ hashFiles('conf-2.sh') }}"
+          restore-keys: "build-"
+          path: "cache/build"
+          enableCrossOsArchive: true
       - name: "Build nightly"
         id: "build"
         shell: bash
@@ -61,12 +74,12 @@ jobs:
         run: |
           # Do we need to publish the nightly build?
           CREATE_RELEASE='false'
-          if '${{ github.run_attempt == '1' && steps.build.outputs.ZIP_BUILD_TYPE_SUPPORTED == 'true' && steps.build.outputs.ZIP_IS_ALPHA == 'true' }}'; then
+          if '${{ github.ref_name == github.event.repository.default_branch && github.run_attempt == '1' && steps.build.outputs.ZIP_BUILD_TYPE_SUPPORTED == 'true' && steps.build.outputs.ZIP_IS_ALPHA == 'true' }}'; then
             CREATE_RELEASE='true'
           fi
           printf 'CREATE_RELEASE=%s\n' "${CREATE_RELEASE:?}" 1>> "${GITHUB_OUTPUT?}"
           printf '%s\n' "${CREATE_RELEASE:?}"
-      - name: "Delete previous nightly release"
+      - name: "Delete previous nightly release and update nightly tag"
         uses: actions/github-script@v7
         if: "${{ steps.nightly-logic.outputs.CREATE_RELEASE == 'true' }}"
         with:
@@ -121,8 +134,28 @@ jobs:
         uses: actions/upload-artifact@v4
         if: "${{ steps.build.outputs.ZIP_BUILD_TYPE_SUPPORTED == 'true' }}"
         with:
-          name: "${{ github.event.repository.name }}-g${{ steps.build.outputs.ZIP_SHORT_COMMIT_ID }}-${{ steps.build.outputs.ZIP_BUILD_TYPE }} (extract it)"
+          name: "${{ github.event.repository.name }} ${{ github.ref_name }} g${{ steps.build.outputs.ZIP_SHORT_COMMIT_ID }} ${{ steps.build.outputs.ZIP_BUILD_TYPE }} (extract it)"
           path: "${{ steps.build.outputs.ZIP_FOLDER }}/*.zip*"
           if-no-files-found: "error"
           retention-days: 10
           compression-level: 0
+
+  keep-cache:
+    name: "Keep cache alive"
+    runs-on: ubuntu-latest
+    if: "${{ github.event_name == 'schedule' }}"
+
+    steps:
+      - name: "Checkout sources"
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            conf-2.sh
+          sparse-checkout-cone-mode: false
+      - name: "Ping cache"
+        uses: actions/cache@v4
+        with:
+          key: "build-${{ hashFiles('conf-2.sh') }}"
+          path: "cache/build"
+          enableCrossOsArchive: true
+          lookup-only: true

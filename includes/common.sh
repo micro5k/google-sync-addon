@@ -82,6 +82,9 @@ ui_debug()
 export DL_DEBUG="${DL_DEBUG:-false}"
 export http_proxy="${http_proxy-}"
 export ftp_proxy="${ftp_proxy-}"
+
+if test "${CI:-false}" != 'false' && test "${CI_DEBUG_TRACE:-${RUNNER_DEBUG:-false}}" != 'false'; then DL_DEBUG='true'; fi # GitLab / GitHub
+
 # shellcheck disable=SC2034
 {
   readonly WGET_CMD='wget'
@@ -371,11 +374,18 @@ _get_byte_length()
   printf '%s\n' "${#1}"
 }
 
+_dl_validate_exit_code()
+{
+  test "${DL_DEBUG:?}" = 'false' || ui_debug "${1?} exit code: ${2?}"
+  return "${2:?}"
+}
+
 _parse_webpage_and_get_url()
 {
   local _url _referrer _search_pattern
   local _domain _cookies _parsed_code _parsed_url _status
   local _headers_file
+  local _status_code
 
   _url="${1:?}"
   _referrer="${2?}"
@@ -408,34 +418,45 @@ _parse_webpage_and_get_url()
   fi
 
   _headers_file="${MAIN_DIR:?}/cache/temp/headers/${_domain:?}.dat"
-  if test ! -e "${MAIN_DIR:?}/cache/temp/headers"; then mkdir -p "${MAIN_DIR:?}/cache/temp/headers" || return "${?}"; fi
+  test -d "${MAIN_DIR:?}/cache/temp/headers" || mkdir -p "${MAIN_DIR:?}/cache/temp/headers" || return 10
 
   {
-    _parsed_code="$("${WGET_CMD:?}" -q -S -O '-' "${@}" -- "${_url:?}")" 2> "${_headers_file:?}" || _status="${?}"
-    _parsed_code="$({
-      printf '%s\n' "${_parsed_code?}" &
-    } | grep -o -m 1 -e "${_search_pattern:?}")" || _status="${?}"
-    if test "${_status:?}" -eq 0; then
-      _parsed_url="$(printf '%s\n' "${_parsed_code?}" | grep -o -m 1 -e 'href=".*' | cut -d '"' -f '2' | sed 's/\&amp;/\&/g')" || _status="${?}"
-      if test "${DL_DEBUG:?}" = 'true'; then
-        ui_debug "Parsed url: ${_parsed_url?}"
-        ui_debug "Status: ${_status?}"
-      fi
+    _parsed_code="$("${WGET_CMD:?}" -q -S -O '-' "${@}" -- "${_url:?}" 2> "${_headers_file:?}")" || _status="${?}"
+    _status_code="$(head -n 1 -- "${_headers_file:?}" | grep -o -e 'HTTP/[0-9].*' | cut -d ' ' -f '2' -s)" || _status_code=0
+    if test "${DL_DEBUG:?}" = 'true'; then ui_debug "Status code: ${_status_code?}"; fi
+    _dl_validate_exit_code 'Wget' "${_status:?}" || return 11
+    test -s "${_headers_file:?}" || return 12
+    test -n "${_parsed_code?}" || return 13
+
+    # shellcheck disable=SC3040 # Ignore: In POSIX sh, set option pipefail is undefined
+    {
+      # IMPORTANT: We have to avoid "printf: write error: Broken pipe" when a string is piped to "grep -q" or "grep -m 1"
+      test "${USING_PIPEFAIL:-false}" = 'false' || set +o pipefail
+      _parsed_code="$(printf 2> /dev/null '%s\n' "${_parsed_code?}" | grep -o -m 1 -e "${_search_pattern:?}")" || _status="${?}"
+      test "${USING_PIPEFAIL:-false}" = 'false' || set -o pipefail
+    }
+    _dl_validate_exit_code 'Grep' "${_status:?}" || return 14
+    test -n "${_parsed_code?}" || return 15
+
+    _parsed_url="$(printf '%s\n' "${_parsed_code:?}" | grep -o -e 'href=".*' | cut -d '"' -f '2' -s | sed -e 's|&amp;|\&|g')" || _status="${?}"
+    if test "${DL_DEBUG:?}" = 'true'; then
+      ui_debug "Parsed url: ${_parsed_url?}"
+      ui_debug "Status: ${_status?}"
     fi
 
     if test "${_status:?}" -ne 0 || test -z "${_parsed_url?}"; then
       if test "${DL_DEBUG:?}" = 'true'; then
         ui_error_msg "Webpage parsing failed, error code => ${_status?}"
       fi
-      return 1
+      return 16
     fi
   }
 
   _parse_and_store_all_cookies "${_domain:?}" 0< "${_headers_file:?}" || {
     ui_error_msg "Header parsing failed, error code => ${?}"
-    return 2
+    return 17
   }
-  rm -f "${_headers_file:?}" || return "${?}"
+  rm -f "${_headers_file:?}" || return 18
 
   printf '%s\n' "${_parsed_url?}"
 }
@@ -603,7 +624,7 @@ send_web_request_and_output_headers()
 
 parse_headers_and_get_status_code()
 {
-  printf '%s\n' "${1?}" | head -n 1 | grep -o -m 1 -e 'HTTP/.*' | cut -d ' ' -f '2' -s
+  printf '%s\n' "${1?}" | head -n 1 | grep -o -e 'HTTP/.*' | cut -d ' ' -f '2' -s
 }
 
 parse_headers_and_get_location_url()
@@ -727,7 +748,7 @@ dl_type_one()
     _referrer="${2:?}"
     _url="${1:?}"
   }
-  _result="$(_parse_webpage_and_get_url "${_url:?}" "${_referrer:?}" 'downloadButton[^"]*\"\s*href=\"[^"]*\"')" || {
+  _result="$(_parse_webpage_and_get_url "${_url:?}" "${_referrer:?}" 'downloadButton[^"]*"\s*href="[^"]*"')" || {
     report_failure_one "${?}" 'get link 1' "${_result:-}" || return "${?}"
   }
 
@@ -736,7 +757,7 @@ dl_type_one()
     _referrer="${_url:?}"
     _url="${_base_url:?}${_result:?}"
   }
-  _result="$(_parse_webpage_and_get_url "${_url:?}" "${_referrer:?}" 'Your\sdownload\swill\sstart\s.*href=\"[^"]*\"')" || {
+  _result="$(_parse_webpage_and_get_url "${_url:?}" "${_referrer:?}" 'Your\sdownload\swill\sstart.*href="[^"]*"')" || {
     report_failure_one "${?}" 'get link 2' "${_result:-}" || return "${?}"
   }
 
@@ -862,7 +883,7 @@ dl_type_two()
 
 dl_file()
 {
-  if test -e "${MAIN_DIR:?}/cache/$1/$2"; then verify_sha1 "${MAIN_DIR:?}/cache/$1/$2" "$3" || rm -f "${MAIN_DIR:?}/cache/$1/$2"; fi # Preventive check to silently remove corrupted/invalid files
+  if test -e "${BUILD_CACHE_DIR:?}/$1/$2"; then verify_sha1 "${BUILD_CACHE_DIR:?}/$1/$2" "$3" || rm -f "${BUILD_CACHE_DIR:?}/$1/$2"; fi # Preventive check to silently remove corrupted/invalid files
 
   printf '%s ' "Checking ${2?}..."
   local _status _url _domain
@@ -872,22 +893,22 @@ dl_file()
 
   _clear_cookies || return "${?}"
 
-  if ! test -e "${MAIN_DIR:?}/cache/${1:?}/${2:?}"; then
-    mkdir -p "${MAIN_DIR:?}/cache/${1:?}"
+  if ! test -e "${BUILD_CACHE_DIR:?}/${1:?}/${2:?}"; then
+    mkdir -p "${BUILD_CACHE_DIR:?}/${1:?}" || ui_error "Failed to create the ${1?} folder inside the cache dir"
 
     if test "${CI:-false}" = 'false'; then sleep 0.5; else sleep 3; fi
     case "${_domain:?}" in
       *\.'go''file''.io' | 'go''file''.io')
         printf '\n %s: ' 'DL type 2'
-        dl_type_two "${_url:?}" "${MAIN_DIR:?}/cache/${1:?}/${2:?}" || _status="${?}"
+        dl_type_two "${_url:?}" "${BUILD_CACHE_DIR:?}/${1:?}/${2:?}" || _status="${?}"
         ;;
       *\.'apk''mirror''.com')
         printf '\n %s: ' 'DL type 1'
-        dl_type_one "${_url:?}" "${DL_PROT:?}${_domain:?}/" "${MAIN_DIR:?}/cache/${1:?}/${2:?}" || _status="${?}"
+        dl_type_one "${_url:?}" "${DL_PROT:?}${_domain:?}/" "${BUILD_CACHE_DIR:?}/${1:?}/${2:?}" || _status="${?}"
         ;;
       ????*)
         printf '\n %s: ' 'DL type 0'
-        dl_type_zero "${_url:?}" "${MAIN_DIR:?}/cache/${1:?}/${2:?}" || _status="${?}"
+        dl_type_zero "${_url:?}" "${BUILD_CACHE_DIR:?}/${1:?}/${2:?}" || _status="${?}"
         ;;
       *)
         ui_error "Invalid download URL => '${_url?}'"
@@ -897,22 +918,22 @@ dl_file()
     _clear_cookies || return "${?}"
 
     if test "${_status:?}" -ne 0; then
-      if test -n "${5:-}"; then
+      if test -n "${5-}"; then
         if test "${_status:?}" -eq 128; then
           printf '%s\n' 'Download skipped, trying a mirror...'
         else
-          printf '%s\n' 'Download failed, trying a mirror...'
+          printf '%s\n' "Download failed with error code ${_status?}, trying a mirror..."
         fi
         dl_file "${1:?}" "${2:?}" "${3:?}" "${5:?}"
         return "${?}"
       else
-        printf '%s\n' 'Download failed'
-        ui_error "Failed to download the file => 'cache/${1?}/${2?}'"
+        printf '%s\n' "Download failed with error code ${_status?}"
+        ui_error "Failed to download the file => '${1?}/${2?}'"
       fi
     fi
   fi
 
-  verify_sha1 "${MAIN_DIR:?}/cache/$1/$2" "$3" || corrupted_file "${MAIN_DIR:?}/cache/$1/$2"
+  verify_sha1 "${BUILD_CACHE_DIR:?}/$1/$2" "$3" || corrupted_file "${BUILD_CACHE_DIR:?}/$1/$2"
   printf '%s\n' 'OK'
 }
 
