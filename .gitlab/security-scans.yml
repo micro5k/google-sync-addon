@@ -1,0 +1,18 @@
+---
+# SPDX-FileCopyrightText: none
+# SPDX-License-Identifier: CC0-1.0
+
+include:
+  - template: Security/SAST.gitlab-ci.yml
+  #- template: Security/License-Scanning.gitlab-ci.yml
+  #- template: Security/Secret-Detection.gitlab-ci.yml
+
+sast:
+  cache: []
+  inherit:
+    default: false
+
+#license_scanning:
+#  cache: []
+#  inherit:
+#    default: false
