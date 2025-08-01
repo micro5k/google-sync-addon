@@ -13,11 +13,57 @@ on:
     - cron: "0 5 */365 1 *"
 
 jobs:
-  dependency-submission:
-    name: "Dependency submission"
+  pre-requisites:
+    name: "Pre-requisites"
     runs-on: ubuntu-latest
     timeout-minutes: 10
     if: "${{ github.event_name == 'push' }}"
+    outputs:
+      dependency-graph-enabled: "${{ steps.dependency-graph.outputs.result }}"
+      codacy-token-set: "${{ steps.check-tokens.outputs.CODACY_TOKEN_SET }}"
+      sonar-token-set: "${{ steps.check-tokens.outputs.SONAR_TOKEN_SET }}"
+
+    steps:
+      - name: "Verify tokens"
+        id: check-tokens
+        run: |
+          # Verifying tokens...
+          # Codacy
+          if test -n '${{ secrets.CODACY_PROJECT_TOKEN }}'; then token_set='true'; else token_set='false'; fi
+          printf 'CODACY_TOKEN_SET=%s\n' "${token_set:?}" 1>> "${GITHUB_OUTPUT?}"
+          # SonarQube
+          if test -n '${{ secrets.SONAR_TOKEN }}'; then token_set='true'; else token_set='false'; fi
+          printf 'SONAR_TOKEN_SET=%s\n' "${token_set:?}" 1>> "${GITHUB_OUTPUT?}"
+      - name: "Verify the dependency graph"
+        id: dependency-graph
+        uses: actions/github-script@v7
+        timeout-minutes: 5
+        with:
+          retries: 3
+          script: |
+            /* jshint esversion: 6 */
+            const response = await github.rest.dependencyGraph.exportSbom({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+            }).catch(response => response);
+            if(response && response.status === 200) {
+              console.log('The dependency graph is enabled.');
+              return true;
+            } else if(response && response.status === 404) {
+              console.error('::error::The dependency graph is disabled.');
+            } else {
+              let errorMsg = 'exportSbom failed';
+              if(response && response.status && response.message) errorMsg += ' with error ' + response.status + ' (' + response.message + ')';
+              throw new Error(errorMsg);
+            }
+            return false;
+
+  dependency-submission:
+    name: "Dependency submission"
+    needs: [pre-requisites]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: "${{ github.event_name == 'push' && needs.pre-requisites.outputs.dependency-graph-enabled == 'true' }}"
     permissions:
       contents: write
 
@@ -36,33 +82,12 @@ jobs:
           dependency-graph: "generate-and-submit"
           validate-wrappers: true
 
-  verify-tokens:
-    name: "Verify tokens"
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    if: "${{ github.event_name == 'push' }}"
-    outputs:
-      codacy-token-set: "${{ steps.check-tokens.outputs.CODACY_TOKEN_SET }}"
-      sonar-token-set: "${{ steps.check-tokens.outputs.SONAR_TOKEN_SET }}"
-
-    steps:
-      - name: "Verify tokens"
-        id: check-tokens
-        run: |
-          # Verifying tokens...
-          # Codacy
-          if test -n '${{ secrets.CODACY_PROJECT_TOKEN }}'; then token_set='true'; else token_set='false'; fi
-          printf 'CODACY_TOKEN_SET=%s\n' "${token_set:?}" 1>> "${GITHUB_OUTPUT?}"
-          # SonarQube
-          if test -n '${{ secrets.SONAR_TOKEN }}'; then token_set='true'; else token_set='false'; fi
-          printf 'SONAR_TOKEN_SET=%s\n' "${token_set:?}" 1>> "${GITHUB_OUTPUT?}"
-
   codacy:
     name: "Codacy"
-    needs: [verify-tokens]
+    needs: [pre-requisites]
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    if: "${{ github.event_name == 'push' && needs.verify-tokens.outputs.codacy-token-set == 'true' }}"
+    if: "${{ github.event_name == 'push' && needs.pre-requisites.outputs.codacy-token-set == 'true' }}"
     concurrency:
       group: "${{ github.repository_id }}-${{ github.workflow }}-codacy"
       cancel-in-progress: false
@@ -98,10 +123,10 @@ jobs:
 
   sonarqube:
     name: "SonarQube"
-    needs: [verify-tokens]
+    needs: [pre-requisites]
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    if: "${{ github.event_name == 'push' && needs.verify-tokens.outputs.sonar-token-set == 'true' }}"
+    if: "${{ github.event_name == 'push' && needs.pre-requisites.outputs.sonar-token-set == 'true' }}"
 
     steps:
       - name: "Checkout sources"
