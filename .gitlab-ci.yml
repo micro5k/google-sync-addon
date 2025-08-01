@@ -4,6 +4,9 @@
 
 variables:
   GIT_DEPTH: 1
+  FF_USE_FASTZIP: true
+  CACHE_COMPRESSION_LEVEL: "fastest"
+  ARTIFACT_COMPRESSION_LEVEL: "fastest"
 
 workflow:
   auto_cancel:
@@ -57,6 +60,7 @@ build-job:
         - "LICENSE*.rst"
         - "build.sh"
         - "conf-*.sh"
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
   script: "BUILD_TYPE='full' './build.sh'"
   artifacts:
     paths:
