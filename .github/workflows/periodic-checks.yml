@@ -1,6 +1,6 @@
 ---
-# SPDX-FileCopyrightText: (c) 2021 ale5000
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: NONE
+# SPDX-License-Identifier: CC0-1.0
 
 name: "Periodic checks"
 permissions: {}
@@ -11,14 +11,12 @@ on:
       - "gradle/wrapper/gradle-wrapper.jar"
       - "**codecov.yml"
       - "Makefile"
-      - ".reuse/dep5"
   pull_request:
     paths:
       - ".github/workflows/periodic-checks.yml"
       - "gradle/wrapper/gradle-wrapper.jar"
       - "**codecov.yml"
       - "Makefile"
-      - ".reuse/dep5"
   schedule:
     - cron: "0 0 * * 1"
   workflow_dispatch:
