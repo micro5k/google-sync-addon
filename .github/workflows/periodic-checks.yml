@@ -7,18 +7,17 @@ permissions: {}
 on:
   push:
     paths:
-      - ".github/workflows/periodic-checks.yml"
       - "gradle/wrapper/gradle-wrapper.jar"
       - "**codecov.yml"
       - "Makefile"
   pull_request:
     paths:
-      - ".github/workflows/periodic-checks.yml"
       - "gradle/wrapper/gradle-wrapper.jar"
       - "**codecov.yml"
       - "Makefile"
   schedule:
-    - cron: "0 0 * * 1"
+    # At 03:00 AM, every 30 days (UTC)
+    - cron: "0 3 */30 * *"
   workflow_dispatch:
 
 jobs:
@@ -29,7 +28,7 @@ jobs:
 
     steps:
       - name: "Checkout sources"
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: "Validate Gradle Wrapper"
         uses: gradle/actions/wrapper-validation@v4
       - name: "Validate Codecov configuration"
@@ -56,7 +55,7 @@ jobs:
 
     steps:
       - name: "Checkout sources"
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: "Validation"
         uses: Uno-Takashi/checkmake-action@v2
         with:
@@ -69,7 +68,7 @@ jobs:
 
     steps:
       - name: "Checkout sources"
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: "Validation"
         shell: bash
         run: |
