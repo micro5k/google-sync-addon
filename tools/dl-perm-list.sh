@@ -5,21 +5,20 @@
 # Get the latest version from here: https://github.com/micro5k/microg-unofficial-installer/tree/main/tools
 
 # SPDX-FileCopyrightText: (c) 2025 ale5000
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: GPL-3.0-or-later OR Apache-2.0
 
 # shellcheck enable=all
 # shellcheck disable=SC3043 # In POSIX sh, local is undefined
 
 readonly SCRIPT_NAME='Android permissions retriever'
 readonly SCRIPT_SHORTNAME='DlPermList'
-readonly SCRIPT_VERSION='0.2.0'
+readonly SCRIPT_VERSION='0.3.0'
 readonly SCRIPT_AUTHOR='ale5000'
 
 set -u
 # shellcheck disable=SC3040,SC3041,SC2015
 {
   # Unsupported set options may cause the shell to exit (even without set -e), so first try them in a subshell to avoid this issue
-  (set -o posix 2> /dev/null) && set -o posix || true
   (set +H 2> /dev/null) && set +H || true
   (set -o pipefail 2> /dev/null) && set -o pipefail || true
 }
@@ -50,9 +49,32 @@ readonly DL_UA='Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/201001
 readonly DL_ACCEPT_HEADER='Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
 readonly DL_ACCEPT_LANG_HEADER='Accept-Language: en-US,en;q=0.5'
 
+pause_if_needed()
+{
+  # shellcheck disable=SC3028 # Ignore: In POSIX sh, SHLVL is undefined
+  if test "${NO_PAUSE:-0}" = '0' && test "${no_pause:-0}" = '0' && test "${CI:-false}" = 'false' && test "${TERM_PROGRAM:-unknown}" != 'vscode' && test "${SHLVL:-1}" = '1' && test -t 0 && test -t 1 && test -t 2; then
+    if test -n "${NO_COLOR-}"; then
+      printf 1>&2 '\n%s' 'Press any key to exit... ' || :
+    else
+      printf 1>&2 '\n\033[1;32m\r%s' 'Press any key to exit... ' || :
+    fi
+    # shellcheck disable=SC3045 # Ignore: In POSIX sh, read -s / -n is undefined
+    IFS='' read 2> /dev/null 1>&2 -r -s -n1 _ || IFS='' read 1>&2 -r _ || :
+    printf 1>&2 '\n' || :
+    test -n "${NO_COLOR-}" || printf 1>&2 '\033[0m\r    \r' || :
+  fi
+  unset no_pause || :
+  return "${1:-0}"
+}
+
 show_status()
 {
   printf 1>&2 '\033[1;32m%s\033[0m\n' "${1?}"
+}
+
+show_error()
+{
+  printf 1>&2 '\n\033[1;31m%s\033[0m\n' "ERROR: ${1?}"
 }
 
 find_data_dir()
@@ -72,8 +94,7 @@ find_data_dir()
     return 1
   fi
 
-  _path="$(realpath "${_path:?}")" || return 1
-
+  _path="$(realpath 2> /dev/null "${_path:?}" || readlink -f "${_path:?}")" || return 1
   printf '%s\n' "${_path:?}"
 }
 
@@ -94,9 +115,9 @@ create_and_return_data_dir()
     return 1
   fi
 
-  _path="$(realpath "${_path:?}")" || return 1
   test -d "${_path:?}" || mkdir -p -- "${_path:?}" || return 1
 
+  _path="$(realpath 2> /dev/null "${_path:?}" || readlink -f "${_path:?}")" || return 1
   printf '%s\n' "${_path:?}"
 }
 
@@ -122,13 +143,24 @@ main()
 {
   local api tag
 
+  command 1> /dev/null -v "${WGET_CMD:?}" || {
+    show_error 'Missing: wget'
+    return 255
+  }
+
   DATA_DIR="$(find_data_dir || create_and_return_data_dir)" || return 1
   test -d "${DATA_DIR:?}/perms" || mkdir -p -- "${DATA_DIR:?}/perms" || return 1
 
   for api in $(seq -- 23 "${MAX_API:?}"); do
-    tag="$(eval " printf '%s\n' \"\${TAG_API_${api:?}:?}\" ")" || printf '%s\n' "Failed to get tag for API ${api?}"
+    tag="$(eval " printf '%s\n' \"\${TAG_API_${api:?}:?}\" ")" || {
+      printf '%s\n' "Failed to get tag for API ${api?}"
+      return 4
+    }
     printf '%s\n' "API ${api:?}: ${tag:?}"
-    download_and_parse_permissions "${api:?}" "${tag:?}" || printf '%s\n' "Failed to download/parse XML for API ${api?}"
+    download_and_parse_permissions "${api:?}" "${tag:?}" || {
+      printf '%s\n' "Failed to download/parse XML for API ${api?}"
+      return 5
+    }
   done
 }
 
@@ -139,8 +171,8 @@ while test "${#}" -gt 0; do
   case "${1?}" in
     -V | --version)
       printf '%s\n' "${SCRIPT_NAME:?} v${SCRIPT_VERSION:?}"
-      printf '%s\n' "Copyright (c) 2025 ${SCRIPT_AUTHOR:?}"
-      printf '%s\n' 'License GPLv3+'
+      printf '%s\n' "Copy""right (c) 2025 ${SCRIPT_AUTHOR:?}"
+      printf '%s\n' 'License GPL-3.0+ OR Apache-2.0'
       execute_script='false'
       ;;
 
@@ -173,8 +205,8 @@ if test "${execute_script:?}" = 'true'; then
   show_status "${SCRIPT_NAME:?} v${SCRIPT_VERSION:?} by ${SCRIPT_AUTHOR:?}"
 
   if test "${#}" -eq 0; then set -- ''; fi
-  main "${@}"
-  STATUS="${?}"
+  main "${@}" || STATUS="${?}"
 fi
 
-exit "${STATUS:?}"
+pause_if_needed "${STATUS:?}"
+exit "${?}"
