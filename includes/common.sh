@@ -1333,6 +1333,8 @@ init_cmdline()
   readonly UTILS_DATA_DIR="${UTILS_DIR:?}/data"
   export UTILS_DIR UTILS_DATA_DIR
 
+  if test -n "${GIT_SSH:="$(command -v 'TortoiseGitPlink' || :)"}"; then export GIT_SSH; else unset GIT_SSH; fi
+
   # Set the path of Android SDK if not already set
   if test -z "${ANDROID_SDK_ROOT-}"; then
     if test -n "${USER_HOME-}" && test -e "${USER_HOME:?}/Android/Sdk"; then
@@ -1447,6 +1449,21 @@ init_cmdline()
     readonly __DEFAULT_PS1_AS_ROOT=''
   fi
 
+  git()
+  {
+    HOME="${USER_HOME:-${HOME:?}}" command -- git "${@}"
+  }
+
+  gpg()
+  {
+    HOME="${USER_HOME:-${HOME:?}}" command -- gpg "${@}"
+  }
+
+  bundle()
+  {
+    HOME="${USER_HOME:-${HOME:?}}" command -- bundle "${@}"
+  }
+
   if test "${CI:-false}" = 'false'; then
     PS1="${__DEFAULT_PS1:?}"
     PROMPT_COMMAND='__update_title_and_ps1 "${@}" || true'
@@ -1494,7 +1511,7 @@ export PATH
 if test -n "${ANDROID_SDK_ROOT:-}" && test -e "${ANDROID_SDK_ROOT:?}/emulator/emulator.exe"; then
   # shellcheck disable=SC2139
   {
-    alias 'emu'="'${ANDROID_SDK_ROOT:?}/emulator/emulator.exe'"
-    alias 'emu-w'="'${ANDROID_SDK_ROOT:?}/emulator/emulator.exe' -writable-system"
+    alias 'emu'="'${ANDROID_SDK_ROOT:?}/emulator/emulator.exe' -no-boot-anim"
+    alias 'emu-w'="'${ANDROID_SDK_ROOT:?}/emulator/emulator.exe' -writable-system -no-snapshot-load -no-boot-anim"
   }
 fi

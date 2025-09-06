@@ -3,17 +3,23 @@
 
 * text=auto
 
-docs/CODEOWNERS   text eol=lf
+.git-hooks/*      text eol=lf
 .gitattributes    text eol=lf
 .gitignore        text eol=lf
 .gitmodules       text eol=lf
+allowed_signers   text eol=lf
 
+docs/CODEOWNERS   text eol=lf
 .editorconfig     text eol=lf
 .mailmap          text eol=lf
 .semgrepignore    text eol=lf
 .shellcheckrc     text eol=lf
-.simplecov        text eol=lf
 
+# Ruby
+.simplecov        text eol=lf
+Gemfile*          text eol=lf
+
+*.gpg             text eol=lf
 *.yml             text eol=lf
 *.xml             text eol=lf
 *.json            text eol=lf
