@@ -67,16 +67,14 @@ prepare_installation
 
 # Install
 perform_installation
+reset_runtime_permissions_if_needed
+reset_appops_if_needed
 reset_authenticator_and_sync_adapter_caches
 
 clear_and_enable_app 'com.google.android.backuptransport'
 clear_and_enable_app 'com.google.android.syncadapters.contacts'
 clear_and_enable_app 'com.google.android.syncadapters.calendar'
 
-# Install survival script
 install_survival_script '00-1-google-sync'
-
-# Resetting Android runtime permissions
-reset_runtime_permissions_if_needed 'com.google.android.syncadapters.contacts'
 
 finalize_correctly

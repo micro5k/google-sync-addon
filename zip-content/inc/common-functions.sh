@@ -364,8 +364,8 @@ _get_mount_info()
 {
   if test ! -e "${1:?}"; then return 2; fi
 
-  if test "${TEST_INSTALL:-false}" = 'false' && test -e '/proc/mounts'; then
-    grep -m 1 -e '[[:blank:]]'"${1:?}"'[[:blank:]]' '/proc/mounts' 2> /dev/null || return 1
+  if test "${TEST_INSTALL:-false}" = 'false' && test -f '/proc/mounts'; then
+    grep -e '[[:blank:]]'"${1:?}"'[[:blank:]]' -- '/proc/mounts' 2> /dev/null || return 1
     return 0
   fi
 
@@ -373,7 +373,7 @@ _get_mount_info()
   if _mount_result="$(mount 2> /dev/null)" || {
     test -n "${DEVICE_MOUNT:-}" && _mount_result="$("${DEVICE_MOUNT:?}")"
   }; then
-    if printf '%s' "${_mount_result:?}" | grep -m 1 -e '[[:blank:]]'"${1:?}"'[[:blank:]]'; then return 0; fi
+    if printf '%s\n' "${_mount_result:?}" | grep -e '[[:blank:]]'"${1:?}"'[[:blank:]]'; then return 0; fi
     return 1
   fi
 
@@ -397,15 +397,16 @@ is_mounted_read_write()
   local _mount_info
   _mount_info="$(_get_mount_info "${1:?}")" || ui_error "is_mounted_read_write has failed for '${1?}'"
 
-  # IMPORTANT: We have to avoid "printf: write error: Broken pipe" when a string is piped to "grep -q" or "grep -m1"
-  if
-    {
-      (printf 2> /dev/null '%s\n' "${_mount_info:?}") || :
-    } | grep -q -e '[[:blank:],(]rw[),[:blank:]]'
-  then
-    return 0
-  fi
+  # With an "overlay" there may be multiple entries, example:
+  # /dev/block/dm-3 on /product type ext4 (ro,seclabel,relatime)
+  # overlay on /product type overlay (rw,seclabel,noatime,lowerdir=/product,upperdir=/mnt/scratch/overlay/product/upper,workdir=/mnt/scratch/overlay/product/work,redirect_dir=nofollow,userxattr)
+  #
+  # or
+  #
+  # /dev/block/dm-3 /product ext4 ro,seclabel,relatime 0 0
+  # overlay /product overlay rw,seclabel,noatime,lowerdir=/product,upperdir=/mnt/scratch/overlay/product/upper,workdir=/mnt/scratch/overlay/product/work,redirect_dir=nofollow,userxattr 0 0
 
+  if printf '%s\n' "${_mount_info:?}" | grep 1> /dev/null -e '[[:blank:],(]rw[),[:blank:]]'; then return 0; fi
   return 1
 }
 
@@ -416,6 +417,24 @@ _disable_write_locks()
   if test -d '/sys/kernel/security/sony_ric'; then
     ui_msg 'Disabling Sony RIC...' # Sony RIC may prevent you to remount the system partition as read-write
     printf '%s\n' '0' 1> '/sys/kernel/security/sony_ric/enable' || ui_warning 'Failed to disable Sony RIC'
+  fi
+}
+
+_execute_system_remount()
+{
+  local _remount_output
+  test "${DRY_RUN:?}" -lt 2 || return 1
+
+  # Use the system remount binary if available (this will save us many problems)
+  if test -f "${SYS_PATH:?}/bin/remount"; then
+    ui_msg 'Executing the remount binary...'
+    _remount_output="$("${SYS_PATH:?}/bin/remount" 2>&1)" || ui_warning 'Failed to execute the remount binary'
+    ui_debug "${_remount_output?}"
+    case "${_remount_output?}" in
+      *'reboot your device'*) if test "${IS_EMU:?}" = 'true'; then exit 252; else exit 251; fi ;;
+      *) ;;
+    esac
+    ui_debug ''
   fi
 }
 
@@ -690,6 +709,9 @@ mount_partition_if_possible()
     elif test -n "${SYS_MOUNTPOINT-}" && test ! -L "${SYS_MOUNTPOINT:?}/${_partition_name:?}" && test -d "${SYS_MOUNTPOINT:?}/${_partition_name:?}"; then # Example: /system_root/odm
       _skip_warnings='true'
       ui_debug "Found ${_partition_name?} folder: ${SYS_MOUNTPOINT?}/${_partition_name?}"
+    elif test ! -L "/${_partition_name:?}" && test -d "/${_partition_name:?}"; then # Example: /odm
+      _skip_warnings='true'
+      ui_debug "Found ${_partition_name?} folder: /${_partition_name?}"
     fi
   fi
 
@@ -827,20 +849,45 @@ install_survival_script()
 
 reset_runtime_permissions_if_needed()
 {
+  local _found
+  test "${FIRST_INSTALLATION:?}" = 'true' || return
+  test -n "${DATA_PATH?}" || return
+
   # Reset the runtime permissions to prevent issues on dirty flashing
   if test "${API:?}" -ge 23; then
-    if test -e "${DATA_PATH:?}/system/users/0/runtime-permissions.xml"; then
-      if test "${FIRST_INSTALLATION:?}" = 'true' || ! grep -q -F -e "${1:?}" -- "${DATA_PATH:?}"/system/users/*/runtime-permissions.xml; then
-        ui_msg "Resetting Android runtime permissions..."
-        test "${DRY_RUN:?}" -ne 0 || delete "${DATA_PATH:?}"/system/users/*/runtime-permissions.xml
-      fi
+    _found='false'
+    if _something_exists "${DATA_PATH:?}"/system/users/*/runtime-permissions.xml; then
+      ui_msg "Resetting runtime permissions..."
+      _found='true'
+      test "${DRY_RUN:?}" -ne 0 || delete "${DATA_PATH:?}"/system/users/*/runtime-permissions.xml
     fi
-    if test -e "${DATA_PATH:?}/misc_de/0/apexdata/com.android.permission/runtime-permissions.xml"; then
-      if test "${FIRST_INSTALLATION:?}" = 'true' || ! grep -q -F -e "${1:?}" -- "${DATA_PATH:?}"/misc_de/*/apexdata/com.android.permission/runtime-permissions.xml; then
-        ui_msg "Resetting Android runtime permissions..."
-        test "${DRY_RUN:?}" -ne 0 || delete "${DATA_PATH:?}"/misc_de/*/apexdata/com.android.permission/runtime-permissions.xml
-      fi
+    if _something_exists "${DATA_PATH:?}"/misc_de/*/apexdata/com.android.permission/runtime-permissions.xml*; then
+      ui_msg "Resetting runtime permissions..."
+      _found='true'
+      test "${DRY_RUN:?}" -ne 0 || delete "${DATA_PATH:?}"/misc_de/*/apexdata/com.android.permission/runtime-permissions.xml*
     fi
+
+    if test "${_found:?}" = 'true' && test "${BOOTMODE:?}" = 'true' && test -n "${DEVICE_PM?}" && test "${DRY_RUN:?}" -eq 0; then
+      PATH="${PREVIOUS_PATH?}" "${DEVICE_PM:?}" reset-permissions || ui_warning 'Failed to reset runtime permissions'
+    fi
+  fi
+}
+
+reset_appops_if_needed()
+{
+  test "${FIRST_INSTALLATION:?}" = 'true' || return
+  test -n "${DATA_PATH?}" || return
+  test "${API:?}" -ge 23 || return
+
+  ui_msg "Resetting App Ops..."
+  test "${DRY_RUN:?}" -eq 0 || return
+
+  delete "${DATA_PATH:?}"/system/appops.xml
+  delete "${DATA_PATH:?}"/system/appops_accesses.xml
+  delete "${DATA_PATH:?}"/system/appops/discrete/*
+  delete "${DATA_PATH:?}"/system/appops/history/*
+  if test "${BOOTMODE:?}" = 'true' && test -n "${DEVICE_APPOPS?}"; then
+    PATH="${PREVIOUS_PATH?}" "${DEVICE_APPOPS:?}" 1> /dev/null read-settings || ui_warning 'Failed to refresh App Ops'
   fi
 }
 
@@ -1279,6 +1326,7 @@ initialize()
   export SETUP_TYPE
 
   _disable_write_locks
+  _execute_system_remount
 
   remount_read_write "${SYS_MOUNTPOINT:?}" || {
     deinitialize
@@ -3481,7 +3529,7 @@ soft_kill_app()
   test "${DRY_RUN:?}" -eq 0 || return
 
   if test "${BOOTMODE:?}" = 'true' && test -n "${DEVICE_AM?}"; then
-    PATH="${PREVIOUS_PATH?}" "${DEVICE_AM:?}" 2> /dev/null kill "${1:?}" || true
+    PATH="${PREVIOUS_PATH?}" "${DEVICE_AM:?}" kill "${1:?}" || :
   fi
 }
 
@@ -3490,7 +3538,7 @@ kill_app()
   test "${DRY_RUN:?}" -eq 0 || return
 
   if test "${BOOTMODE:?}" = 'true' && test -n "${DEVICE_AM?}"; then
-    PATH="${PREVIOUS_PATH?}" "${DEVICE_AM:?}" 2> /dev/null force-stop "${1:?}" || PATH="${PREVIOUS_PATH?}" "${DEVICE_AM:?}" 2> /dev/null kill "${1:?}" || true
+    PATH="${PREVIOUS_PATH?}" "${DEVICE_AM:?}" force-stop "${1:?}" || PATH="${PREVIOUS_PATH?}" "${DEVICE_AM:?}" kill "${1:?}" || :
   fi
 }
 
@@ -3499,7 +3547,7 @@ disable_app()
   test "${DRY_RUN:?}" -eq 0 || return
 
   if test "${BOOTMODE:?}" = 'true' && test -n "${DEVICE_PM?}"; then
-    PATH="${PREVIOUS_PATH?}" "${DEVICE_PM:?}" 2> /dev/null disable "${1:?}" || true
+    PATH="${PREVIOUS_PATH?}" "${DEVICE_PM:?}" 2> /dev/null disable "${1:?}" || :
   fi
 }
 
@@ -3508,7 +3556,7 @@ clear_app()
   test "${DRY_RUN:?}" -eq 0 || return
 
   if test "${BOOTMODE:?}" = 'true' && test -n "${DEVICE_PM?}"; then
-    PATH="${PREVIOUS_PATH?}" "${DEVICE_PM:?}" 2> /dev/null clear "${1:?}" || true
+    PATH="${PREVIOUS_PATH?}" "${DEVICE_PM:?}" 2> /dev/null 1>&2 clear "${1:?}" || :
   fi
 }
 
@@ -3517,8 +3565,8 @@ clear_and_enable_app()
   test "${DRY_RUN:?}" -eq 0 || return
 
   if test "${BOOTMODE:?}" = 'true' && test -n "${DEVICE_PM?}"; then
-    PATH="${PREVIOUS_PATH?}" "${DEVICE_PM:?}" 2> /dev/null clear "${1:?}" || true
-    PATH="${PREVIOUS_PATH?}" "${DEVICE_PM:?}" 2> /dev/null enable "${1:?}" || true
+    PATH="${PREVIOUS_PATH?}" "${DEVICE_PM:?}" 2> /dev/null 1>&2 clear "${1:?}" || :
+    PATH="${PREVIOUS_PATH?}" "${DEVICE_PM:?}" 2> /dev/null enable "${1:?}" || :
   fi
 }
 

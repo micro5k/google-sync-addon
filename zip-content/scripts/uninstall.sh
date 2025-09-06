@@ -137,10 +137,13 @@ uninstall_list | while IFS='|' read -r FILENAME INTERNAL_NAME _; do
     delete "${SYS_PATH:?}/system_ext/app/${FILENAME}"
 
     # Dalvik cache
-    delete "${DATA_PATH:?}"/dalvik-cache/system@priv-app@"${FILENAME}"[@\.]*@classes*
-    delete "${DATA_PATH:?}"/dalvik-cache/system@app@"${FILENAME}"[@\.]*@classes*
-    delete "${DATA_PATH:?}"/dalvik-cache/*/system@priv-app@"${FILENAME}"[@\.]*@classes*
-    delete "${DATA_PATH:?}"/dalvik-cache/*/system@app@"${FILENAME}"[@\.]*@classes*
+    delete "${DATA_PATH:?}"/dalvik-cache/system@priv-app@"${FILENAME:?}"[@\.]*@classes*
+    delete "${DATA_PATH:?}"/dalvik-cache/system@app@"${FILENAME:?}"[@\.]*@classes*
+    delete "${DATA_PATH:?}"/dalvik-cache/*/system@priv-app@"${FILENAME:?}"[@\.]*@classes*
+    delete "${DATA_PATH:?}"/dalvik-cache/*/system@app@"${FILENAME:?}"[@\.]*@classes*
+
+    # Package caches
+    delete "${DATA_PATH:?}"/system/package_cache/*/"${FILENAME:?}"-*
 
     # Delete legacy libs (very unlikely to be present but possible)
     delete "${SYS_PATH:?}/lib64/${FILENAME:?}"
@@ -157,15 +160,16 @@ uninstall_list | while IFS='|' read -r FILENAME INTERNAL_NAME _; do
     delete "${SYS_PATH:?}/etc/default-permissions/${FILENAME:?}-permissions.xml"
   fi
 
-  if test -n "${INTERNAL_NAME}"; then
+  if test -n "${INTERNAL_NAME?}"; then
     # Only delete app updates during uninstallation or first-time installation
     if test "${SETUP_TYPE:?}" = 'uninstall' || test "${FIRST_INSTALLATION:?}" = 'true'; then
-      delete "${DATA_PATH:?}/app/${INTERNAL_NAME}"
-      delete "${DATA_PATH:?}/app/${INTERNAL_NAME}.apk"
-      delete "${DATA_PATH:?}/app/${INTERNAL_NAME}"-*
-      delete "/mnt/asec/${INTERNAL_NAME}"
-      delete "/mnt/asec/${INTERNAL_NAME}.apk"
-      delete "/mnt/asec/${INTERNAL_NAME}"-*
+      delete "${DATA_PATH:?}/app/${INTERNAL_NAME:?}.apk"
+      delete "${DATA_PATH:?}/app/${INTERNAL_NAME:?}"
+      delete "${DATA_PATH:?}/app/${INTERNAL_NAME:?}"-*
+      delete "${DATA_PATH:?}"/app/*/"${INTERNAL_NAME:?}"-* # Recent Android
+      delete "/mnt/asec/${INTERNAL_NAME:?}.apk"
+      delete "/mnt/asec/${INTERNAL_NAME:?}"
+      delete "/mnt/asec/${INTERNAL_NAME:?}"-*
       # ToDO => Check also /data/app-private /data/app-asec /data/preload
 
       # App libs
@@ -178,6 +182,10 @@ uninstall_list | while IFS='|' read -r FILENAME INTERNAL_NAME _; do
     delete "${DATA_PATH:?}"/dalvik-cache/data@app@"${INTERNAL_NAME:?}"-*@classes*
     delete "${DATA_PATH:?}"/dalvik-cache/*/data@app@"${INTERNAL_NAME:?}"-*@classes*
     delete "${DATA_PATH:?}"/dalvik-cache/profiles/"${INTERNAL_NAME:?}"
+
+    # Package caches
+    delete "${DATA_PATH:?}"/system/package_cache/*/"${INTERNAL_NAME:?}"-*
+    delete "${DATA_PATH:?}"/system_ce/*/shortcut_service/packages/"${INTERNAL_NAME:?}"*
 
     # Caches
     delete_folder_content_silent "${DATA_PATH:?}/data/${INTERNAL_NAME:?}/code_cache"
@@ -216,12 +224,16 @@ done
 STATUS="$?"
 if test "${STATUS}" -ne 0; then exit "${STATUS}"; fi
 
-list_app_data_to_remove | while IFS='|' read -r FILENAME; do
-  if test -z "${FILENAME}"; then continue; fi
-  delete "${DATA_PATH:?}/data/${FILENAME}"
-  delete "${DATA_PATH:?}"/user/*/"${FILENAME}"
-  delete "${DATA_PATH:?}"/user_de/*/"${FILENAME}"
-  delete "${INTERNAL_MEMORY_PATH}/Android/data/${FILENAME}"
+list_app_data_to_remove | while IFS='|' read -r INTERNAL_NAME; do
+  if test -z "${INTERNAL_NAME?}"; then continue; fi
+  delete "${DATA_PATH:?}"/misc/profiles/ref/"${INTERNAL_NAME:?}"
+  delete "${DATA_PATH:?}"/misc/profiles/cur/*/"${INTERNAL_NAME:?}"
+  delete "${DATA_PATH:?}"/user_de/*/"${INTERNAL_NAME:?}"
+  delete "${DATA_PATH:?}"/user/*/"${INTERNAL_NAME:?}"
+
+  delete "${DATA_PATH:?}"/data/"${INTERNAL_NAME:?}"
+  delete "${DATA_PATH:?}"/media/*/Android/data/"${INTERNAL_NAME:?}"
+  delete "${INTERNAL_MEMORY_PATH}"/Android/data/"${INTERNAL_NAME:?}"
 done
 
 delete "${SYS_PATH:?}"/etc/default-permissions/google-sync-permissions.xml
@@ -230,6 +242,6 @@ delete "${SYS_PATH:?}"/etc/default-permissions/contacts-calendar-sync.xml
 # Legacy file
 delete "${SYS_PATH:?}/etc/zips/google-sync.prop"
 
-if test -z "${IS_INCLUDED:?}"; then
+if test "${IS_INCLUDED:-false}" = 'false'; then
   ui_debug 'Done.'
 fi
