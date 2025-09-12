@@ -1010,6 +1010,33 @@ dl_list()
   done
 }
 
+ruby_update_all()
+{
+  is_root || {
+    ui_error_msg 'You must execute this as root'
+    return 1
+  }
+
+  ui_debug 'Installing / updating rubygems-update...'
+  if gem 1> /dev/null list -i '^rubygems-update$'; then
+    gem update rubygems-update || ui_warning 'Failed to update rubygems-update'
+  else
+    gem install rubygems-update || ui_warning 'Failed to install rubygems-update'
+  fi
+  ui_debug ''
+
+  ui_debug 'Running update_rubygems...'
+  update_rubygems 1> /dev/null || ui_warning 'Failed to execute => update_rubygems'
+  ui_debug 'Running gem update --system...'
+  gem update --system || ui_warning 'Failed to execute => gem update --system'
+  ui_debug ''
+  ui_debug 'Running gem update...'
+  gem update || ui_warning 'Failed to execute => gem update'
+  ui_debug ''
+  ui_debug 'Running gem cleanup...'
+  gem cleanup || ui_warning 'Failed to execute => gem cleanup'
+}
+
 get_32bit_programfiles()
 {
   local _dir
@@ -1214,6 +1241,13 @@ init_path()
   if test -n "${PATH-}"; then PATH="${PATH%"${PATHSEP:?}"}"; fi
 
   if test "${PLATFORM:?}" = 'win'; then
+    # Make some GNU tools available
+    local _program_dir_32
+    _program_dir_32="$(get_32bit_programfiles)"
+    if test -n "${_program_dir_32?}"; then
+      add_to_path_env "${_program_dir_32:?}/GnuWin32/bin"
+    fi
+
     # On Bash under Windows (for example the one included inside Git for Windows) we need to have '/usr/bin'
     # before 'C:/Windows/System32' otherwise it will use the find/sort/etc. of Windows instead of the Unix compatible ones.
     # ADDITIONAL NOTE: We have to do this even under BusyBox otherwise every external bash/make executed as subshell of BusyBox will be broken.
@@ -1222,13 +1256,6 @@ init_path()
       PATH='/usr/bin'
     else
       PATH="/usr/bin${PATHSEP:?}${PATH:?}"
-    fi
-
-    # Make some GNU tools available
-    local _program_dir_32
-    _program_dir_32="$(get_32bit_programfiles)"
-    if test -n "${_program_dir_32?}"; then
-      add_to_path_env "${_program_dir_32:?}/GnuWin32/bin"
     fi
   fi
 
@@ -1322,11 +1349,6 @@ init_cmdline()
   unset KILL_PPID
 
   if test "${PLATFORM:?}" = 'win'; then unset JAVA_HOME; fi
-
-  # Clean useless directories from the $PATH env
-  if test "${PLATFORM?}" = 'win'; then
-    remove_from_path_env "${LOCALAPPDATA-}/Microsoft/WindowsApps"
-  fi
 
   # Set environment variables
   readonly UTILS_DIR="${MAIN_DIR:?}/utils"
@@ -1457,6 +1479,11 @@ init_cmdline()
   gpg()
   {
     HOME="${USER_HOME:-${HOME:?}}" command -- gpg "${@}"
+  }
+
+  gem()
+  {
+    HOME="${USER_HOME:-${HOME:?}}" command -- gem "${@}"
   }
 
   bundle()
