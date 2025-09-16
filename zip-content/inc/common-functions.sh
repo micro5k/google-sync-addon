@@ -114,8 +114,9 @@ ui_msg_empty_line()
 {
   if test "${RECOVERY_OUTPUT:?}" = 'true'; then
     _send_text_to_recovery ' '
+    test "${TEST_INSTALL:-false}" = 'false' || sleep 2> /dev/null '0.01'
   else
-    _print_text '%s' ''
+    _print_text 1>&2 '%s' ''
   fi
 }
 
@@ -415,8 +416,14 @@ _disable_write_locks()
   test "${DRY_RUN:?}" -lt 2 || return 1
 
   if test -d '/sys/kernel/security/sony_ric'; then
-    ui_msg 'Disabling Sony RIC...' # Sony RIC may prevent you to remount the system partition as read-write
+    # Sony RIC may prevent you to remount the system partition as read-write
+    ui_msg 'Disabling Sony RIC...'
     printf '%s\n' '0' 1> '/sys/kernel/security/sony_ric/enable' || ui_warning 'Failed to disable Sony RIC'
+  fi
+  if test -n "${VENDOR_PATH?}" && test -f "${VENDOR_PATH:?}/bin/write_protect"; then
+    # Alcatel TCL Flip 2
+    ui_msg 'Disabling write protect...'
+    PATH="${PREVIOUS_PATH:?}:${PATH:?}" "${VENDOR_PATH:?}/bin/write_protect" 0 || ui_warning 'Failed to disable write protect'
   fi
 }
 
@@ -428,7 +435,7 @@ _execute_system_remount()
   # Use the system remount binary if available (this will save us many problems)
   if test -f "${SYS_PATH:?}/bin/remount"; then
     ui_msg 'Executing the remount binary...'
-    _remount_output="$("${SYS_PATH:?}/bin/remount" 2>&1)" || ui_warning 'Failed to execute the remount binary'
+    _remount_output="$(PATH="${PREVIOUS_PATH:?}:${PATH:?}" "${SYS_PATH:?}/bin/remount" 2>&1)" || ui_warning 'Failed to execute the remount binary'
     ui_debug "${_remount_output?}"
     case "${_remount_output?}" in
       *'reboot your device'*) if test "${IS_EMU:?}" = 'true'; then exit 252; else exit 251; fi ;;
@@ -891,16 +898,8 @@ reset_appops_if_needed()
   fi
 }
 
-_write_test()
+_write_test_helper()
 {
-  test "${DRY_RUN:?}" -lt 2 || return 0
-
-  test -d "${1:?}" || {
-    ui_warning "Missing folder => ${1?}"
-    mkdir -p "${1:?}" || return 4
-    set_perm 0 0 0755 "${1:?}"
-  }
-
   touch -- "${1:?}/write-test-file.dat" || return 1
   if test "${FIRST_INSTALLATION:?}" = 'true'; then
     printf '%512s' '' 1> "${1:?}/write-test-file.dat" || return 2
@@ -909,12 +908,17 @@ _write_test()
   return 0
 }
 
-_write_test_cleaning()
+_write_test()
 {
+  local _folder _status
   test "${DRY_RUN:?}" -lt 2 || return 0
 
-  rm -f -- "${1:?}/write-test-file.dat" || return 1
-  return 0
+  _status=0
+  if test -d "${1:?}/etc"; then _folder="${1:?}/etc"; else _folder="${1:?}"; fi
+  _write_test_helper "${_folder:?}" || _status="${?}"
+
+  rm -f -- "${_folder:?}/write-test-file.dat" || :
+  return "${_status:?}"
 }
 
 _detect_architectures()
@@ -1166,7 +1170,7 @@ initialize()
 
   if test "${DRY_RUN:?}" -gt 0; then
     ui_warning "DRY RUN mode ${DRY_RUN?} enabled. No files on your device will be modified!!!"
-    sleep 2> /dev/null '0.02' || : # Wait some time otherwise ui_debug may appear before the previous ui_warning
+    sleep 2> /dev/null '0.01' || : # Wait some time otherwise ui_debug may appear before the previous ui_warning
     ui_debug ''
   fi
 
@@ -1334,6 +1338,26 @@ initialize()
   readonly SETUP_TYPE
   export SETUP_TYPE
 
+  if mount_partition_if_possible 'vendor' "${SLOT_SUFFIX:+vendor}${SLOT_SUFFIX-}${NL:?}vendor${NL:?}"; then
+    VENDOR_PATH="${LAST_MOUNTPOINT:?}"
+    UNMOUNT_VENDOR="${LAST_PARTITION_MUST_BE_UNMOUNTED:?}"
+  fi
+  if mount_partition_if_possible 'product' "${SLOT_SUFFIX:+product}${SLOT_SUFFIX-}${NL:?}product${NL:?}"; then
+    PRODUCT_PATH="${LAST_MOUNTPOINT:?}"
+    UNMOUNT_PRODUCT="${LAST_PARTITION_MUST_BE_UNMOUNTED:?}"
+  fi
+  if mount_partition_if_possible 'system_ext' "${SLOT_SUFFIX:+system_ext}${SLOT_SUFFIX-}${NL:?}system_ext${NL:?}"; then
+    SYS_EXT_PATH="${LAST_MOUNTPOINT:?}"
+    UNMOUNT_SYS_EXT="${LAST_PARTITION_MUST_BE_UNMOUNTED:?}"
+  fi
+  if mount_partition_if_possible 'odm' "${SLOT_SUFFIX:+odm}${SLOT_SUFFIX-}${NL:?}odm${NL:?}"; then
+    ODM_PATH="${LAST_MOUNTPOINT:?}"
+    UNMOUNT_ODM="${LAST_PARTITION_MUST_BE_UNMOUNTED:?}"
+  fi
+
+  LD_LIBRARY_PATH="${LD_LIBRARY_PATH-}${LD_LIBRARY_PATH:+:}${VENDOR_PATH:-/vendor}/lib64:${SYS_PATH:?}/lib64:${VENDOR_PATH:-/vendor}/lib:${SYS_PATH:?}/lib"
+  export LD_LIBRARY_PATH
+
   _disable_write_locks
   _execute_system_remount
 
@@ -1354,25 +1378,17 @@ initialize()
     ui_error "Remounting '${SYS_MOUNTPOINT?}' failed!!!" 30
   }
 
-  if mount_partition_if_possible 'vendor' "${SLOT_SUFFIX:+vendor}${SLOT_SUFFIX-}${NL:?}vendor${NL:?}"; then
-    VENDOR_PATH="${LAST_MOUNTPOINT:?}"
-    UNMOUNT_VENDOR="${LAST_PARTITION_MUST_BE_UNMOUNTED:?}"
-    remount_read_write_if_possible "${LAST_MOUNTPOINT:?}" false && VENDOR_RW='true'
+  if test -n "${VENDOR_PATH?}"; then
+    remount_read_write_if_possible "${VENDOR_PATH:?}" false && VENDOR_RW='true'
   fi
-  if mount_partition_if_possible 'product' "${SLOT_SUFFIX:+product}${SLOT_SUFFIX-}${NL:?}product${NL:?}"; then
-    PRODUCT_PATH="${LAST_MOUNTPOINT:?}"
-    UNMOUNT_PRODUCT="${LAST_PARTITION_MUST_BE_UNMOUNTED:?}"
-    remount_read_write_if_possible "${LAST_MOUNTPOINT:?}" false && PRODUCT_RW='true'
+  if test -n "${PRODUCT_PATH?}"; then
+    remount_read_write_if_possible "${PRODUCT_PATH:?}" false && PRODUCT_RW='true'
   fi
-  if mount_partition_if_possible 'system_ext' "${SLOT_SUFFIX:+system_ext}${SLOT_SUFFIX-}${NL:?}system_ext${NL:?}"; then
-    SYS_EXT_PATH="${LAST_MOUNTPOINT:?}"
-    UNMOUNT_SYS_EXT="${LAST_PARTITION_MUST_BE_UNMOUNTED:?}"
-    remount_read_write_if_possible "${LAST_MOUNTPOINT:?}" false && SYS_EXT_RW='true'
+  if test -n "${SYS_EXT_PATH?}"; then
+    remount_read_write_if_possible "${SYS_EXT_PATH:?}" false && SYS_EXT_RW='true'
   fi
-  if mount_partition_if_possible 'odm' "${SLOT_SUFFIX:+odm}${SLOT_SUFFIX-}${NL:?}odm${NL:?}"; then
-    ODM_PATH="${LAST_MOUNTPOINT:?}"
-    UNMOUNT_ODM="${LAST_PARTITION_MUST_BE_UNMOUNTED:?}"
-    #remount_read_write_if_possible "${LAST_MOUNTPOINT:?}" false && ODM_RW='true'
+  if test -n "${ODM_PATH?}"; then
+    : #remount_read_write_if_possible "${ODM_PATH:?}" false && ODM_RW='true'
   fi
   readonly VENDOR_PATH PRODUCT_PATH SYS_EXT_PATH ODM_PATH
   export VENDOR_PATH PRODUCT_PATH SYS_EXT_PATH ODM_PATH
@@ -1428,6 +1444,12 @@ initialize()
     ui_error "Unsupported CPU, ABI list => $(printf '%s\n' "${_raw_arch_list?}" | LC_ALL=C tr -s -- ',' || true)"
   fi
 
+  if test "${SETUP_TYPE:?}" = 'install'; then
+    ui_msg 'Extracting...'
+    custom_package_extract_dir 'origin' "${TMP_PATH:?}"
+    mkdir -p -- "${TMP_PATH:?}/files/etc" || ui_error "Failed to create the dir '${TMP_PATH?}/files/etc'"
+  fi
+
   unset LAST_MOUNTPOINT
   unset LAST_PARTITION_MUST_BE_UNMOUNTED
   unset CURRENTLY_ROLLING_BACK
@@ -1459,8 +1481,7 @@ clean_previous_installations()
     _initial_free_space="$(get_free_disk_space_of_partition "${SYS_PATH:?}")" || _initial_free_space='-1'
     test "${_initial_free_space:?}" != 0 || ui_error "There is NO free space on '${SYS_PATH?}' ($(get_file_system "${SYS_PATH?}" || :))" 31
 
-    _write_test "${SYS_PATH:?}/etc" || ui_error "Something is wrong because '${SYS_PATH?}' ($(get_file_system "${SYS_PATH?}" || :)) is NOT really writable!!! Return code: ${?}" 30
-    _write_test_cleaning "${SYS_PATH:?}/etc" || ui_error 'Failed to delete the test file'
+    _write_test "${SYS_PATH:?}" || ui_error "Something is wrong because '${SYS_PATH?}' ($(get_file_system "${SYS_PATH?}" || :)) is NOT really writable!!! Return code: ${?}" 30
   else
     ui_msg 'Uninstalling...'
   fi
@@ -1535,35 +1556,34 @@ prepare_installation()
 
   ui_msg 'Preparing installation...'
   _need_newline='false'
-  sleep '0.1' # It avoid the following output to be printed interleaved with the previous output
+  sleep 2> /dev/null '0.01' # It avoid the following output to be printed interleaved with the previous output
 
-  if test "${API:?}" -ge 29; then # Android 10+
-    _need_newline='true'
-    replace_permission_placeholders 'ACCESS_BACKGROUND_LOCATION' 'true'
+  if test "${API:?}" -ge 23; then
+    if test "${API:?}" -ge 29; then # Android 10+
+      _need_newline='true'
+      replace_permission_placeholders 'ACCESS_BACKGROUND_LOCATION' 'true'
 
-    if test "${API:?}" -ge 31; then # Android 12+
-      replace_permission_placeholders 'BLUETOOTH_ADVERTISE'
-      replace_permission_placeholders 'BLUETOOTH_CONNECT'
-      replace_permission_placeholders 'BLUETOOTH_SCAN'
+      if test "${API:?}" -ge 31; then # Android 12+
+        replace_permission_placeholders 'BLUETOOTH_ADVERTISE'
+        replace_permission_placeholders 'BLUETOOTH_CONNECT'
+        replace_permission_placeholders 'BLUETOOTH_SCAN'
 
-      if test "${API:?}" -ge 33; then # Android 13+
-        replace_permission_placeholders 'POST_NOTIFICATIONS'
+        if test "${API:?}" -ge 33; then # Android 13+
+          replace_permission_placeholders 'POST_NOTIFICATIONS'
+        fi
       fi
     fi
-  fi
 
-  if test "${FAKE_SIGN_PERMISSION:?}" = 'true'; then
-    _need_newline='true'
-    replace_permission_placeholders 'FAKE_PACKAGE_SIGNATURE'
+    if test "${FAKE_SIGN_PERMISSION:?}" = 'true'; then
+      _need_newline='true'
+      replace_permission_placeholders 'FAKE_PACKAGE_SIGNATURE'
+    fi
   fi
 
   test "${_need_newline:?}" = 'false' || ui_debug ''
 
   if test "${API}" -lt 23; then
     delete_temp "files/etc/default-permissions"
-  fi
-  if test "${API:?}" -lt 21; then
-    delete_temp "files/etc/sysconfig"
   fi
 
   if test "${PRIVAPP_DIRNAME:?}" != 'priv-app' && test -e "${TMP_PATH:?}/files/priv-app"; then
@@ -1598,8 +1618,10 @@ prepare_installation()
   delete_temp "files/etc/zips"
   create_dir "${TMP_PATH:?}/files/etc/zips"
   {
+    # REUSE-IgnoreStart
     echo '# SPDX-FileCopyrightText: NONE'
     echo '# SPDX-License-Identifier: CC0-1.0'
+    # REUSE-IgnoreEnd
     echo ''
     echo 'install.destination=system'
     echo "install.build.type=${BUILD_TYPE:?}"
@@ -1873,7 +1895,9 @@ verify_disk_space()
 {
   local _needed_space_bytes _free_space_bytes
 
-  if _needed_space_bytes="$(get_disk_space_usage_of_file_or_folder "${TMP_PATH:?}/files")" && test -n "${_needed_space_bytes?}"; then
+  ui_msg_empty_line
+
+  if test -d "${TMP_PATH:?}/files" && _needed_space_bytes="$(get_disk_space_usage_of_file_or_folder "${TMP_PATH:?}/files")" && test -n "${_needed_space_bytes?}"; then
     ui_msg "Disk space required: $(convert_bytes_to_mb "${_needed_space_bytes:?}" || :) MB"
   else
     _needed_space_bytes='-1'
@@ -1890,7 +1914,6 @@ verify_disk_space()
   if test "${_needed_space_bytes:?}" -ge 0 && test "${_free_space_bytes:?}" -ge 0; then
     : # OK
   else
-    ui_msg_empty_line
     ui_warning 'Unable to verify needed space, continuing anyway'
     return 0
   fi
@@ -1951,8 +1974,6 @@ perform_secure_copy_to_device()
 
 perform_installation()
 {
-  ui_msg_empty_line
-
   if ! verify_disk_space "${DEST_PATH:?}"; then
     ui_msg_empty_line
     ui_warning "There is NOT enough free space available, but let's try anyway"
@@ -1960,16 +1981,15 @@ perform_installation()
 
   ui_msg_empty_line
 
-  test "${DRY_RUN:?}" -eq 0 || return
-
   ui_msg 'Installing...'
+  test "${DRY_RUN:?}" -eq 0 || return
 
   if test ! -d "${SYS_PATH:?}/etc/zips"; then
     mkdir -p "${SYS_PATH:?}/etc/zips" || ui_error "Failed to create the dir '${SYS_PATH:?}/etc/zips'"
     set_perm 0 0 0750 "${SYS_PATH:?}/etc/zips"
   fi
-
   set_perm 0 0 0640 "${TMP_PATH:?}/files/etc/zips/${MODULE_ID:?}.prop"
+
   perform_secure_copy_to_device 'etc/zips'
   perform_secure_copy_to_device 'etc/permissions'
 
@@ -2147,6 +2167,7 @@ add_line_in_file_after_string()
 
 replace_line_in_file_with_file()
 { # $1 => File to process  $2 => Line to replace  $3 => File to read for replacement text
+  test -f "${1:?}" || ui_error "Failed to replace a line in a file because the file is missing => '$1'" 92
   sed -i -e "/${2:?}/r ${3:?}" -- "${1:?}" || ui_error "Failed to replace (1) a line in the file => '$1'" 92
   sed -i -e "/${2:?}/d" -- "${1:?}" || ui_error "Failed to replace (2) a line in the file => '$1'" 92
 }
@@ -2267,9 +2288,9 @@ verify_sha1_hash()
 # File / folder related functions
 create_dir()
 { # Ensure dir exists
-  test -d "$1" && return
-  mkdir -p "$1" || ui_error "Failed to create the dir '$1'" 97
-  set_perm 0 0 0755 "$1"
+  test ! -d "${1:?}" || return 0
+  mkdir -p -- "${1:?}" || ui_error "Failed to create the dir '${1?}'" 97
+  set_perm 0 0 0755 "${1:?}"
 }
 
 copy_dir_content()
@@ -2442,10 +2463,20 @@ string_split()
   printf '%s' "${1:?}" | cut -d '|' -sf "${2:?}" || return "${?}"
 }
 
-set_filename_of_base_sysconfig_xml()
+setup_sysconfig()
 {
-  BASE_SYSCONFIG_XML="etc/sysconfig/${1:?}"
-  test -e "${TMP_PATH:?}/files/${BASE_SYSCONFIG_XML:?}" || ui_error "You have set the wrong filename for the base sysconfig XML => ${BASE_SYSCONFIG_XML?}"
+  test "${API:?}" -ge 21 || return
+
+  ui_debug "Enabling sysconfig: ${1:?}.xml"
+  create_dir "${TMP_PATH:?}/files/etc/sysconfig" || ui_error "Failed to create the sysconfig folder"
+  move_rename_file "${TMP_PATH:?}/origin/etc/sysconfig/${1:?}.xml" "${TMP_PATH:?}/files/etc/sysconfig/${1:?}.xml" || ui_error "Failed to setup the sysconfig => '${1?}.xml'"
+}
+
+set_base_sysconfig()
+{
+  test "${API:?}" -ge 21 || return
+  BASE_SYSCONFIG_XML="etc/sysconfig/${1:?}.xml"
+  test -f "${TMP_PATH:?}/files/${BASE_SYSCONFIG_XML:?}" || ui_error "You have set the wrong filename for the base sysconfig XML => ${BASE_SYSCONFIG_XML?}"
 }
 
 # @description Configure an app for later installation.
@@ -2517,7 +2548,7 @@ setup_app()
         move_rename_file "${TMP_PATH:?}/origin/etc/default-permissions/default-permissions-${_filename:?}.xml" "${TMP_PATH:?}/files/etc/default-permissions/default-permissions-${_output_name:?}.xml" || ui_error "Failed to setup the default permissions xml of '${_vanity_name?}'"
         _installed_file_list="${_installed_file_list?}|etc/default-permissions/default-permissions-${_output_name:?}.xml"
       fi
-      if test "${_url_handling:?}" != 'false' && test "${CURRENTLY_ROLLING_BACK:-false}" != 'true'; then
+      if test "${API:?}" -ge 21 && test "${_url_handling:?}" != 'false' && test "${CURRENTLY_ROLLING_BACK:-false}" != 'true'; then
         test -n "${BASE_SYSCONFIG_XML?}" || ui_error 'You have NOT set the filename of the base sysconfig XML'
         add_line_in_file_after_string "${TMP_PATH:?}/files/${BASE_SYSCONFIG_XML:?}" '<!-- %CUSTOM_APP_LINKS-START% -->' "    <app-link package=\"${_internal_name:?}\" />" || ui_error "Failed to auto-enable URL handling for '${_vanity_name?}'"
       fi
@@ -2607,8 +2638,16 @@ setup_util()
 {
   ui_msg "Enabling utility: ${2?}"
 
-  mkdir -p "${TMP_PATH:?}/files/bin" || ui_error "Failed to create the folder for '${2?}'"
+  create_dir "${TMP_PATH:?}/files/bin" || ui_error "Failed to create the folder for '${2?}'"
   move_rename_file "${TMP_PATH:?}/origin/bin/${1:?}.sh" "${TMP_PATH:?}/files/bin/${1:?}" || ui_error "Failed to setup the util => '${2?}'"
+}
+
+setup_xml()
+{
+  ui_debug "Enabling xml: ${2:?}/${1:?}.xml"
+
+  create_dir "${TMP_PATH:?}/files/etc/${2:?}" || ui_error "Failed to create the folder => '${2?}'"
+  move_rename_file "${TMP_PATH:?}/origin/etc/${2:?}/${1:?}.xml" "${TMP_PATH:?}/files/etc/${2:?}/${1:?}.xml" || ui_error "Failed to setup the xml => '${2?}/${1?}.xml'"
 }
 
 list_files()

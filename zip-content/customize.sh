@@ -356,6 +356,8 @@ fi
 "${OUR_BB:?}" mkdir -p "${TMP_PATH:?}" || ui_error "Failed to create the temp folder"
 set_perm_safe 0 0 0755 "${TMP_PATH:?}"
 
+test -z "${LD_LIBRARY_PATH-}" || export LD_LIBRARY_PATH
+
 PREVIOUS_PATH="${PATH:-%empty}"
 DEVICE_TWRP="$(command -v twrp)" || DEVICE_TWRP=''
 DEVICE_GETPROP="$(command -v getprop)" || DEVICE_GETPROP=''
