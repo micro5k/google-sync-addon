@@ -25,6 +25,13 @@ export KEY_TEST_ONLY="${KEY_TEST_ONLY:-0}"
 export BYPASS_LOCK_CHECK="${BYPASS_LOCK_CHECK:-0}"
 
 export INPUT_TYPE="${INPUT_TYPE:-auto}"
+
+export BASIC_INFO_READY=''
+export MOST_INFO_READY=''
+export BASIC_INFO_DISPLAYED=''
+export ADVANCED_INFO_DISPLAYED=''
+export ASSOCIATED_LOOP_DEVICES=''
+export MOUNTED_APEX_CHILDREN=''
 readonly ROLLBACK_TEST='false'
 
 # shellcheck disable=SC3040,SC2015
@@ -52,7 +59,7 @@ readonly NL='
 ### FUNCTIONS ###
 
 # Message related functions
-_send_text_to_recovery()
+_show_msg_in_recovery()
 {
   if test "${RECOVERY_OUTPUT:?}" != 'true'; then return; fi # Nothing to do here
 
@@ -68,10 +75,10 @@ _send_text_to_recovery()
 _print_text()
 {
   if test -n "${NO_COLOR-}"; then
-    printf '%s\n' "${2?}"
+    printf 1>&2 '%s\n' "${2?}"
   else
     # shellcheck disable=SC2059
-    printf "${1:?}\n" "${2?}"
+    printf 1>&2 "${1:?}\n" "${2?}"
   fi
 
   if test "${DEBUG_LOG_ENABLED:?}" = '1' && test -n "${ORIGINAL_STDERR_FD_PATH?}"; then printf '%s\n' "${2?}" 1>> "${ORIGINAL_STDERR_FD_PATH:?}"; fi
@@ -83,47 +90,64 @@ ui_error()
   _error_code=91
   test -z "${2-}" || _error_code="${2:?}"
 
-  if test "${RECOVERY_OUTPUT:?}" = 'true'; then
-    _send_text_to_recovery "ERROR ${_error_code:?}: ${1:?}"
-  else
-    _print_text 1>&2 '\033[1;31m%s\033[0m' "ERROR ${_error_code:?}: ${1:?}"
+  if test "${BASIC_INFO_DISPLAYED-}" != 'true' && test "${BASIC_INFO_READY-}" = 'true'; then
+    display_basic_info
+  fi
+  if test "${ADVANCED_INFO_DISPLAYED-}" != 'true' && test "${MOST_INFO_READY-}" = 'true'; then
+    display_info 'error'
   fi
 
+  if test "${RECOVERY_OUTPUT:?}" = 'true'; then
+    _show_msg_in_recovery "ERROR ${_error_code:?}: ${1:?}"
+  else
+    _print_text '\033[1;31m%s\033[0m' "ERROR ${_error_code:?}: ${1:?}"
+  fi
+
+  deinitialize
   exit "${_error_code:?}"
+}
+
+ui_error_msg()
+{
+  if test "${RECOVERY_OUTPUT:?}" = 'true'; then
+    _show_msg_in_recovery "ERROR: ${1:?}"
+  else
+    _print_text '\033[1;31m%s\033[0m' "ERROR: ${1:?}"
+  fi
 }
 
 ui_recovered_error()
 {
   if test "${RECOVERY_OUTPUT:?}" = 'true'; then
-    _send_text_to_recovery "RECOVERED ERROR: ${1:?}"
+    _show_msg_in_recovery "RECOVERED ERROR: ${1:?}"
   else
-    _print_text 1>&2 '\033[1;31;103m%s\033[0m' "RECOVERED ERROR: ${1:?}"
+    _print_text '\033[1;31;103m%s\033[0m' "RECOVERED ERROR: ${1:?}"
   fi
 }
 
 ui_warning()
 {
   if test "${RECOVERY_OUTPUT:?}" = 'true'; then
-    _send_text_to_recovery "WARNING: ${1:?}"
+    _show_msg_in_recovery "WARNING: ${1:?}"
   else
-    _print_text 1>&2 '\033[0;33m%s\033[0m' "WARNING: ${1:?}"
+    _print_text '\033[0;33m%s\033[0m' "WARNING: ${1:?}"
   fi
 }
 
 ui_msg_empty_line()
 {
   if test "${RECOVERY_OUTPUT:?}" = 'true'; then
-    _send_text_to_recovery ' '
-    test "${TEST_INSTALL:-false}" = 'false' || sleep 2> /dev/null '0.01'
+    _show_msg_in_recovery ' '
+    test "${TEST_INSTALL:-false}" = 'false' || sleep 2> /dev/null '0.01' || :
   else
-    _print_text 1>&2 '%s' ''
+    _print_text '%s' ''
   fi
 }
 
 ui_msg()
 {
   if test "${RECOVERY_OUTPUT:?}" = 'true'; then
-    _send_text_to_recovery "${1:?}"
+    _show_msg_in_recovery "${1:?}"
   else
     _print_text '%s' "${1:?}"
   fi
@@ -131,7 +155,7 @@ ui_msg()
 
 ui_debug()
 {
-  _print_text 1>&2 '%s' "${1?}"
+  _print_text '%s' "${1?}"
 }
 
 # Other
@@ -309,6 +333,17 @@ _mount_helper()
   return 0
 }
 
+_losetup_helper()
+{
+  if test -n "${DEVICE_LOSETUP-}" && PATH="${PREVIOUS_PATH:?}" "${DEVICE_LOSETUP:?}" "${@}"; then
+    :
+  else
+    losetup "${@}" || return "${?}"
+  fi
+
+  return 0
+}
+
 _verify_system_partition()
 {
   local _backup_ifs _path
@@ -436,9 +471,17 @@ _execute_system_remount()
   if test -f "${SYS_PATH:?}/bin/remount"; then
     ui_msg 'Executing the remount binary...'
     _remount_output="$(PATH="${PREVIOUS_PATH:?}:${PATH:?}" "${SYS_PATH:?}/bin/remount" 2>&1)" || ui_warning 'Failed to execute the remount binary'
+    ui_debug 'Output:'
     ui_debug "${_remount_output?}"
     case "${_remount_output?}" in
-      *'reboot your device'*) if test "${IS_EMU:?}" = 'true'; then exit 252; else exit 251; fi ;;
+      *'reboot your device'*)
+        deinitialize
+        if test "${IS_EMU:?}" = 'true'; then exit 252; else exit 251; fi
+        ;;
+      *'must be bootloader unlocked'*)
+        ui_debug ''
+        if test "${BYPASS_LOCK_CHECK:?}" != 0; then ui_warning 'The boot loader is locked!!!'; else ui_error 'The boot loader is locked!!!' 37; fi
+        ;;
       *) ;;
     esac
     ui_debug ''
@@ -508,6 +551,154 @@ _prepare_mountpoint()
   return 0
 }
 
+_mount_single_apex()
+{
+  local _val _apex_file _block _found
+
+  unset LAST_APEX_MOUNTPOINT
+  _found='false'
+
+  if test -e "/dev/block/mapper/${1:?}"; then
+    ui_debug "  Checking ${1?}..."
+
+    _block="$(_canonicalize "/dev/block/mapper/${1:?}")"
+    _found='true'
+    ui_msg "  Found 'mapper/${1?}' block at: ${_block?}" # Reuse existing
+  fi
+
+  if test "${_found:?}" = 'false'; then
+    _apex_file="${SYS_PATH:?}/apex/${1:?}.apex"
+    test -f "${_apex_file:?}" || return 2
+
+    ui_debug "  Checking ${1?}..."
+
+    if _val="$(_losetup_helper 2> /dev/null -j "${_apex_file:?}" | tail -n 1 | cut -d ':' -f '1')" && test -n "${_val?}" && test -b "${_val:?}"; then
+      _block="${_val:?}"
+      _found='true'
+      ui_msg "  Found loop of '${1?}' at: ${_block?}" # Reuse existing
+    fi
+
+    if test "${_found:?}" = 'false' && mkdir -p -- "${TMP_PATH:?}/apex/${1:?}" && unzip -oq "${_apex_file:?}" 'apex_payload.img' -d "${TMP_PATH:?}/apex/${1:?}"; then
+      if _val="$(_losetup_helper -r -f)" && test -n "${_val?}" && test -b "${_val:?}" && _losetup_helper -r -- "${_val:?}" "${TMP_PATH:?}/apex/${1:?}/apex_payload.img"; then
+        _block="${_val:?}"
+        _found='true'
+        ASSOCIATED_LOOP_DEVICES="${_block:?}${NL:?}${ASSOCIATED_LOOP_DEVICES?}"
+        ui_msg "  Associated loop device: ${_block?}" # Create new association
+      fi
+    fi
+  fi
+
+  if test "${_found:?}" != 'false' && mkdir -p -- "${2:?}"; then
+    if _mount_helper -o 'ro,nodev,noatime' "${_block:?}" "${2:?}"; then
+      rm -f -- "${TMP_PATH:?}/apex/${1:?}/apex_payload.img" || :
+      MOUNTED_APEX_CHILDREN="${2:?}${NL:?}${MOUNTED_APEX_CHILDREN?}"
+      LAST_APEX_MOUNTPOINT="${2:?}"
+      return 0
+    fi
+    rmdir -- "${2:?}" || :
+  fi
+  rm -f -- "${TMP_PATH:?}/apex/${1:?}/apex_payload.img" || :
+
+  ui_debug "  Block not found for: ${1?}"
+  return 1
+}
+
+_mount_apex_children()
+{
+  local _child
+
+  for _child in 'com.android.runtime' 'com.android.art' 'com.android.i18n'; do
+    test ! -e "${1:?}/${_child:?}" || continue # Already exist
+
+    if _mount_single_apex "${_child:?}" "${1:?}/${_child:?}"; then
+      ui_debug "  Mounted: ${LAST_APEX_MOUNTPOINT?}"
+    fi
+  done
+
+  unset LAST_APEX_MOUNTPOINT
+}
+
+mount_apex_if_possible()
+{
+  local _partition_name _mp
+  unset LAST_MOUNTPOINT
+  LAST_PARTITION_MUST_BE_UNMOUNTED=0
+
+  _partition_name="apex"
+  _mp='/apex'
+
+  test -d "${SYS_PATH:?}/apex" || return 3
+  ui_debug ''
+  ui_debug "Checking ${_partition_name?}..."
+
+  if is_mounted "${_mp:?}"; then
+    test "${BOOTMODE:?}" = 'true' || _mount_apex_children "${_mp:?}"
+
+    LAST_MOUNTPOINT="${_mp:?}"
+    ui_debug "Already mounted: ${LAST_MOUNTPOINT?}"
+    return 0 # Already mounted
+  fi
+
+  test -e "${_mp:?}" || {
+    ui_warning "Mounting of ${_partition_name?} failed (missing mountpoint)"
+    return 2
+  }
+
+  if _mount_helper -o 'rw,nosuid,nodev,noexec,mode=755' -t 'tmpfs' 'tmpfs' "${_mp:?}"; then
+    LAST_MOUNTPOINT="${_mp:?}"
+    LAST_PARTITION_MUST_BE_UNMOUNTED=1
+    ui_debug "  Mounted: ${LAST_MOUNTPOINT?}" # Successfully mounted
+  else
+    ui_warning "Mounting of ${_partition_name?} failed"
+    return 2
+  fi
+
+  _mount_apex_children "${_mp:?}"
+
+  ui_debug 'Done'
+  return 0
+}
+
+unmount_apex_if_needed()
+{
+  local _mp _name _backup_ifs
+
+  _mp='/apex'
+
+  _backup_ifs="${IFS-}"
+  IFS="${NL:?}"
+  set -f || :
+  # shellcheck disable=SC2086 # Word splitting is intended
+  set -- ${MOUNTED_APEX_CHILDREN?} || ui_warning "Failed expanding \${MOUNTED_APEX_CHILDREN} inside unmount_apex_if_needed()"
+  set +f || :
+  IFS="${_backup_ifs?}"
+  for _name in "${@}"; do
+    unmount_partition "${_name:?}"
+    rmdir -- "${_name:?}" || ui_warning "Failed to remove => ${_name?}"
+  done
+  MOUNTED_APEX_CHILDREN=''
+
+  _backup_ifs="${IFS-}"
+  IFS="${NL:?}"
+  set -f || :
+  # shellcheck disable=SC2086 # Word splitting is intended
+  set -- ${ASSOCIATED_LOOP_DEVICES?} || ui_warning "Failed expanding \${ASSOCIATED_LOOP_DEVICES} inside unmount_apex_if_needed()"
+  set +f || :
+  IFS="${_backup_ifs?}"
+  for _name in "${@}"; do
+    _losetup_helper -d "${_name:?}"
+  done
+  ASSOCIATED_LOOP_DEVICES=''
+
+  test "${UNMOUNT_APEX:?}" = '1' || return 0
+
+  for _name in 'com.android.runtime' 'com.android.art' 'com.android.i18n'; do
+    test -e "${_mp:?}/${_name:?}" || continue
+    unmount_partition "${_mp:?}/${_name:?}"
+  done
+  unmount_partition "${_mp:?}"
+}
+
 _manual_partition_mount()
 {
   local _backup_ifs _path _block _found
@@ -557,7 +748,7 @@ _manual_partition_mount()
       if test "${RECOVERY_FAKE_SYSTEM:?}" = 'true' && test "${_path:?}" = '/system'; then continue; fi
       _prepare_mountpoint "${_path:?}" || continue
 
-      if _mount_helper '-o' 'ro' "${_block:?}" "${_path:?}"; then
+      if _mount_helper -o 'ro' "${_block:?}" "${_path:?}"; then
         IFS="${_backup_ifs:-}"
         LAST_MOUNTPOINT="${_path:?}"
         return 0
@@ -598,17 +789,6 @@ _find_and_mount_system()
       SYS_MOUNTPOINT="${LAST_MOUNTPOINT:?}"
       UNMOUNT_SYSTEM="${LAST_PARTITION_MUST_BE_UNMOUNTED:?}"
     else
-      deinitialize
-
-      ui_msg_empty_line
-      ui_msg "Current slot: ${SLOT?}"
-      ui_msg "Device locked state: ${DEVICE_STATE?}"
-      ui_msg "Verified boot state: ${VERIFIED_BOOT_STATE?}"
-      ui_msg "Verity mode: ${VERITY_MODE?} (detection is unreliable)"
-      ui_msg "Dynamic partitions: ${DYNAMIC_PARTITIONS?}"
-      ui_msg "Recovery fake system: ${RECOVERY_FAKE_SYSTEM?}"
-      ui_msg_empty_line
-
       ui_error "The ROM cannot be found!!!" 123
     fi
   fi
@@ -699,7 +879,7 @@ mount_partition_if_possible()
       *) ;;
     esac
 
-    if _mount_helper 2> /dev/null '-o' 'ro' "${_mp:?}"; then
+    if _mount_helper 2> /dev/null -o 'ro' "${_mp:?}"; then
       LAST_MOUNTPOINT="${_mp:?}"
       LAST_PARTITION_MUST_BE_UNMOUNTED=1
       ui_debug "Mounted (2): ${LAST_MOUNTPOINT?}"
@@ -713,7 +893,7 @@ mount_partition_if_possible()
     if test -n "${SYS_PATH-}" && test ! -L "${SYS_PATH:?}/${_partition_name:?}" && test -d "${SYS_PATH:?}/${_partition_name:?}"; then # Example: /system_root/system/product
       _skip_warnings='true'
       ui_debug "Found ${_partition_name?} folder: ${SYS_PATH?}/${_partition_name?}"
-    elif test -n "${SYS_MOUNTPOINT-}" && test ! -L "${SYS_MOUNTPOINT:?}/${_partition_name:?}" && test -d "${SYS_MOUNTPOINT:?}/${_partition_name:?}"; then # Example: /system_root/odm
+    elif test -n "${SYS_MOUNTPOINT-}" && test "${SYS_MOUNTPOINT:?}" != '/' && test ! -L "${SYS_MOUNTPOINT:?}/${_partition_name:?}" && test -d "${SYS_MOUNTPOINT:?}/${_partition_name:?}"; then # Example: /system_root/odm
       _skip_warnings='true'
       ui_debug "Found ${_partition_name?} folder: ${SYS_MOUNTPOINT?}/${_partition_name?}"
     elif test ! -L "/${_partition_name:?}" && test -d "/${_partition_name:?}"; then # Example: /odm
@@ -1044,8 +1224,27 @@ is_new_architecture()
   return 1
 }
 
+append_to_ld_library_path()
+{
+  if test -d "${1:?}"; then
+    LD_LIBRARY_PATH="${LD_LIBRARY_PATH-}${LD_LIBRARY_PATH:+:}${1:?}"
+  fi
+}
+
+append_dir_from_all_partitions_to_ld_library_path()
+{
+  append_to_ld_library_path "${VENDOR_PATH:-/vendor}/${1:?}"
+  append_to_ld_library_path "${SYS_PATH:?}/${1:?}"
+  append_to_ld_library_path "${PRODUCT_PATH:-/product}/${1:?}"
+  append_to_ld_library_path "/apex/com.android.runtime/${1:?}"
+  append_to_ld_library_path "/apex/com.android.art/${1:?}"
+  append_to_ld_library_path "/apex/com.android.i18n/${1:?}"
+  append_to_ld_library_path "/apex/sharedlibs/${1:?}"
+}
+
 display_basic_info()
 {
+  BASIC_INFO_DISPLAYED='true'
   ui_msg "$(write_separator_line "${#MODULE_NAME}" '-' || :)"
   ui_msg "${MODULE_NAME:?}"
   ui_msg "${MODULE_VERSION:?}"
@@ -1056,18 +1255,28 @@ display_basic_info()
 
 display_info()
 {
-  ui_msg "Brand: ${BUILD_BRAND?}"
-  ui_msg "Manufacturer: ${BUILD_MANUFACTURER?}"
-  ui_msg "Model: ${BUILD_MODEL?}"
-  ui_msg "Device: ${BUILD_DEVICE?}"
-  ui_msg "Product: ${BUILD_PRODUCT?}"
-  ui_msg "Emulator: ${IS_EMU:?}"
-  ui_msg "Fake signature permission: ${FAKE_SIGN_PERMISSION?}"
-  ui_msg_empty_line
-  ui_msg "Recovery: ${RECOVERY_NAME?}"
-  ui_msg "Recovery API version: ${RECOVERY_API_VER-}"
-  ui_msg_empty_line
-  ui_msg "First installation: ${FIRST_INSTALLATION:?}"
+  ADVANCED_INFO_DISPLAYED='true'
+  if test "${1-}" != 'error'; then
+    ui_msg "First installation: ${FIRST_INSTALLATION:?}"
+    ui_msg "Android API: ${API:?}"
+    if test -n "${CPU-}" && test -n "${CPU64-}"; then
+      ui_msg "64-bit CPU arch: ${CPU64:?}"
+      ui_msg "32-bit CPU arch: ${CPU:?}"
+    fi
+    if test -n "${ARCH_LIST-}"; then
+      ui_msg "ABI list: ${ARCH_LIST?}"
+    fi
+    ui_msg_empty_line
+    ui_msg "Brand: ${BUILD_BRAND?}"
+    ui_msg "Manufacturer: ${BUILD_MANUFACTURER?}"
+    ui_msg "Model: ${BUILD_MODEL?}"
+    ui_msg "Device: ${BUILD_DEVICE?}"
+    ui_msg "Product: ${BUILD_PRODUCT?}"
+    ui_msg "Emulator: ${IS_EMU:?}"
+    ui_msg "Fake signature permission: ${FAKE_SIGN_PERMISSION?}"
+    ui_msg_empty_line
+  fi
+
   ui_msg "Boot mode: ${BOOTMODE:?}"
   ui_msg "Sideload: ${SIDELOAD:?}"
   if test -n "${ZIPINSTALL_VERSION?}"; then
@@ -1075,17 +1284,8 @@ display_info()
   else
     ui_msg "Zip install: ${ZIP_INSTALL?}"
   fi
+  ui_msg_empty_line
   ui_msg "Battery level: ${BATTERY_LEVEL:?}"
-  ui_msg_empty_line
-  ui_msg "Android API: ${API:?}"
-  if test -n "${CPU-}" && test -n "${CPU64-}"; then
-    ui_msg "64-bit CPU arch: ${CPU64:?}"
-    ui_msg "32-bit CPU arch: ${CPU:?}"
-  fi
-  if test -n "${ARCH_LIST-}"; then
-    ui_msg "ABI list: ${ARCH_LIST?}"
-  fi
-  ui_msg_empty_line
   ui_msg "Boot reason: ${BOOT_REASON?}"
   ui_msg "Current slot: ${SLOT?}$(test "${VIRTUAL_AB?}" != 'true' || printf '%s\n' ' (Virtual A/B)' || :)"
   ui_msg "Device locked state: ${DEVICE_STATE?}"
@@ -1094,46 +1294,58 @@ display_info()
   ui_msg "Dynamic partitions: ${DYNAMIC_PARTITIONS?}"
   ui_msg "Recovery fake system: ${RECOVERY_FAKE_SYSTEM?}"
   ui_msg_empty_line
+  ui_msg "Recovery: ${RECOVERY_NAME?}"
+  ui_msg "Recovery API version: ${RECOVERY_API_VER-}"
+  ui_msg_empty_line
   ui_msg "Encryption state: ${ENCRYPTION_STATE?}"
   ui_msg "Encryption type: ${ENCRYPTION_TYPE?}"
   ui_msg "Encryption options: ${ENCRYPTION_OPTIONS?}"
   ui_msg_empty_line
-  ui_msg "System mountpoint: ${SYS_MOUNTPOINT?}"
-  ui_msg "System path: ${SYS_PATH?}"
-  ui_msg "Priv-app dir name: ${PRIVAPP_DIRNAME?}"
-  #ui_msg "Android root ENV: ${ANDROID_ROOT-}"
-  ui_msg_empty_line
+  if test "${1-}" != 'error'; then
+    ui_msg "System mountpoint: ${SYS_MOUNTPOINT?}"
+    ui_msg "System path: ${SYS_PATH?}"
+    ui_msg "Priv-app dir name: ${PRIVAPP_DIRNAME?}"
+    #ui_msg "Android root ENV: ${ANDROID_ROOT-}"
+    ui_msg_empty_line
+  fi
   ui_msg "Input devices: $(_list_input_devices || :)"
   ui_msg "$(write_separator_line "${#MODULE_NAME}" '-' || :)"
+}
+
+reset_unmount_vars()
+{
+  UNMOUNT_SYSTEM=0
+  UNMOUNT_VENDOR=0
+  UNMOUNT_PRODUCT=0
+  UNMOUNT_SYS_EXT=0
+  UNMOUNT_ODM=0
+  UNMOUNT_SYS_DLKM=0
+  UNMOUNT_APEX=0
+  UNMOUNT_DATA=0
 }
 
 initialize()
 {
   local _raw_arch_list _additional_data_mountpoint
 
-  UNMOUNT_SYSTEM=0
-  UNMOUNT_VENDOR=0
-  UNMOUNT_PRODUCT=0
-  UNMOUNT_SYS_EXT=0
-  UNMOUNT_ODM=0
-  UNMOUNT_DATA=0
+  reset_unmount_vars
+
+  VENDOR_PATH=''
+  PRODUCT_PATH=''
+  SYS_EXT_PATH=''
+  ODM_PATH=''
+  SYS_DLKM_PATH=''
+  DATA_PATH='/data'
+
+  VENDOR_RW='false'
+  PRODUCT_RW='false'
+  SYS_EXT_RW='false'
 
   # Make sure that the commands are still overridden here (most shells don't have the ability to export functions)
   if test "${TEST_INSTALL:-false}" != 'false' && test -f "${RS_OVERRIDE_SCRIPT:?}"; then
     # shellcheck source=SCRIPTDIR/../../recovery-simulator/inc/configure-overrides.sh
     command . "${RS_OVERRIDE_SCRIPT:?}" || ui_error "Sourcing override script failed with error: ${?}"
   fi
-
-  VENDOR_PATH=''
-  PRODUCT_PATH=''
-  SYS_EXT_PATH=''
-  ODM_PATH=''
-  DATA_PATH='/data'
-
-  VENDOR_RW='false'
-  PRODUCT_RW='false'
-  SYS_EXT_RW='false'
-  ODM_RW='false'
 
   BASE_SYSCONFIG_XML=''
 
@@ -1150,6 +1362,8 @@ initialize()
   BUILD_TYPE="$(simple_file_getprop 'buildType' "${TMP_PATH:?}/info.prop")" || ui_error 'Failed to parse build type'
   readonly BUILD_TYPE
   export BUILD_TYPE
+
+  BASIC_INFO_READY='true'
 
   _get_local_settings
 
@@ -1170,7 +1384,6 @@ initialize()
 
   if test "${DRY_RUN:?}" -gt 0; then
     ui_warning "DRY RUN mode ${DRY_RUN?} enabled. No files on your device will be modified!!!"
-    sleep 2> /dev/null '0.01' || : # Wait some time otherwise ui_debug may appear before the previous ui_warning
     ui_debug ''
   fi
 
@@ -1223,6 +1436,8 @@ initialize()
   if test "${BATTERY_LEVEL:?}" != 'unknown' && test "${BATTERY_LEVEL:?}" -lt 15; then
     ui_error "The battery is too low. Current level: ${BATTERY_LEVEL?}%" 108
   fi
+
+  MOST_INFO_READY='true'
 
   if is_device_locked; then
     if test "${BYPASS_LOCK_CHECK:?}" != 0; then
@@ -1350,33 +1565,33 @@ initialize()
     SYS_EXT_PATH="${LAST_MOUNTPOINT:?}"
     UNMOUNT_SYS_EXT="${LAST_PARTITION_MUST_BE_UNMOUNTED:?}"
   fi
+
   if mount_partition_if_possible 'odm' "${SLOT_SUFFIX:+odm}${SLOT_SUFFIX-}${NL:?}odm${NL:?}"; then
     ODM_PATH="${LAST_MOUNTPOINT:?}"
     UNMOUNT_ODM="${LAST_PARTITION_MUST_BE_UNMOUNTED:?}"
   fi
+  if mount_partition_if_possible 'system_dlkm' "${SLOT_SUFFIX:+system_dlkm}${SLOT_SUFFIX-}${NL:?}system_dlkm${NL:?}"; then
+    SYS_DLKM_PATH="${LAST_MOUNTPOINT:?}"
+    UNMOUNT_SYS_DLKM="${LAST_PARTITION_MUST_BE_UNMOUNTED:?}"
+  fi
 
-  LD_LIBRARY_PATH="${LD_LIBRARY_PATH-}${LD_LIBRARY_PATH:+:}${VENDOR_PATH:-/vendor}/lib64:${SYS_PATH:?}/lib64:${VENDOR_PATH:-/vendor}/lib:${SYS_PATH:?}/lib"
-  export LD_LIBRARY_PATH
+  if mount_apex_if_possible; then
+    UNMOUNT_APEX="${LAST_PARTITION_MUST_BE_UNMOUNTED:?}"
+  fi
+
+  ui_debug ''
+  unset LD_PRELOAD
+  export LD_LIBRARY_PATH="${LD_LIBRARY_PATH-}"
+  append_dir_from_all_partitions_to_ld_library_path 'lib64'
+  append_dir_from_all_partitions_to_ld_library_path 'lib'
+  append_dir_from_all_partitions_to_ld_library_path 'lib/arm'
+  ui_debug "LD_LIBRARY_PATH='${LD_LIBRARY_PATH-}'"
+  ui_debug ''
 
   _disable_write_locks
   _execute_system_remount
 
-  remount_read_write "${SYS_MOUNTPOINT:?}" || {
-    deinitialize
-
-    ui_msg_empty_line
-    ui_msg "Device: ${BUILD_DEVICE?}"
-    ui_msg_empty_line
-    ui_msg "Current slot: ${SLOT?}"
-    ui_msg "Device locked state: ${DEVICE_STATE?}"
-    ui_msg "Verified boot state: ${VERIFIED_BOOT_STATE?}"
-    ui_msg "Verity mode: ${VERITY_MODE?} (detection is unreliable)"
-    ui_msg "Dynamic partitions: ${DYNAMIC_PARTITIONS?}"
-    ui_msg "Recovery fake system: ${RECOVERY_FAKE_SYSTEM?}"
-    ui_msg_empty_line
-
-    ui_error "Remounting '${SYS_MOUNTPOINT?}' failed!!!" 30
-  }
+  remount_read_write "${SYS_MOUNTPOINT:?}" || ui_error "Remounting '${SYS_MOUNTPOINT?}' failed!!!" 30
 
   if test -n "${VENDOR_PATH?}"; then
     remount_read_write_if_possible "${VENDOR_PATH:?}" false && VENDOR_RW='true'
@@ -1387,12 +1602,9 @@ initialize()
   if test -n "${SYS_EXT_PATH?}"; then
     remount_read_write_if_possible "${SYS_EXT_PATH:?}" false && SYS_EXT_RW='true'
   fi
-  if test -n "${ODM_PATH?}"; then
-    : #remount_read_write_if_possible "${ODM_PATH:?}" false && ODM_RW='true'
-  fi
-  readonly VENDOR_PATH PRODUCT_PATH SYS_EXT_PATH ODM_PATH
-  export VENDOR_PATH PRODUCT_PATH SYS_EXT_PATH ODM_PATH
-  export VENDOR_RW PRODUCT_RW SYS_EXT_RW ODM_RW
+  readonly VENDOR_PATH PRODUCT_PATH SYS_EXT_PATH ODM_PATH SYS_DLKM_PATH
+  export VENDOR_PATH PRODUCT_PATH SYS_EXT_PATH ODM_PATH SYS_DLKM_PATH
+  export VENDOR_RW PRODUCT_RW SYS_EXT_RW
 
   _additional_data_mountpoint=''
   if test -n "${ANDROID_DATA-}" && test "${ANDROID_DATA:?}" != '/data'; then _additional_data_mountpoint="${ANDROID_DATA:?}"; fi
@@ -1459,15 +1671,24 @@ deinitialize()
 {
   if test "${UNMOUNT_DATA:?}" = '1' && test -n "${DATA_PATH?}"; then unmount_partition "${DATA_PATH:?}"; fi
 
+  unmount_apex_if_needed
+
+  if test "${UNMOUNT_SYS_DLKM:?}" = '1' && test -n "${SYS_DLKM_PATH?}"; then unmount_partition "${SYS_DLKM_PATH:?}"; fi
   if test "${UNMOUNT_ODM:?}" = '1' && test -n "${ODM_PATH?}"; then unmount_partition "${ODM_PATH:?}"; fi
+
   if test "${UNMOUNT_SYS_EXT:?}" = '1' && test -n "${SYS_EXT_PATH?}"; then unmount_partition "${SYS_EXT_PATH:?}"; fi
   if test "${UNMOUNT_PRODUCT:?}" = '1' && test -n "${PRODUCT_PATH?}"; then unmount_partition "${PRODUCT_PATH:?}"; fi
   if test "${UNMOUNT_VENDOR:?}" = '1' && test -n "${VENDOR_PATH?}"; then unmount_partition "${VENDOR_PATH:?}"; fi
 
   if test "${UNMOUNT_SYSTEM:?}" = '1' && test -n "${SYS_MOUNTPOINT-}"; then unmount_partition "${SYS_MOUNTPOINT:?}"; fi
 
+  reset_unmount_vars
+
   if test -e "${TMP_PATH:?}/system_mountpoint"; then
-    rmdir -- "${TMP_PATH:?}/system_mountpoint" || ui_error 'Failed to delete the temp system mountpoint'
+    rmdir -- "${TMP_PATH:?}/system_mountpoint" || {
+      ui_error_msg 'Failed to delete the temp system mountpoint'
+      exit 91
+    }
   fi
 }
 
@@ -1556,7 +1777,6 @@ prepare_installation()
 
   ui_msg 'Preparing installation...'
   _need_newline='false'
-  sleep 2> /dev/null '0.01' # It avoid the following output to be printed interleaved with the previous output
 
   if test "${API:?}" -ge 23; then
     if test "${API:?}" -ge 29; then # Android 10+
@@ -1909,7 +2129,7 @@ verify_disk_space()
   if test -n "${VENDOR_PATH?}"; then display_free_space "${VENDOR_PATH:?}" "$(get_free_disk_space_of_partition "${VENDOR_PATH:?}" || :)" "${VENDOR_RW:?}"; fi
   if test -n "${PRODUCT_PATH?}"; then display_free_space "${PRODUCT_PATH:?}" "$(get_free_disk_space_of_partition "${PRODUCT_PATH:?}" || :)" "${PRODUCT_RW:?}"; fi
   if test -n "${SYS_EXT_PATH?}"; then display_free_space "${SYS_EXT_PATH:?}" "$(get_free_disk_space_of_partition "${SYS_EXT_PATH:?}" || :)" "${SYS_EXT_RW:?}"; fi
-  if test -n "${ODM_PATH?}"; then display_free_space "${ODM_PATH:?}" "$(get_free_disk_space_of_partition "${ODM_PATH:?}" || :)" "${ODM_RW:?}"; fi
+  if test -n "${ODM_PATH?}"; then display_free_space "${ODM_PATH:?}" "$(get_free_disk_space_of_partition "${ODM_PATH:?}" || :)" 'false'; fi
 
   if test "${_needed_space_bytes:?}" -ge 0 && test "${_free_space_bytes:?}" -ge 0; then
     : # OK
@@ -2034,10 +2254,7 @@ finalize_correctly()
       delete_dir_if_empty "${SYS_PATH:?}/etc/zips"
       ui_msg 'Uninstallation finished.'
       ;;
-    *)
-      deinitialize
-      ui_error 'Invalid setup type'
-      ;;
+    *) ui_error 'Invalid setup type' ;;
   esac
 
   deinitialize
@@ -3507,7 +3724,6 @@ _live_setup_key_test()
   test "${DEBUG_LOG_ENABLED:?}" -ne 1 || display_info
 
   _live_setup_initialize
-  sleep '0.05'
 
   _count=0
   while test "${_count:?}" -lt 8 && _count="$((_count + 1))"; do
