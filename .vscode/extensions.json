@@ -1,0 +1,11 @@
+{
+    "recommendations": [
+        "timonwong.shellcheck",
+        "marcovr.actions-shell-scripts",
+        "codecov.codecov"
+    ],
+    "unwantedRecommendations": [
+        "vscjava.vscode-java-pack",
+        "codacy-app.codacy"
+    ]
+}

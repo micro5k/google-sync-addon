@@ -5,11 +5,11 @@
 numericId=928871
 id=google-sync-addon
 name=Google sync add-on
-version=v1.3.2.27-alpha
+version=v1.3.2.36-alpha
 versionCode=6
 author=ale5000
 description=It installs Google sync adapters on Android.
-applicationId=net.ale5000.google_sync_addon.ota
+group=net.ale5000
 support=https://github.com/micro5k/google-sync-addon/issues
 donate=https://liberapay.com/microg-unofficial-by-ale5000/donate
 minApi=19

@@ -1,0 +1,20 @@
+{
+    "shellcheck.enable": true,
+    "shellcheck.enableQuickFix": true,
+    "shellcheck.logLevel": "trace",
+    "shellcheck.run": "onType",
+
+    "codecov.coverage.enabled": true,
+
+    "codacy.guardrails.analyzeGeneratedCode": "disabled",
+    "codacy.guardrails.instructionsFile": "manual",
+
+    "java.import.gradle.enabled": false,
+    "java.import.maven.enabled": false,
+    "java.autobuild.enabled": false,
+    "java.showBuildStatusOnStart.enabled": "off",
+    "java.server.launchMode": "LightWeight",
+
+    "task.autoDetect": "off",
+    "gradle.autoDetect": "off"
+}

@@ -33,7 +33,7 @@ indent_style = tab
 [*.bat]
 end_of_line = crlf
 
-[*.{xml,json}]
+[*.{xml,json,gradle}]
 indent_size = 4
 
 [*.{yml,yaml,rst,md,json}]
@@ -41,6 +41,9 @@ quote_type = double
 
 [zip-content/customize.sh]
 keep_padding = true
+
+[.git-hooks/*]
+shell_variant = bash
 
 [recovery-simulator/recovery.sh]
 shell_variant = bash

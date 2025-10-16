@@ -81,7 +81,7 @@ _print_text()
     printf 1>&2 "${1:?}\n" "${2?}"
   fi
 
-  if test "${DEBUG_LOG_ENABLED:?}" = '1' && test -n "${ORIGINAL_STDERR_FD_PATH?}"; then printf '%s\n' "${2?}" 1>> "${ORIGINAL_STDERR_FD_PATH:?}"; fi
+  if test "${DEBUG_LOG_ENABLED:?}" = '1' && test -n "${STDERR_FD_PATH?}"; then printf '%s\n' "${2?}" 1>> "${STDERR_FD_PATH:?}"; fi
 }
 
 ui_error()
@@ -138,7 +138,9 @@ ui_msg_empty_line()
 {
   if test "${RECOVERY_OUTPUT:?}" = 'true'; then
     _show_msg_in_recovery ' '
-    test "${TEST_INSTALL:-false}" = 'false' || sleep 2> /dev/null '0.01' || :
+    # Recovery messages may appear with a slight delay compared to messages written to STDOUT/STDERR,
+    # which may cause unordered text in the recovery log, where all outputs are merged together
+    sleep 2> /dev/null '0.01' || :
   else
     _print_text '%s' ''
   fi
@@ -325,6 +327,21 @@ _detect_battery_level()
 _mount_helper()
 {
   if test -n "${DEVICE_MOUNT-}" && PATH="${PREVIOUS_PATH:?}" "${DEVICE_MOUNT:?}" 2> /dev/null "${@}"; then
+    :
+  else
+    mount "${@}" || return "${?}"
+  fi
+
+  return 0
+}
+
+_mount_ext4_helper()
+{
+  if test -n "${DEVICE_MOUNT-}" && PATH="${PREVIOUS_PATH:?}" "${DEVICE_MOUNT:?}" -t 'ext4' "${@}"; then
+    :
+  elif test -n "${DEVICE_MOUNT-}" && PATH="${PREVIOUS_PATH:?}" "${DEVICE_MOUNT:?}" "${@}"; then
+    :
+  elif mount -t 'ext4' "${@}"; then
     :
   else
     mount "${@}" || return "${?}"
@@ -551,55 +568,124 @@ _prepare_mountpoint()
   return 0
 }
 
+_find_apex()
+{
+  if test -d "${2:?}/${1:?}"; then
+    printf '%s\n' "${2:?}/${1:?}"
+  elif test -d "${2:?}/${1:?}.release"; then
+    printf '%s\n' "${2:?}/${1:?}.release"
+  elif test -d "${2:?}/${1:?}.debug"; then
+    printf '%s\n' "${2:?}/${1:?}.debug"
+  else
+    return 1
+  fi
+}
+
+# Cases to consider:
+# - /system/apex/com.android.[name].apex
+# - /system/apex/com.android.[name].release.apex
+# - /system/apex/com.android.[name].debug.apex
+# - /system/apex/com.android.[name]
+# - /system/apex/com.android.[name].release
+# - /system/apex/com.android.[name].debug
+# - /system/apex/com.google.android.[name].apex
+# - /system/apex/com.google.android.[name].release.apex
+# - /system/apex/com.google.android.[name].debug.apex
+# - /system/apex/com.google.android.[name]
+# - /system/apex/com.google.android.[name].release
+# - /system/apex/com.google.android.[name].debug
+
+_find_apex_on_system()
+{
+  local _search _apex_path
+
+  _search="${1:?}"
+  set -- "${SYS_PATH:?}/apex/com.android.${1:?}."* "${SYS_PATH:?}/apex/com.android.${1:?}" "${SYS_PATH:?}/apex/com.google.android.${1:?}."* "${SYS_PATH:?}/apex/com.google.android.${1:?}" || {
+    ui_warning 'Failed expanding inside _find_apex_on_system()'
+    return 2
+  }
+
+  for _apex_path in "${@}"; do
+    if test -e "${_apex_path:?}"; then
+      printf '%s\n' "${_apex_path:?}"
+      return 0
+    fi
+  done
+
+  if test "${_search:?}" = 'tzdata' && _apex_path="${SYS_PATH:?}/apex/com.google.android.${_search:?}6.apex" && test -e "${_apex_path:?}"; then
+    printf '%s\n' "${_apex_path:?}"
+    return 0
+  fi
+
+  return 1
+}
+
 _mount_single_apex()
 {
-  local _val _apex_file _block _found
+  local _name _apex_origin _block _found _val
 
   unset LAST_APEX_MOUNTPOINT
+  _name="com.android.${1:?}"
   _found='false'
+  _apex_origin=''
+  _block=''
 
-  if test -e "/dev/block/mapper/${1:?}"; then
-    ui_debug "  Checking ${1?}..."
+  if LAST_APEX_MOUNTPOINT="$(_find_apex "${_name:?}" "${2:?}")"; then
+    ui_debug "  Checking ${1?} apex..."
+    ui_debug "  Already mounted: ${LAST_APEX_MOUNTPOINT?}"
+    return 3 # Already mounted
+  fi
 
-    _block="$(_canonicalize "/dev/block/mapper/${1:?}")"
+  if test -e "/dev/block/mapper/${_name:?}"; then
+    ui_debug "  Checking ${1?} apex..."
+    _block="$(_canonicalize "/dev/block/mapper/${_name:?}")"
     _found='true'
-    ui_msg "  Found 'mapper/${1?}' block at: ${_block?}" # Reuse existing
+    ui_msg "  Found 'mapper/${_name?}' block at: ${_block?}" # Reuse existing
   fi
 
   if test "${_found:?}" = 'false'; then
-    _apex_file="${SYS_PATH:?}/apex/${1:?}.apex"
-    test -f "${_apex_file:?}" || return 2
+    _apex_origin="$(_find_apex_on_system "${1:?}")" || return 2
+    ui_debug "  Checking ${1?} apex..."
 
-    ui_debug "  Checking ${1?}..."
-
-    if _val="$(_losetup_helper 2> /dev/null -j "${_apex_file:?}" | tail -n 1 | cut -d ':' -f '1')" && test -n "${_val?}" && test -b "${_val:?}"; then
+    if _val="$(_losetup_helper 2> /dev/null -j "${_apex_origin:?}" | tail -n 1 | cut -d ':' -f '1')" && test -n "${_val?}" && test -b "${_val:?}"; then
       _block="${_val:?}"
       _found='true'
       ui_msg "  Found loop of '${1?}' at: ${_block?}" # Reuse existing
     fi
 
-    if test "${_found:?}" = 'false' && mkdir -p -- "${TMP_PATH:?}/apex/${1:?}" && unzip -oq "${_apex_file:?}" 'apex_payload.img' -d "${TMP_PATH:?}/apex/${1:?}"; then
-      if _val="$(_losetup_helper -r -f)" && test -n "${_val?}" && test -b "${_val:?}" && _losetup_helper -r -- "${_val:?}" "${TMP_PATH:?}/apex/${1:?}/apex_payload.img"; then
+    if
+      test "${_found:?}" = 'false' &&
+        test -f "${_apex_origin:?}" && # Only needed for APEX files, not for APEX folders (flattened APEX)
+        mkdir -p -- "${TMP_PATH:?}/apex/${_name:?}" &&
+        unzip -oq "${_apex_origin:?}" 'apex_payload.img' -d "${TMP_PATH:?}/apex/${_name:?}" &&
+        test -f "${TMP_PATH:?}/apex/${_name:?}/apex_payload.img"
+    then
+      if _val="$(_losetup_helper -r -f)" && test -n "${_val?}" && test -b "${_val:?}" && _losetup_helper -r -- "${_val:?}" "${TMP_PATH:?}/apex/${_name:?}/apex_payload.img"; then
         _block="${_val:?}"
         _found='true'
         ASSOCIATED_LOOP_DEVICES="${_block:?}${NL:?}${ASSOCIATED_LOOP_DEVICES?}"
-        ui_msg "  Associated loop device: ${_block?}" # Create new association
+        ui_msg "  Associated '${_apex_origin?}' to loop device: ${_block?}" # Associated a loop
       fi
     fi
   fi
 
-  if test "${_found:?}" != 'false' && mkdir -p -- "${2:?}"; then
-    if _mount_helper -o 'ro,nodev,noatime' "${_block:?}" "${2:?}"; then
-      rm -f -- "${TMP_PATH:?}/apex/${1:?}/apex_payload.img" || :
-      MOUNTED_APEX_CHILDREN="${2:?}${NL:?}${MOUNTED_APEX_CHILDREN?}"
-      LAST_APEX_MOUNTPOINT="${2:?}"
+  if mkdir -p -- "${2:?}/${_name:?}"; then
+    if test -z "${_block?}" && test -n "${_apex_origin?}" && test -d "${_apex_origin:?}" && _mount_helper -o 'bind,ro' "${_apex_origin:?}" "${2:?}/${_name:?}"; then
+      # Flattened APEX
+      LAST_APEX_MOUNTPOINT="${2:?}/${_name:?}"
+      MOUNTED_APEX_CHILDREN="${LAST_APEX_MOUNTPOINT:?}${NL:?}${MOUNTED_APEX_CHILDREN?}"
+      return 0
+    elif test -n "${_block?}" && _mount_ext4_helper -o 'ro,nodev,noatime,norecovery' "${_block:?}" "${2:?}/${_name:?}"; then
+      rm -f -- "${TMP_PATH:?}/apex/${_name:?}/apex_payload.img" || :
+      LAST_APEX_MOUNTPOINT="${2:?}/${_name:?}"
+      MOUNTED_APEX_CHILDREN="${LAST_APEX_MOUNTPOINT:?}${NL:?}${MOUNTED_APEX_CHILDREN?}"
       return 0
     fi
-    rmdir -- "${2:?}" || :
+    rmdir -- "${2:?}/${_name:?}" || :
   fi
-  rm -f -- "${TMP_PATH:?}/apex/${1:?}/apex_payload.img" || :
+  rm -f -- "${TMP_PATH:?}/apex/${_name:?}/apex_payload.img" || :
 
-  ui_debug "  Block not found for: ${1?}"
+  ui_warning "Loop or block not found for: ${1?}"
   return 1
 }
 
@@ -607,10 +693,8 @@ _mount_apex_children()
 {
   local _child
 
-  for _child in 'com.android.runtime' 'com.android.art' 'com.android.i18n'; do
-    test ! -e "${1:?}/${_child:?}" || continue # Already exist
-
-    if _mount_single_apex "${_child:?}" "${1:?}/${_child:?}"; then
+  for _child in 'runtime' 'art' 'i18n' 'tzdata'; do
+    if _mount_single_apex "${_child:?}" "${1:?}"; then
       ui_debug "  Mounted: ${LAST_APEX_MOUNTPOINT?}"
     fi
   done
@@ -620,19 +704,20 @@ _mount_apex_children()
 
 mount_apex_if_possible()
 {
-  local _partition_name _mp
+  local _mp
+
   unset LAST_MOUNTPOINT
   LAST_PARTITION_MUST_BE_UNMOUNTED=0
-
-  _partition_name="apex"
   _mp='/apex'
 
   test -d "${SYS_PATH:?}/apex" || return 3
   ui_debug ''
-  ui_debug "Checking ${_partition_name?}..."
+  ui_debug "Checking apex..."
 
   if is_mounted "${_mp:?}"; then
-    test "${BOOTMODE:?}" = 'true' || _mount_apex_children "${_mp:?}"
+    if test "${BOOTMODE:?}" != 'true'; then
+      if remount_read_write_if_possible "${_mp:?}" false; then _mount_apex_children "${_mp:?}"; fi
+    fi
 
     LAST_MOUNTPOINT="${_mp:?}"
     ui_debug "Already mounted: ${LAST_MOUNTPOINT?}"
@@ -640,7 +725,7 @@ mount_apex_if_possible()
   fi
 
   test -e "${_mp:?}" || {
-    ui_warning "Mounting of ${_partition_name?} failed (missing mountpoint)"
+    ui_warning "Mounting of apex failed (missing mountpoint)"
     return 2
   }
 
@@ -649,7 +734,7 @@ mount_apex_if_possible()
     LAST_PARTITION_MUST_BE_UNMOUNTED=1
     ui_debug "  Mounted: ${LAST_MOUNTPOINT?}" # Successfully mounted
   else
-    ui_warning "Mounting of ${_partition_name?} failed"
+    ui_warning "Mounting of apex failed"
     return 2
   fi
 
@@ -661,9 +746,7 @@ mount_apex_if_possible()
 
 unmount_apex_if_needed()
 {
-  local _mp _name _backup_ifs
-
-  _mp='/apex'
+  local _name _backup_ifs
 
   _backup_ifs="${IFS-}"
   IFS="${NL:?}"
@@ -690,13 +773,14 @@ unmount_apex_if_needed()
   done
   ASSOCIATED_LOOP_DEVICES=''
 
-  test "${UNMOUNT_APEX:?}" = '1' || return 0
+  test "${UNMOUNT_APEX:?}" = '1' || return
+  test -n "${APEX_PATH?}" || return
 
-  for _name in 'com.android.runtime' 'com.android.art' 'com.android.i18n'; do
-    test -e "${_mp:?}/${_name:?}" || continue
-    unmount_partition "${_mp:?}/${_name:?}"
+  for _name in "${APEX_PATH:?}"/*; do
+    test -e "${_name:?}" || continue
+    unmount_partition "${_name:?}"
   done
-  unmount_partition "${_mp:?}"
+  unmount_partition "${APEX_PATH:?}"
 }
 
 _manual_partition_mount()
@@ -1080,8 +1164,10 @@ reset_appops_if_needed()
 
 _write_test_helper()
 {
+  local _free_space
+
   touch -- "${1:?}/write-test-file.dat" || return 1
-  if test "${FIRST_INSTALLATION:?}" = 'true'; then
+  if test "${FIRST_INSTALLATION:?}" = 'true' && _free_space="$(get_free_disk_space_of_partition "${1:?}")" && test "${_free_space:?}" -ge 512; then
     printf '%512s' '' 1> "${1:?}/write-test-file.dat" || return 2
   fi
   test -f "${1:?}/write-test-file.dat" || return 3
@@ -1231,15 +1317,30 @@ append_to_ld_library_path()
   fi
 }
 
+append_apex_dirs_to_ld_library_path()
+{
+  local _cur_apex_dir
+
+  if _cur_apex_dir="$(_find_apex "${1:?}" "${APEX_PATH:?}")"; then
+    append_to_ld_library_path "${_cur_apex_dir:?}/${2:?}"
+    append_to_ld_library_path "${_cur_apex_dir:?}/${2:?}/bionic"
+  fi
+}
+
 append_dir_from_all_partitions_to_ld_library_path()
 {
-  append_to_ld_library_path "${VENDOR_PATH:-/vendor}/${1:?}"
   append_to_ld_library_path "${SYS_PATH:?}/${1:?}"
-  append_to_ld_library_path "${PRODUCT_PATH:-/product}/${1:?}"
-  append_to_ld_library_path "/apex/com.android.runtime/${1:?}"
-  append_to_ld_library_path "/apex/com.android.art/${1:?}"
-  append_to_ld_library_path "/apex/com.android.i18n/${1:?}"
-  append_to_ld_library_path "/apex/sharedlibs/${1:?}"
+  append_to_ld_library_path "${SYS_EXT_PATH:-%empty}/${1:?}"
+  append_to_ld_library_path "${VENDOR_PATH:-%empty}/${1:?}"
+  append_to_ld_library_path "${SYS_PATH:?}/vendor/${1:?}"
+  append_to_ld_library_path "${PRODUCT_PATH:-%empty}/${1:?}"
+  if test -n "${APEX_PATH?}"; then
+    append_apex_dirs_to_ld_library_path 'com.android.runtime' "${1:?}"
+    append_apex_dirs_to_ld_library_path 'com.android.art' "${1:?}"
+    append_apex_dirs_to_ld_library_path 'com.android.i18n' "${1:?}"
+    append_apex_dirs_to_ld_library_path 'com.android.tzdata' "${1:?}"
+    append_apex_dirs_to_ld_library_path 'sharedlibs' "${1:?}"
+  fi
 }
 
 display_basic_info()
@@ -1305,11 +1406,31 @@ display_info()
     ui_msg "System mountpoint: ${SYS_MOUNTPOINT?}"
     ui_msg "System path: ${SYS_PATH?}"
     ui_msg "Priv-app dir name: ${PRIVAPP_DIRNAME?}"
-    #ui_msg "Android root ENV: ${ANDROID_ROOT-}"
     ui_msg_empty_line
   fi
   ui_msg "Input devices: $(_list_input_devices || :)"
   ui_msg "$(write_separator_line "${#MODULE_NAME}" '-' || :)"
+}
+
+_set_android_env_vars()
+{
+  export ANDROID_ROOT="${SYS_PATH:?}"
+
+  if test -n "${APEX_PATH?}"; then
+    if ANDROID_RUNTIME_ROOT="$(_find_apex 'com.android.runtime' "${APEX_PATH:?}")"; then export ANDROID_RUNTIME_ROOT; else unset ANDROID_RUNTIME_ROOT; fi
+    if ANDROID_ART_ROOT="$(_find_apex 'com.android.art' "${APEX_PATH:?}")"; then export ANDROID_ART_ROOT; else unset ANDROID_ART_ROOT; fi
+    if ANDROID_I18N_ROOT="$(_find_apex 'com.android.i18n' "${APEX_PATH:?}")"; then export ANDROID_I18N_ROOT; else unset ANDROID_I18N_ROOT; fi
+    if ANDROID_TZDATA_ROOT="$(_find_apex 'com.android.tzdata' "${APEX_PATH:?}")"; then export ANDROID_TZDATA_ROOT; else unset ANDROID_TZDATA_ROOT; fi
+  fi
+
+  unset LD_PRELOAD
+
+  export LD_LIBRARY_PATH="${LD_LIBRARY_PATH-}"
+  append_dir_from_all_partitions_to_ld_library_path 'lib64'
+  append_dir_from_all_partitions_to_ld_library_path 'lib'
+  append_dir_from_all_partitions_to_ld_library_path 'lib/arm'
+
+  export DYLD_LIBRARY_PATH="${LD_LIBRARY_PATH?}"
 }
 
 reset_unmount_vars()
@@ -1335,6 +1456,7 @@ initialize()
   SYS_EXT_PATH=''
   ODM_PATH=''
   SYS_DLKM_PATH=''
+  APEX_PATH=''
   DATA_PATH='/data'
 
   VENDOR_RW='false'
@@ -1449,7 +1571,7 @@ initialize()
 
   if is_bootloader_locked; then
     if test "${BYPASS_LOCK_CHECK:?}" != 0; then
-      ui_warning "The boot loader is locked!!! Verified boot state: ${VERIFIED_BOOT_STATE?}" 37
+      ui_warning "The boot loader is locked!!! Verified boot state: ${VERIFIED_BOOT_STATE?}"
     else
       ui_error "The boot loader is locked!!! Verified boot state: ${VERIFIED_BOOT_STATE?}" 37
     fi
@@ -1574,17 +1696,14 @@ initialize()
     SYS_DLKM_PATH="${LAST_MOUNTPOINT:?}"
     UNMOUNT_SYS_DLKM="${LAST_PARTITION_MUST_BE_UNMOUNTED:?}"
   fi
-
   if mount_apex_if_possible; then
+    APEX_PATH="${LAST_MOUNTPOINT:?}"
     UNMOUNT_APEX="${LAST_PARTITION_MUST_BE_UNMOUNTED:?}"
   fi
 
+  _set_android_env_vars
+
   ui_debug ''
-  unset LD_PRELOAD
-  export LD_LIBRARY_PATH="${LD_LIBRARY_PATH-}"
-  append_dir_from_all_partitions_to_ld_library_path 'lib64'
-  append_dir_from_all_partitions_to_ld_library_path 'lib'
-  append_dir_from_all_partitions_to_ld_library_path 'lib/arm'
   ui_debug "LD_LIBRARY_PATH='${LD_LIBRARY_PATH-}'"
   ui_debug ''
 
@@ -1602,8 +1721,8 @@ initialize()
   if test -n "${SYS_EXT_PATH?}"; then
     remount_read_write_if_possible "${SYS_EXT_PATH:?}" false && SYS_EXT_RW='true'
   fi
-  readonly VENDOR_PATH PRODUCT_PATH SYS_EXT_PATH ODM_PATH SYS_DLKM_PATH
-  export VENDOR_PATH PRODUCT_PATH SYS_EXT_PATH ODM_PATH SYS_DLKM_PATH
+  readonly VENDOR_PATH PRODUCT_PATH SYS_EXT_PATH ODM_PATH SYS_DLKM_PATH APEX_PATH
+  export VENDOR_PATH PRODUCT_PATH SYS_EXT_PATH ODM_PATH SYS_DLKM_PATH APEX_PATH
   export VENDOR_RW PRODUCT_RW SYS_EXT_RW
 
   _additional_data_mountpoint=''
@@ -1698,10 +1817,7 @@ clean_previous_installations()
 
   if test "${SETUP_TYPE?}" != 'uninstall'; then
     ui_msg_empty_line
-
     _initial_free_space="$(get_free_disk_space_of_partition "${SYS_PATH:?}")" || _initial_free_space='-1'
-    test "${_initial_free_space:?}" != 0 || ui_error "There is NO free space on '${SYS_PATH?}' ($(get_file_system "${SYS_PATH?}" || :))" 31
-
     _write_test "${SYS_PATH:?}" || ui_error "Something is wrong because '${SYS_PATH?}' ($(get_file_system "${SYS_PATH?}" || :)) is NOT really writable!!! Return code: ${?}" 30
   else
     ui_msg 'Uninstalling...'
@@ -1720,16 +1836,6 @@ clean_previous_installations()
     _wait_free_space_changes 5 "${_initial_free_space:?}" # Reclaiming free space may take some time
     ui_debug ''
   fi
-}
-
-_move_app_into_subfolder()
-{
-  local _path_without_ext
-  _path_without_ext="$(remove_ext "${1:?}")"
-
-  test ! -e "${_path_without_ext:?}" || ui_error "Folder already exists => '${_path_without_ext?}'"
-  mkdir -p -- "${_path_without_ext:?}" || ui_error "Failed to create the folder '${_path_without_ext?}'"
-  mv -f -- "${1:?}" "${_path_without_ext:?}/" || ui_error "Failed to move the file '${1?}' to folder '${_path_without_ext?}/'"
 }
 
 _replace_perm_placeholders_in_file()
@@ -1778,61 +1884,37 @@ prepare_installation()
   ui_msg 'Preparing installation...'
   _need_newline='false'
 
-  if test "${API:?}" -ge 23; then
-    if test "${API:?}" -ge 29; then # Android 10+
-      _need_newline='true'
-      replace_permission_placeholders 'ACCESS_BACKGROUND_LOCATION' 'true'
+  # Recovery messages may appear with a slight delay compared to messages written to STDOUT/STDERR,
+  # which may cause unordered text in the recovery log, where all outputs are merged together
+  sleep 2> /dev/null '0.01' || :
 
-      if test "${API:?}" -ge 31; then # Android 12+
-        replace_permission_placeholders 'BLUETOOTH_ADVERTISE'
-        replace_permission_placeholders 'BLUETOOTH_CONNECT'
-        replace_permission_placeholders 'BLUETOOTH_SCAN'
+  if test "${API:?}" -ge 29; then # Android 10+
+    _need_newline='true'
+    replace_permission_placeholders 'ACCESS_BACKGROUND_LOCATION' 'true'
 
-        if test "${API:?}" -ge 33; then # Android 13+
-          replace_permission_placeholders 'POST_NOTIFICATIONS'
-        fi
+    if test "${API:?}" -ge 31; then # Android 12+
+      replace_permission_placeholders 'BLUETOOTH_ADVERTISE'
+      replace_permission_placeholders 'BLUETOOTH_CONNECT'
+      replace_permission_placeholders 'BLUETOOTH_SCAN'
+
+      if test "${API:?}" -ge 33; then # Android 13+
+        replace_permission_placeholders 'POST_NOTIFICATIONS'
       fi
     fi
+  fi
 
-    if test "${FAKE_SIGN_PERMISSION:?}" = 'true'; then
-      _need_newline='true'
-      replace_permission_placeholders 'FAKE_PACKAGE_SIGNATURE'
-    fi
+  if test "${API:?}" -ge 23 && test "${FAKE_SIGN_PERMISSION:?}" = 'true'; then
+    _need_newline='true'
+    replace_permission_placeholders 'FAKE_PACKAGE_SIGNATURE'
   fi
 
   test "${_need_newline:?}" = 'false' || ui_debug ''
-
-  if test "${API}" -lt 23; then
-    delete_temp "files/etc/default-permissions"
-  fi
 
   if test "${PRIVAPP_DIRNAME:?}" != 'priv-app' && test -e "${TMP_PATH:?}/files/priv-app"; then
     ui_debug "  Merging priv-app folder with ${PRIVAPP_DIRNAME?} folder..."
     mkdir -p -- "${TMP_PATH:?}/files/${PRIVAPP_DIRNAME:?}" || ui_error "Failed to create the dir '${TMP_PATH?}/files/${PRIVAPP_DIRNAME?}'"
     copy_dir_content "${TMP_PATH:?}/files/priv-app" "${TMP_PATH:?}/files/${PRIVAPP_DIRNAME:?}"
     delete_temp "files/priv-app"
-  fi
-
-  if test "${API:?}" -ge 21; then
-    _backup_ifs="${IFS:-}"
-    IFS=''
-
-    # Move apps into subfolders
-    ui_debug '  Moving apps into subfolders...'
-    if test -e "${TMP_PATH:?}/files/priv-app"; then
-      for entry in "${TMP_PATH:?}/files/priv-app"/*; do
-        if test ! -f "${entry:?}"; then continue; fi
-        _move_app_into_subfolder "${entry:?}"
-      done
-    fi
-    if test -e "${TMP_PATH:?}/files/app"; then
-      for entry in "${TMP_PATH:?}/files/app"/*; do
-        if test ! -f "${entry:?}"; then continue; fi
-        _move_app_into_subfolder "${entry:?}"
-      done
-    fi
-
-    IFS="${_backup_ifs:-}"
   fi
 
   delete_temp "files/etc/zips"
@@ -2175,17 +2257,13 @@ perform_secure_copy_to_device()
   touch 2> /dev/null "${SYS_PATH:?}/etc/zips/${MODULE_ID:?}.failed" || :
 
   ui_debug ''
-  df 2> /dev/null -B1 -P -- "${SYS_MOUNTPOINT:?}" || :
-  ui_debug ''
-  df 2> /dev/null -h -T -- "${SYS_MOUNTPOINT:?}" || df -h -- "${SYS_MOUNTPOINT:?}" || :
-  ui_debug ''
-
   display_free_space "${DEST_PATH:?}" "$(get_free_disk_space_of_partition "${DEST_PATH:?}" || :)" 'true'
 
   local _ret_code
   _ret_code=5
   ! _is_free_space_error "${_error_text?}" || _ret_code=122
 
+  ui_debug ''
   if test -n "${_error_text?}"; then
     ui_error "Failed to copy '${1?}' to the device due to => $(printf '%s\n' "${_error_text?}" | head -n 1 || :)" "${_ret_code?}"
   fi
@@ -3885,6 +3963,23 @@ find_test()
   find "$1" -type d -exec echo 'FOLDER:' '{}' ';' -o -type f -exec echo 'FILE:' '{}' ';' | while read -r x; do echo "${x}"; done
 }
 
+stderr_init()
+{
+  test "${DEBUG_LOG_ENABLED:-0}" = '1' || return
+
+  if test -n "${BACKUP_STDERR-}" && STDERR_FD_PATH="/proc/${PPID:?}/fd/${BACKUP_STDERR:?}" && test -c "${STDERR_FD_PATH:?}"; then
+    :
+  elif command 1> /dev/null -v 'tty' && STDERR_FD_PATH="$(tty)" && test -c "${STDERR_FD_PATH:?}"; then
+    ui_warning "Fallback to tty: ${STDERR_FD_PATH?}"
+  else
+    STDERR_FD_PATH=''
+    ui_warning "Cannot write to STDERR"
+  fi
+
+  export STDERR_FD_PATH
+}
+
 ### INITIALIZATION ###
 
+stderr_init
 initialize || exit "${?}"
