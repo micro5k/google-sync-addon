@@ -34,7 +34,7 @@ if test "${SETUP_TYPE:?}" = 'install'; then
   if
     setup_app "${APP_CONTACTSSYNC:?}" 'APP_CONTACTSSYNC' 'Google Contacts Sync 12' 'GoogleContactsSyncAdapter12' 'priv-app' ||
       setup_app "${APP_CONTACTSSYNC:?}" 'APP_CONTACTSSYNC' 'Google Contacts Sync 8' 'GoogleContactsSyncAdapter8' 'priv-app' ||
-      setup_app "${APP_CONTACTSSYNC:?}" 'APP_CONTACTSSYNC' 'Google Contacts Sync 4.4' 'GoogleContactsSyncAdapter44' 'app'
+      setup_app "${APP_CONTACTSSYNC:?}" 'APP_CONTACTSSYNC' 'Google Contacts Sync 4.4' 'GoogleContactsSyncAdapter4.4' 'app'
   then
     BACKUP_TRANSPORT_IS_OPTIONAL='false'
   fi
@@ -42,7 +42,7 @@ if test "${SETUP_TYPE:?}" = 'install'; then
   setup_app "${APP_CALENDARSYNC:?}" 'APP_CALENDARSYNC' 'Google Calendar Sync 6' 'GoogleCalendarSyncAdapter6' 'app' ||
     setup_app "${APP_CALENDARSYNC:?}" 'APP_CALENDARSYNC' 'Google Calendar Sync 5' 'GoogleCalendarSyncAdapter5' 'app'
 
-  setup_app 1 '' 'Google Backup Transport 4.4' 'GoogleBackupTransport44' 'priv-app' false "${BACKUP_TRANSPORT_IS_OPTIONAL:?}"
+  setup_app 1 '' 'Google Backup Transport 4.4' 'GoogleBackupTransport4.4' 'priv-app' false "${BACKUP_TRANSPORT_IS_OPTIONAL:?}"
 fi
 
 if test "${SETUP_TYPE:?}" = 'install'; then

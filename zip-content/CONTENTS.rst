@@ -41,10 +41,10 @@ Notes
 -----
 .. [#] <origin/priv-app/GoogleContactsSyncAdapter12.apk>
 .. [#] <origin/priv-app/GoogleContactsSyncAdapter8.apk>
-.. [#] <origin/app/GoogleContactsSyncAdapter44.apk>
+.. [#] <origin/app/GoogleContactsSyncAdapter4.4.apk>
 .. [#] <origin/app/GoogleCalendarSyncAdapter6.apk>
 .. [#] <origin/app/GoogleCalendarSyncAdapter5.apk>
-.. [#] <origin/priv-app/GoogleBackupTransport44.apk>
+.. [#] <origin/priv-app/GoogleBackupTransport4.4.apk>
 
 
 Components used only during setup (not installed)
