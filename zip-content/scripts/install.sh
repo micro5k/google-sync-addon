@@ -30,11 +30,13 @@ if test "${SETUP_TYPE:?}" = 'install'; then
   ui_msg 'Configuring...'
   ui_msg_empty_line
 
+  # IMPORTANT: Some Google Contacts Sync Adapters are disabled because they no longer work
+
   BACKUP_TRANSPORT_IS_OPTIONAL='true'
   if
-    setup_app "${APP_CONTACTSSYNC:?}" 'APP_CONTACTSSYNC' 'Google Contacts Sync 12' 'GoogleContactsSyncAdapter12' 'priv-app' ||
-      setup_app "${APP_CONTACTSSYNC:?}" 'APP_CONTACTSSYNC' 'Google Contacts Sync 8' 'GoogleContactsSyncAdapter8' 'priv-app' ||
-      setup_app "${APP_CONTACTSSYNC:?}" 'APP_CONTACTSSYNC' 'Google Contacts Sync 4.4' 'GoogleContactsSyncAdapter4.4' 'app'
+    #setup_app "${APP_CONTACTSSYNC:?}" 'APP_CONTACTSSYNC' 'Google Contacts Sync 12' 'GoogleContactsSyncAdapter12' 'priv-app' ||
+    #  setup_app "${APP_CONTACTSSYNC:?}" 'APP_CONTACTSSYNC' 'Google Contacts Sync 8' 'GoogleContactsSyncAdapter8' 'priv-app' ||
+    setup_app "${APP_CONTACTSSYNC:?}" 'APP_CONTACTSSYNC' 'Google Contacts Sync 4.4' 'GoogleContactsSyncAdapter4.4' 'app'
   then
     BACKUP_TRANSPORT_IS_OPTIONAL='false'
   fi
