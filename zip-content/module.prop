@@ -5,7 +5,7 @@
 numericId=928871
 id=google-sync-addon
 name=Google sync add-on
-version=v1.3.2.36-alpha
+version=v1.3.2.38-alpha
 versionCode=6
 author=ale5000
 description=It installs Google sync adapters on Android.
