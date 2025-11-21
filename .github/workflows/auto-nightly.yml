@@ -40,7 +40,7 @@ jobs:
 
     steps:
       - name: "Checkout sources"
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
       - name: "Setup Java"
         uses: actions/setup-java@v5
         with:
@@ -251,7 +251,7 @@ jobs:
 
     steps:
       - name: "Checkout file"
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           sparse-checkout: |
             conf-2.sh
