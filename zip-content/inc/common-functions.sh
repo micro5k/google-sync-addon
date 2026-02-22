@@ -1301,7 +1301,7 @@ _generate_architectures_list()
   export ARCH_LIST
 }
 
-is_new_architecture()
+is_architecture_still_supported_by_Android()
 {
   case "${1:?}" in
     'arm64-v8a' | 'armeabi-v7a' | 'x86_64' | 'x86') return 0 ;;
@@ -1731,7 +1731,7 @@ initialize()
   if mount_partition_if_possible 'data' "userdata${NL:?}DATAFS${NL:?}" "$(generate_mountpoint_list 'data' "${_additional_data_mountpoint?}" || :)"; then
     DATA_PATH="${LAST_MOUNTPOINT:?}"
     UNMOUNT_DATA="${LAST_PARTITION_MUST_BE_UNMOUNTED:?}"
-    remount_read_write_if_possible "${LAST_MOUNTPOINT:?}"
+    remount_read_write_if_possible "${LAST_MOUNTPOINT:?}" false || ui_warning "The data partition cannot be remounted as read-write; I suggest to manually performing a factory reset after flashing this ZIP."
   else
     ui_warning "The data partition cannot be mounted; I suggest to manually performing a factory reset after flashing this ZIP."
   fi
