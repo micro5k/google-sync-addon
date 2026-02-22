@@ -2,8 +2,8 @@
 # SPDX-FileCopyrightText: NONE
 # SPDX-License-Identifier: CC0-1.0
 
-numericId=928871
 id=google-sync-addon
+numericId=928871
 name=Google sync add-on
 version=v1.3.2.39-alpha
 versionCode=6
