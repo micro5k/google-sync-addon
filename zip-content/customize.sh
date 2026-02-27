@@ -20,12 +20,22 @@ set -u 2> /dev/null || :
 
 SKIPUNZIP=1
 ASH_STANDALONE=1
+readonly SKIPUNZIP ASH_STANDALONE
+export SKIPUNZIP ASH_STANDALONE
 KSU="${KSU:-false}"
-readonly SKIPUNZIP ASH_STANDALONE KSU
-export SKIPUNZIP ASH_STANDALONE KSU
+APATCH="${APATCH:-false}"
+export KSU APATCH
+
+# shellcheck disable=SC2034
+{
+  REPLACE=''
+  REMOVE=''
+}
 
 if test "${KSU:?}" != 'false'; then
   INSTALL_MODE='KernelSU'
+elif test "${APATCH:?}" != 'false'; then
+  INSTALL_MODE='APatch'
 elif test -n "${MAGISK_VER_CODE-}"; then
   INSTALL_MODE='Magisk'
 else
@@ -39,23 +49,19 @@ export INSTALL_MODE
 export OUTFD="${OUTFD:-2}"
 
 if test -z "${BOOTMODE-}"; then
-  printf 1>&2 '%s\n' 'Missing BOOTMODE variable'
-  abort 2> /dev/null 'Missing BOOTMODE variable'
+  abort 2> /dev/null 'Missing BOOTMODE variable' || printf 1>&2 '%s\n' 'Missing BOOTMODE variable'
   exit 1
 fi
 if test -z "${ZIPFILE-}"; then
-  printf 1>&2 '%s\n' 'Missing ZIPFILE variable'
-  abort 2> /dev/null 'Missing ZIPFILE variable'
+  abort 2> /dev/null 'Missing ZIPFILE variable' || printf 1>&2 '%s\n' 'Missing ZIPFILE variable'
   exit 1
 fi
 if test -z "${TMPDIR-}" || test ! -w "${TMPDIR:?}"; then
-  printf 1>&2 '%s\n' 'The temp folder is missing (2)'
-  abort 2> /dev/null 'The temp folder is missing (2)'
+  abort 2> /dev/null 'The temp folder is NOT set or NOT writable' || printf 1>&2 '%s\n' 'The temp folder is NOT set or NOT writable'
   exit 1
 fi
 if test "${OUTFD:?}" -lt 1; then
-  printf 1>&2 '%s\n' 'Invalid OUTFD variable'
-  abort 2> /dev/null  'Invalid OUTFD variable'
+  abort 2> /dev/null 'Invalid OUTFD variable' || printf 1>&2 '%s\n' 'Invalid OUTFD variable'
   exit 1
 fi
 RECOVERY_PIPE="/proc/self/fd/${OUTFD:?}"
@@ -67,7 +73,6 @@ export TMPDIR
 export RECOVERY_PIPE
 export ANDROID_ROOT
 export ANDROID_DATA
-unset REPLACE
 
 ### GLOBAL VARIABLES ###
 
@@ -177,6 +182,7 @@ ui_error()
     _print_text '\033[1;31m%s\033[0m' "ERROR ${_error_code:?}: ${1:?}"
   fi
 
+  abort 2> /dev/null "ERROR ${_error_code?}: ${1?}" || :
   exit "${_error_code:?}"
 }
 

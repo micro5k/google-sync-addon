@@ -63,7 +63,7 @@ jobs:
           BUILD_TYPE='oss' '${{ github.workspace }}/build.sh'
       - name: "Attest build provenance"
         id: "attest"
-        uses: actions/attest-build-provenance@v3
+        uses: actions/attest-build-provenance@v4
         timeout-minutes: 10
         if: "${{ vars.NIGHTLY_ATTESTATION == 'true' && github.run_attempt == '1' && steps.build.outputs.ZIP_IS_ALPHA == 'true' && steps.build.outputs.ZIP_BUILD_TYPE_SUPPORTED == 'true' }}"
         with:
@@ -231,13 +231,14 @@ jobs:
             ${{ steps.info.outputs.ZIP_ATTESTATION_FILE }}
           fail_on_unmatched_files: true
       - name: "Upload artifacts"
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         if: "${{ steps.build.outputs.ZIP_BUILD_TYPE_SUPPORTED == 'true' }}"
         with:
-          name: "${{ github.event.repository.name }} ${{ steps.build.outputs.ZIP_BRANCH_NAME || github.ref_name }} g${{ steps.build.outputs.ZIP_SHORT_COMMIT_ID }} ${{ steps.build.outputs.ZIP_BUILD_TYPE }} (extract it)"
-          path: "${{ steps.build.outputs.ZIP_FOLDER }}/*.zip*"
-          overwrite: false
+          name: "${{ github.event.repository.name }} ${{ steps.build.outputs.ZIP_BRANCH_NAME || github.ref_name }} g${{ steps.build.outputs.ZIP_SHORT_COMMIT_ID }} ${{ steps.build.outputs.ZIP_BUILD_TYPE }}"
+          path: "${{ steps.build.outputs.ZIP_FOLDER }}/*.zip"
           retention-days: "${{ steps.info.outputs.ZIP_RETENTION_DAYS }}"
+          overwrite: false
+          archive: false
           compression-level: 0
           if-no-files-found: "error"
 
