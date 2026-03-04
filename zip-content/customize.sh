@@ -421,7 +421,7 @@ detect_recovery_arch()
 detect_recovery_arch
 
 if test "${INSTALL_MODE:?}" != 'Pure'; then
-  ui_error "This ZIP currently cannot be installed as ${INSTALL_MODE?} module"
+  ui_error "This ZIP currently canNOT be installed as ${INSTALL_MODE?} module, although it is planned for the future"
 fi
 
 OUR_BB="${BASE_TMP_PATH:?}/busybox"
@@ -550,6 +550,12 @@ fi
 
 ui_debug ''
 disable_debug_log # Disable debug log if it was enabled and restore normal output
+
+if test "${DEBUG_LOG:?}" -ne 0; then
+  ui_msg "The log was created in: ${LOG_PATH?}"
+  ui_msg "You can get it with this command: adb pull \"${LOG_PATH:?}\" ."
+  ui_debug ''
+fi
 
 export PATH="${PREVIOUS_PATH?}"
 delete_recursive_safe "${TMP_PATH:?}"
