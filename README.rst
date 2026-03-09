@@ -1,12 +1,16 @@
+##################
+Google sync add-on
+##################
 ..
    SPDX-License-Identifier: GPL-3.0-or-later
    SPDX-FileType: DOCUMENTATION
 
-==================
-Google sync add-on
-==================
 :Author: `ale5000 <https://github.com/ale5000-git>`_
-:License: `GPLv3.0 or later <LICENSE.rst>`_
+:License: `GPLv3.0 or later <./LICENSE.rst>`_
+
+.. image:: https://api.reuse.software/badge/github.com/micro5k/google-sync-addon
+   :alt: REUSE status
+   :target: https://api.reuse.software/info/github.com/micro5k/google-sync-addon
 
 .. image:: https://codecov.io/gh/micro5k/google-sync-addon/branch/main/graph/badge.svg
    :alt: Coverage

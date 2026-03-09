@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: (c) 2016 ale5000
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 # shellcheck disable=SC2310 # This function is invoked in an 'if' condition so set -e will be disabled
@@ -13,8 +14,9 @@ set -e
   case "$(set 2> /dev/null -o || set || :)" in *'pipefail'*) if set -o pipefail; then export USING_PIPEFAIL='true'; else echo 1>&2 'Failed: pipefail'; fi ;; *) ;; esac
 }
 
+# REUSE-IgnoreStart
 cat << 'LICENSE'
-  SPDX-FileCopyrightText: (c) 2016-2019, 2021-2026 ale5000
+  Copyright (C) 2016-2019, 2021-2026 ale5000
 
   This program is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -30,6 +32,7 @@ cat << 'LICENSE'
   along with this program.  If not, see <https://www.gnu.org/licenses/>.
 LICENSE
 echo ''
+# REUSE-IgnoreEnd
 
 detect_script_dir()
 {
@@ -249,12 +252,13 @@ fi
 }
 
 # Copy data
-cp -rf "${MAIN_DIR:?}/zip-content" "${TEMP_DIR:?}/" || ui_error 'Failed to copy data to the temp dir'
-cp -rf "${MAIN_DIR:?}/"LICENSES* "${TEMP_DIR:?}/zip-content/" || ui_error 'Failed to copy the licenses folder to the temp dir'
-cp -f "${MAIN_DIR:?}/LICENSE.rst" "${TEMP_DIR:?}/zip-content/" || ui_error 'Failed to copy the license to the temp dir'
-cp -f "${MAIN_DIR:?}/LICENSE-ADDITION.rst" "${TEMP_DIR:?}/zip-content/" || ui_error 'Failed to copy the license to the temp dir'
-mkdir -p "${TEMP_DIR:?}/zip-content/docs"
-cp -f "${MAIN_DIR:?}/CHANGELOG.rst" "${TEMP_DIR:?}/zip-content/docs/" || ui_error 'Failed to copy the changelog to the temp dir'
+cp -rf "${MAIN_DIR:?}"/zip-content "${TEMP_DIR:?}/" || ui_error 'Failed to copy the zip-content'
+cp -rf "${MAIN_DIR:?}"/LICENSES "${TEMP_DIR:?}/zip-content/" || ui_error 'Failed to copy the LICENSES folder'
+cp -f "${MAIN_DIR:?}"/LICENSE*.rst "${TEMP_DIR:?}/zip-content/" || ui_error 'Failed to copy the license'
+
+mkdir -p "${TEMP_DIR:?}"/zip-content/docs || ui_error 'Failed to create the docs folder'
+cp -f "${MAIN_DIR:?}"/docs/*.rst "${TEMP_DIR:?}/zip-content/docs/" || ui_error 'Failed to copy the docs'
+cp -f "${MAIN_DIR:?}"/CHANGELOG.rst "${TEMP_DIR:?}/zip-content/docs/" || ui_error 'Failed to copy the changelog'
 
 if test "${OPENSOURCE_ONLY:?}" != 'false'; then
   mv -f "${TEMP_DIR}/zip-content/settings-oss.conf" "${TEMP_DIR}/zip-content/settings.conf" || ui_error 'Failed to choose the settings file'
@@ -270,7 +274,9 @@ rm -f "${TEMP_DIR}/zip-content/misc/busybox/busybox-"mips* || ui_error 'Failed t
 rm -f "${TEMP_DIR}/zip-content/LICENSES/Info-ZIP.txt" || ui_error 'Failed to delete unused files in the temp dir'
 rm -f "${TEMP_DIR}/zip-content/LICENSES/Unlicense.txt" || ui_error 'Failed to delete unused files in the temp dir'
 
+# REUSE-IgnoreStart
 printf '%s\n%s\n%s\n\n%s\n' '# -*- coding: utf-8; mode: conf-unix -*-' '# SPDX-FileCopyrightText: NONE' '# SPDX-License-Identifier: CC0-1.0' "buildType=${BUILD_TYPE:?}" 1> "${TEMP_DIR:?}/zip-content/info.prop" || ui_error "Failed to create the 'info.prop' file"
+# REUSE-IgnoreEnd
 
 if test "${OPENSOURCE_ONLY:?}" = 'false'; then
   files_to_download | while IFS='|' read -r LOCAL_FILENAME LOCAL_PATH MIN_API MAX_API FINAL_FILENAME INTERNAL_NAME FILE_HASH _; do
