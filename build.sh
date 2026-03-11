@@ -65,6 +65,7 @@ detect_script_dir()
 detect_script_dir || return 1 2>&- || exit 1
 
 export BUILD_CACHE_DIR="${MAIN_DIR:?}/cache/build"
+export LFS_CACHE_DIR="${MAIN_DIR:?}/cache/lfs"
 
 unset DO_INIT_CMDLINE
 # shellcheck source=SCRIPTDIR/includes/common.sh
@@ -216,67 +217,62 @@ FILENAME_EXT='.zip'
 # shellcheck source=SCRIPTDIR/addition.sh
 . "${MAIN_DIR}/addition.sh"
 
-# Verify files in the files list to avoid creating broken packages
-if test -e "${MAIN_DIR:?}/zip-content/origin/file-list.dat"; then
-  while IFS='|' read -r LOCAL_FILENAME _ _ _ _ _ FILE_HASH _; do
-    printf '.'
-
-    full_filename="${MAIN_DIR:?}/zip-content/origin/${LOCAL_FILENAME:?}"
-    if test -f "${full_filename:?}.apk"; then full_filename="${full_filename:?}.apk"; else full_filename="${full_filename:?}.jar"; fi
-
-    verify_sha1 "${full_filename:?}" "${FILE_HASH:?}" || {
-      printf '\n'
-      ui_error "Verification of '${LOCAL_FILENAME:-}' failed"
-    }
-  done 0< "${MAIN_DIR:?}/zip-content/origin/file-list.dat" || ui_error 'Failed to open the list of files to verify'
-  printf '\n'
-fi
-
-# Download files if they are missing
+# Download and verify external application files to ensure package integrity; bundled files will be verified at a later stage
 {
-  current_dl_list="$(oss_files_to_download)" || ui_error 'Missing download list'
-  dl_list "${current_dl_list?}" || ui_error 'Failed to download the necessary files'
-
   if test "${OPENSOURCE_ONLY:?}" = 'false'; then
     current_dl_list="$(files_to_download)" || ui_error 'Missing download list'
     dl_list "${current_dl_list?}" || ui_error 'Failed to download the necessary files'
 
-    dl_file 'misc/keycheck' 'keycheck-arm.bin' '77d47e9fb79bf4403fddab0130f0b4237f6acdf0' 'github.com/someone755/kerneller/raw/9bb15ca2e73e8b81e412d595b52a176bdeb7c70a/extract/tools/keycheck' ''
+    dl_file 'misc/keycheck' 'keycheck-arm.bin' '2e348074961b78c2cf9e8728910ce7c9596f195a6344ead35e536ccebe18df76' 'github.com/someone755/kerneller/raw/9bb15ca2e73e8b81e412d595b52a176bdeb7c70a/extract/tools/keycheck' ''
   else
     echo 'Skipped not OSS files!'
   fi
+
+  current_dl_list="$(oss_files_to_download)" || ui_error 'Missing download list'
+  dl_list "${current_dl_list?}" || ui_error 'Failed to download the necessary files'
 
   clear_dl_temp_dir || ui_error 'Failed to remove the DL temp dir'
 
   unset current_dl_list
 }
 
-# Copy data
-cp -rf "${MAIN_DIR:?}"/zip-content "${TEMP_DIR:?}/" || ui_error 'Failed to copy the zip-content'
-cp -rf "${MAIN_DIR:?}"/LICENSES "${TEMP_DIR:?}/zip-content/" || ui_error 'Failed to copy the LICENSES folder'
-cp -f "${MAIN_DIR:?}"/LICENSE*.rst "${TEMP_DIR:?}/zip-content/" || ui_error 'Failed to copy the license'
-
+# Copy data and prepare
+cp -rf "${MAIN_DIR:?}"/zip-content "${TEMP_DIR:?}"/ || ui_error 'Failed to copy the zip-content'
+mv -f "${TEMP_DIR:?}"/zip-content/settings-"${BUILD_TYPE:?}".conf "${TEMP_DIR:?}"/zip-content/settings.conf || ui_error 'Failed to prepare the settings file'
+rm -f "${TEMP_DIR:?}"/zip-content/settings-*.conf || :
+# REUSE-IgnoreStart
+printf '%s\n%s\n%s\n\n%s\n' '# -*- coding: utf-8; mode: conf-unix -*-' '# SPDX-FileCopyrightText: NONE' '# SPDX-License-Identifier: CC0-1.0' "buildType=${BUILD_TYPE:?}" 1> "${TEMP_DIR:?}"/zip-content/info.prop || ui_error "Failed to create the 'info.prop' file"
+# REUSE-IgnoreEnd
+cp -rf "${MAIN_DIR:?}"/LICENSES "${TEMP_DIR:?}"/zip-content/ || ui_error 'Failed to copy the LICENSES folder'
+cp -f "${MAIN_DIR:?}"/LICENSE*.rst "${TEMP_DIR:?}"/zip-content/ || ui_error 'Failed to copy the license'
 mkdir -p "${TEMP_DIR:?}"/zip-content/docs || ui_error 'Failed to create the docs folder'
 cp -f "${MAIN_DIR:?}"/docs/*.rst "${TEMP_DIR:?}/zip-content/docs/" || ui_error 'Failed to copy the docs'
 cp -f "${MAIN_DIR:?}"/CHANGELOG.rst "${TEMP_DIR:?}/zip-content/docs/" || ui_error 'Failed to copy the changelog'
 
-if test "${OPENSOURCE_ONLY:?}" != 'false'; then
-  mv -f "${TEMP_DIR}/zip-content/settings-oss.conf" "${TEMP_DIR}/zip-content/settings.conf" || ui_error 'Failed to choose the settings file'
-else
-  mv -f "${TEMP_DIR}/zip-content/settings-full.conf" "${TEMP_DIR}/zip-content/settings.conf" || ui_error 'Failed to choose the settings file'
+# Do not ship currently unused files
+rm -rf "${TEMP_DIR:?}"/zip-content/misc/aapt || ui_error 'Failed to delete unused files in the temp dir'
+rm -f "${TEMP_DIR:?}"/zip-content/misc/busybox/busybox-mips* || ui_error 'Failed to delete unused files in the temp dir'
+rm -f "${TEMP_DIR:?}"/zip-content/LICENSES/Info-ZIP.txt || ui_error 'Failed to delete unused files in the temp dir'
+rm -f "${TEMP_DIR:?}"/zip-content/LICENSES/Unlicense.txt || ui_error 'Failed to delete unused files in the temp dir'
+
+# Verify bundled application files to ensure package integrity; downloaded files have already been validated
+if test -e "${TEMP_DIR:?}/zip-content/origin/file-list.dat"; then
+  printf '%s' 'Verifying'
+  while IFS='|' read -r LOCAL_FILENAME _ _ _ _ _ FILE_HASH _; do
+    printf '%s' '.'
+
+    full_filename="${TEMP_DIR:?}/zip-content/origin/${LOCAL_FILENAME:?}"
+    if test -f "${full_filename:?}.apk"; then ext='.apk'; else ext='.jar'; fi
+
+    download_cached_if_lfs_pointer "${LOCAL_FILENAME:?}${ext:?}" "${TEMP_DIR:?}/zip-content/origin" "${FILE_HASH:?}"
+
+    verify_sha256 "${full_filename:?}${ext:?}" "${FILE_HASH:?}" || {
+      printf '\n'
+      ui_error "Verification of '${LOCAL_FILENAME:-}' failed"
+    }
+  done 0< "${MAIN_DIR:?}/zip-content/origin/file-list.dat" || ui_error 'Failed to open the list of files to verify'
+  printf '\n'
 fi
-rm -f "${TEMP_DIR}/zip-content/settings-oss.conf"
-rm -f "${TEMP_DIR}/zip-content/settings-full.conf"
-
-# Do not ship currently unused binaries and unused files
-rm -rf "${TEMP_DIR}/zip-content/misc/aapt" || ui_error 'Failed to delete unused files in the temp dir'
-rm -f "${TEMP_DIR}/zip-content/misc/busybox/busybox-"mips* || ui_error 'Failed to delete unused files in the temp dir'
-rm -f "${TEMP_DIR}/zip-content/LICENSES/Info-ZIP.txt" || ui_error 'Failed to delete unused files in the temp dir'
-rm -f "${TEMP_DIR}/zip-content/LICENSES/Unlicense.txt" || ui_error 'Failed to delete unused files in the temp dir'
-
-# REUSE-IgnoreStart
-printf '%s\n%s\n%s\n\n%s\n' '# -*- coding: utf-8; mode: conf-unix -*-' '# SPDX-FileCopyrightText: NONE' '# SPDX-License-Identifier: CC0-1.0' "buildType=${BUILD_TYPE:?}" 1> "${TEMP_DIR:?}/zip-content/info.prop" || ui_error "Failed to create the 'info.prop' file"
-# REUSE-IgnoreEnd
 
 if test "${OPENSOURCE_ONLY:?}" = 'false'; then
   files_to_download | while IFS='|' read -r LOCAL_FILENAME LOCAL_PATH MIN_API MAX_API FINAL_FILENAME INTERNAL_NAME FILE_HASH _; do

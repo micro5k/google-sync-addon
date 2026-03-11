@@ -33,7 +33,7 @@ readonly NL='
 pause_if_needed()
 {
   # shellcheck disable=SC3028 # Ignore: In POSIX sh, SHLVL is undefined
-  if test "${NO_PAUSE:-0}" = '0' && test "${no_pause:-0}" = '0' && test "${CI:-false}" = 'false' && test "${TERM_PROGRAM:-unknown}" != 'vscode' && test "${SHLVL:-1}" = '1' && test -t 0 && test -t 1 && test -t 2; then
+  if test "${NO_PAUSE:-0}" = '0' && test "${no_pause:-0}" = '0' && test "${CI:-false}" = 'false' && test "${TERM_PROGRAM:-none}" != 'vscode' && test "${SHLVL:-1}" = '1' && test -t 0 && test -t 1 && test -t 2; then
     if test -n "${NO_COLOR-}"; then
       printf 1>&2 '\n%s' 'Press any key to exit... ' || :
     else
@@ -41,17 +41,16 @@ pause_if_needed()
     fi
     # shellcheck disable=SC3045 # Ignore: In POSIX sh, read -s / -n is undefined
     IFS='' read 2> /dev/null 1>&2 -r -s -n1 _ || IFS='' read 1>&2 -r _ || :
-    printf 1>&2 '\n' || :
-    test -n "${NO_COLOR-}" || printf 1>&2 '\033[0m\r    \r' || :
+    if test -n "${NO_COLOR-}"; then printf 1>&2 '\n' || :; else printf 1>&2 '\n\033[0m\r    \r' || :; fi
   fi
-  unset no_pause || :
+  unset no_pause
   return "${1:-0}"
 }
 
 beep()
 {
-  if test "${CI:-false}" = 'false' && test "${TERM_PROGRAM-}" != 'vscode' && test "${APP_BASE_NAME-}" != 'gradlew' && test -t 2; then
-    printf 1>&2 '%b' '\007' || true
+  if test "${CI:-false}" = 'false' && test "${TERM_PROGRAM:-none}" != 'vscode' && test -t 2; then
+    printf 1>&2 '%b' '\007' || :
   fi
 }
 
@@ -353,22 +352,30 @@ _load_cookies()
   return 0
 }
 
-verify_sha1()
+verify_sha256()
 {
-  local file_name="$1"
-  local hash="$2"
-  local file_hash
+  local _computed_hash
 
-  if test ! -f "${file_name}"; then return 1; fi # Failed
-  file_hash="$(sha1sum -b -- "${file_name}" | cut -d ' ' -f 1)"
-  if test -z "${file_hash}" || test "${hash}" != "${file_hash}"; then return 1; fi # Failed
-  return 0                                                                         # Success
+  test -f "${1:?}" || return 2                                                  # Missing file
+  _computed_hash="$(sha256sum -b -- "${1:?}" | cut -d ' ' -f 1 -s)" || return 3 # Hashing failed
+  test "${2:?}" = "${_computed_hash:?}" || return 4                             # Wrong hash (corrupted file)
+
+  return 0 # Success
 }
 
-corrupted_file()
+verify_sha256_or_delete()
 {
-  rm -f -- "$1" || echo 'Failed to remove the corrupted file.'
-  ui_error "The file '$1' is corrupted."
+  local _ret_code
+
+  _ret_code=0
+  verify_sha256 "${@}" || _ret_code="${?}"
+
+  if test "${_ret_code:?}" -eq 4; then
+    ui_error_msg "Corrupted file => '${1?}'"
+    rm -f -- "${1:?}" || ui_error_msg "Failed to remove the corrupted file => '${1?}'"
+  fi
+
+  return "${_ret_code:?}"
 }
 
 _get_byte_length()
@@ -560,7 +567,7 @@ send_web_request_and_output_response()
   fi
 
   if test "${_is_ajax:?}" != 'true'; then
-    if _cookies="$(_load_cookies "${_url:?}")"; then _cookies="${_cookies%; }"; else return "${?}"; fi
+    if _cookies="$(_load_cookies "${_url:?}")"; then _cookies="${_cookies%"; "}"; else return "${?}"; fi
   fi
 
   if test -n "${_referrer?}"; then set -- "${@}" --header "Referer: ${_referrer:?}" || return "${?}"; fi
@@ -617,7 +624,7 @@ send_web_request_and_output_headers()
   fi
 
   if test "${_is_ajax:?}" != 'true'; then
-    if _cookies="$(_load_cookies "${_url:?}")"; then _cookies="${_cookies%; }"; else return "${?}"; fi
+    if _cookies="$(_load_cookies "${_url:?}")"; then _cookies="${_cookies%"; "}"; else return "${?}"; fi
   fi
 
   if test -n "${_referrer?}"; then set -- "${@}" --header "Referer: ${_referrer:?}" || return "${?}"; fi
@@ -662,7 +669,7 @@ send_web_request_and_no_output()
   fi
 
   if test "${_is_ajax:?}" != 'true'; then
-    if _cookies="$(_load_cookies "${_url:?}")"; then _cookies="${_cookies%; }"; else return "${?}"; fi
+    if _cookies="$(_load_cookies "${_url:?}")"; then _cookies="${_cookies%"; "}"; else return "${?}"; fi
   fi
 
   if test -n "${_referrer?}"; then set -- "${@}" --header "Referer: ${_referrer:?}" || return "${?}"; fi
@@ -701,7 +708,7 @@ _direct_download()
   fi
 
   if test "${_is_ajax:?}" != 'true'; then
-    if _cookies="$(_load_cookies "${_url:?}")"; then _cookies="${_cookies%; }"; else return 13; fi
+    if _cookies="$(_load_cookies "${_url:?}")"; then _cookies="${_cookies%"; "}"; else return 13; fi
   fi
 
   if test -n "${_referrer?}"; then set -- "${@}" --header "Referer: ${_referrer:?}" || return 14; fi
@@ -926,34 +933,70 @@ dl_type_two()
     report_failure 2 "${?}" 'dl' || return "${?}"
 }
 
+is_lfs_pointers()
+{
+  local _file_size
+  _file_size="$(stat -c '%s' -- "${1:?}")" || ui_error "Failed to get the file size of '${1?}'"
+
+  if test "${_file_size:?}" -lt 1024 && grep -m 1 -q -e '^version https://git-lfs.github.com/spec/v1$' -- "${1:?}"; then return 0; fi
+  return 1
+}
+
+download_cached_if_lfs_pointer()
+{
+  if is_lfs_pointers "${2:?}/${1:?}"; then
+    local _expected_sha256 _mirror_url
+
+    # shellcheck source=/dev/null
+    command 1> /dev/null -v 'get_mirror_by_sha256' || command . "${MAIN_DIR:?}/conf-lfs.sh" || ui_error "Failed to source 'conf-lfs.sh'"
+    _mirror_url="$(get_mirror_by_sha256 "${3:?}")" || ui_error "Failed to get the mirror"
+
+    _expected_sha256=$(grep -m 1 -e '^oid sha256:' -- "${2:?}/${1:?}" | cut -d ':' -f 2 -s) || ui_error "Failed to extract the SHA256 hash from the LFS pointer"
+    dl_file 'LFS' "${_expected_sha256:?}" "${3:?}" "${_mirror_url:?}" ''
+    cp -f -- "${LFS_CACHE_DIR:?}/${_expected_sha256:?}" "${2:?}/${1:?}" || ui_error "Failed to copy the LFS file from cache"
+  fi
+}
+
 dl_file()
 {
-  if test -e "${BUILD_CACHE_DIR:?}/$1/$2"; then verify_sha1 "${BUILD_CACHE_DIR:?}/$1/$2" "$3" || rm -f "${BUILD_CACHE_DIR:?}/$1/$2"; fi # Preventive check to silently remove corrupted/invalid files
+  local _output_file
+  local _status _url _domain
+
+  # ToDO: Improve this mess
+  if test "${1:?}" = 'LFS'; then
+    mkdir -p "${LFS_CACHE_DIR:?}" || ui_error "Failed to create the LFS cache folder"
+    _output_file="${LFS_CACHE_DIR:?}/${2:?}"
+  else
+    _output_file="${BUILD_CACHE_DIR:?}/${1:?}/${2:?}"
+  fi
+
+  # Preventive check to remove corrupted files
+  verify_sha256_or_delete "${_output_file:?}" "${3:?}" || :
 
   printf '%s ' "Checking ${2?}..."
-  local _status _url _domain
+
   _status=0
   _url="${DL_PROT:?}${4:?}" || return "${?}"
   _domain="$(get_domain_from_url "${_url:?}")" || return "${?}"
 
   _clear_cookies || return "${?}"
 
-  if ! test -e "${BUILD_CACHE_DIR:?}/${1:?}/${2:?}"; then
-    mkdir -p "${BUILD_CACHE_DIR:?}/${1:?}" || ui_error "Failed to create the ${1?} folder inside the cache dir"
+  if test ! -e "${_output_file:?}"; then
+    test "${1:?}" = 'LFS' || mkdir -p "${BUILD_CACHE_DIR:?}/${1:?}" || ui_error "Failed to create the ${1?} folder inside the cache dir"
 
     if test "${CI:-false}" = 'false'; then sleep '0.5'; else sleep 3; fi
     case "${_domain:?}" in
       *\.'go''file''.io' | 'go''file''.io')
         printf '\n %s: ' 'DL type 2'
-        dl_type_two "${_url:?}" "${BUILD_CACHE_DIR:?}/${1:?}/${2:?}" || _status="${?}"
+        dl_type_two "${_url:?}" "${_output_file:?}" || _status="${?}"
         ;;
       *\.'apk''mirror''.com')
         printf '\n %s: ' 'DL type 1'
-        dl_type_one "${_url:?}" "${BUILD_CACHE_DIR:?}/${1:?}/${2:?}" || _status="${?}"
+        dl_type_one "${_url:?}" "${_output_file:?}" || _status="${?}"
         ;;
       ????*)
         printf '\n %s: ' 'DL type 0'
-        dl_type_zero "${_url:?}" "${BUILD_CACHE_DIR:?}/${1:?}/${2:?}" || _status="${?}"
+        dl_type_zero "${_url:?}" "${_output_file:?}" || _status="${?}"
         ;;
       *)
         ui_error "Invalid download URL => '${_url?}'"
@@ -978,7 +1021,7 @@ dl_file()
     fi
   fi
 
-  verify_sha1 "${BUILD_CACHE_DIR:?}/$1/$2" "$3" || corrupted_file "${BUILD_CACHE_DIR:?}/$1/$2"
+  verify_sha256_or_delete "${_output_file:?}" "${3:?}" || ui_error "This file CANNOT be downloaded => '${2?}'"
   printf '%s\n' 'OK'
 }
 
@@ -1317,7 +1360,7 @@ shellhelp()
 
 init_cmdline()
 {
-  unset PROMPT_COMMAND PS1 PROMPT A5K_SAVED_TITLE
+  unset PROMPT_COMMAND PS1 A5K_SAVED_TITLE
   unset __DEFAULT_PS1 __DEFAULT_PS1_AS_ROOT
 
   export __TITLE_CMD_PREFIX=''
