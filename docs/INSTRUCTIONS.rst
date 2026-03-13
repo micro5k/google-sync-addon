@@ -35,6 +35,8 @@ The following custom recoveries are supported:
 - `Omni Recovery <https://github.com/omnirom/android_bootable_recovery>`_
 
 
+.. _download:
+
 Download
 ========
 
