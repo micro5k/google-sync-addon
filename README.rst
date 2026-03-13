@@ -35,10 +35,6 @@ This project is available on GitHub_, on GitLab_ as well as on XDA_.
 .. _GitLab: https://gitlab.com/micro5k/google-sync-addon
 .. _XDA: https://xdaforums.com/t/3432360/
 
-.. image:: https://liberapay.com/assets/widgets/donate.svg
-   :alt: Donate using Liberapay
-   :target: https://liberapay.com/microg-unofficial-by-ale5000/donate
-
 
 Download
 ========
