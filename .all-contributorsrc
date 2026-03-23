@@ -2,9 +2,7 @@
   "projectName": "google-sync-addon",
   "projectOwner": "micro5k",
   "repoType": "github",
-  "files": [
-    "docs/CONTRIBUTORS.md"
-  ],
+  "files": ["docs/CONTRIBUTORS.md"],
   "imageSize": 100,
   "commit": true,
   "commitConvention": "angular",

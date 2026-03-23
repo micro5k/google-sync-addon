@@ -3,18 +3,6 @@
 
 root = true
 
-[{cache,output,gradlew,gradlew.bat}]
-ignore = true
-
-[{.git,.gradle,.local,.ash_history,.bash_history}]
-ignore = true
-
-[{.git-hooks/post-checkout,.git-hooks/post-commit,.git-hooks/post-merge,.git-hooks/pre-push}]
-ignore = true
-
-[*.{jar,apk,bin,exe}]
-ignore = true
-
 [*]
 charset = utf-8
 end_of_line = lf
@@ -24,7 +12,7 @@ indent_size = 2
 trim_trailing_whitespace = true
 insert_final_newline = true
 
-max_line_length = 80
+max_line_length = 99
 quote_type = single
 curly_bracket_next_line = true
 
@@ -33,8 +21,23 @@ switch_case_indent = true
 space_redirects = true
 function_next_line = true
 
-[Makefile]
+[*.{sh,xml,toml,license,dat,txt,yml,gradle}]
+max_line_length = 265 # ToDO: try to reduce to 99
+
+[recovery-simulator/override/*]
+max_line_length = 150 # ToDO: try to reduce to 99
+
+[*.{rst,js,mjs}]
+max_line_length = 80
+
+[*.rst]
+indent_size = 3
+
+[{Makefile,.tgitconfig}]
 indent_style = tab
+
+[*.gpg]
+insert_final_newline = unset
 
 [*.bat]
 end_of_line = crlf
@@ -53,3 +56,42 @@ shell_variant = bash
 
 [recovery-simulator/recovery.sh]
 shell_variant = bash
+
+# Links cannot be shortened
+[README.rst]
+max_line_length = off
+
+# Long lines cannot be avoided
+[{.mailmap,allowed_signers,conf-2.sh,docs/CONTRIBUTORS.md}]
+max_line_length = off
+
+# Long lines cannot be avoided
+[zip-content/origin/etc/org.fdroid.fdroid/additional_repos.xml]
+max_line_length = off
+
+# Long lines cannot be avoided
+[utils/test-files/Getprop-EMU-Pixel 4 API 33.txt]
+max_line_length = off
+
+# Licenses
+[LICENSES/*.txt]
+indent_style = unset
+max_line_length = off
+
+# Man pages
+[tools/win/man/cat1/*.1]
+indent_style = unset
+
+# Skin binaries
+[*.{apk,bin,exe,gz,jar,zip}]
+ignore = true
+
+[{cache,output,gradlew,gradlew.bat}]
+ignore = true
+
+[{.git,.gradle,.local,.ash_history,.bash_history}]
+ignore = true
+
+[{.git-hooks/post-checkout,.git-hooks/post-commit,.git-hooks/post-merge,.git-hooks/pre-push}]
+ignore = true
+
