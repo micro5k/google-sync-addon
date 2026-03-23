@@ -21,10 +21,10 @@ unset OSTYPE
 unset OPTERR
 unset OPTIND
 
-# IFS change is intended
-# nosemgrep
+# editorconfig-checker-disable
 IFS=' 	
 '
+# editorconfig-checker-enable
 PS1='\w \$ '
 PS2='> '
 if test "${COVERAGE:-false}" = 'false'; then

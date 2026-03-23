@@ -3,8 +3,9 @@
 # SPDX-FileCopyrightText: NONE
 # SPDX-License-Identifier: CC0-1.0
 
-# Configuration file for the Sphinx documentation builder
-# For the full list of built-in configuration values, see the documentation: https://www.sphinx-doc.org/en/master/usage/configuration.html
+# Configuration file for the Sphinx documentation builder.
+# For the full list of built-in configuration values, see the documentation:
+# https://www.sphinx-doc.org/en/master/usage/configuration.html
 
 import os
 import shutil
@@ -14,9 +15,17 @@ from docutils import nodes
 from sphinx import addnodes
 from sphinx.util import logging
 
+logger = logging.getLogger(__name__)
+
+# Root of the documentation directory (the directory containing this file)
+_DOCS_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Root of the repository (one level above docs/)
+_REPO_ROOT = os.path.normpath(os.path.join(_DOCS_DIR, '..'))
+
 
 def get_version():
-    props_path = os.path.join(os.path.dirname(__file__), '..', 'zip-content', 'module.prop')
+    props_path = os.path.join(_REPO_ROOT, 'zip-content', 'module.prop')
 
     if os.path.exists(props_path):
         with open(props_path, 'r') as f:
@@ -91,8 +100,6 @@ def setup(app):
     }
 
 
-logger = logging.getLogger(__name__)
-
 # Project information
 project = 'Google sync add-on'
 author = 'ale5000'
@@ -119,9 +126,11 @@ rst_epilog = f"""
 """
 
 # Options for source files
+exclude_patterns = ['CONTRIBUTORS.md']
 master_doc = 'index'
 source_suffix = {
-    '.rst': 'restructuredtext'
+    '.rst': 'restructuredtext',
+    '.md': 'markdown'
 }
 
 # Options for HTML output
@@ -135,9 +144,10 @@ html_context = {
 }
 
 # Options for LaTeX output (e.g., PDF)
-if 'latex_elements' not in locals():
-    latex_elements = {}
+latex_elements = {}
 
 # The 'openany' option allows chapters to begin on the next available page;
 # this prevents unwanted blank pages by allowing starts on even or odd pages
-latex_elements['extraclassoptions'] = (latex_elements.get('extraclassoptions', '') + ',openany').strip(',')
+latex_elements.update({
+    'extraclassoptions': 'openany'
+})
