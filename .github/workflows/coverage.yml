@@ -49,9 +49,17 @@ jobs:
         run: |
           # Installing Bashcov and simplecov-lcov...
           gem install bashcov:3.3.0 simplecov-lcov
+      - name: "Use build cache"
+        uses: actions/cache/restore@v5
+        timeout-minutes: 5
+        with:
+          key: "build-${{ hashFiles('conf-2.sh') }}"
+          restore-keys: "build-"
+          path: "cache/build"
+          enableCrossOsArchive: true
       - name: "Use LFS cache"
         uses: actions/cache/restore@v5
-        timeout-minutes: 10
+        timeout-minutes: 5
         with:
           key: "lfs-${{ hashFiles('conf-lfs.sh') }}"
           restore-keys: "lfs-"
@@ -101,7 +109,7 @@ jobs:
           printf 'TOKEN_SET=%s\n' "${token_set:?}" 1>> "${GITHUB_OUTPUT?}"
       - name: "Upload coverage reports to Codecov"
         if: "${{ steps.codecov-token.outputs.TOKEN_SET == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main' }}"
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v6
         timeout-minutes: 10
         with:
           fail_ci_if_error: true
