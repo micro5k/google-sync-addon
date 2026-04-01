@@ -130,10 +130,11 @@ occasional social obligation.
 If it's saved you time, or frustration, please consider supporting its
 development!
 
-Wondering how? Check out all the ways to `fuel this project
-<./docs/DONATE.rst>`_ — coffee, kind words, or cold hard crypto, it's all
-welcome. *(No pressure. But the coffee does make the bugs fix themselves
-slightly faster.)*
+|  Wondering how?
+|  Check out all the ways to `fuel this project <./docs/DONATE.rst>`_ —
+   coffee, kind words, or cold hard crypto, it's all welcome.
+|  *(No pressure. But the coffee does make the bugs fix themselves slightly
+   faster.)*
 
 
 Copyright
