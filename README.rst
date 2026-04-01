@@ -1,12 +1,17 @@
 ##################
 Google sync add-on
 ##################
+
 ..
+   SPDX-FileCopyrightText: 2016 ale5000
    SPDX-License-Identifier: GPL-3.0-or-later
    SPDX-FileType: DOCUMENTATION
 
-:Author: `ale5000 <https://github.com/ale5000-git>`_
-:License: `GPLv3.0 or later <./LICENSE.rst>`_
+:Author:
+   `ale5000 <https://github.com/ale5000-git>`_
+
+:License:
+   `GPLv3.0 or later <https://www.gnu.org/licenses/gpl-3.0.html>`_
 
 .. image:: https://app.readthedocs.org/projects/google-sync-addon/badge/?version=latest
    :alt: Documentation status
@@ -23,40 +28,57 @@ Google sync add-on
 
 Description
 ===========
-Google sync add-on is a flashable zip created by ale5000 for a simple installation of Google sync adapters on Android from 4.4 to 16 (excluding Android 6.x).
-No root wizardry required — just flash and go. ✨
+
+Google sync add-on is a flashable zip created by ale5000 for a simple
+installation of Google sync adapters on Android from 4.4 to 16 (excluding
+Android 6.x).
+
+No in-depth Android knowledge needed — the installer takes care of the hard
+parts. ✨
 
 This project is available on GitHub_, on GitLab_, as well as on XDA_.
 
-.. _GitHub: https://github.com/micro5k/google-sync-addon
-.. _GitLab: https://gitlab.com/micro5k/google-sync-addon
-.. _XDA: https://xdaforums.com/t/3432360/
+.. _github: https://github.com/micro5k/google-sync-addon
 
-**IMPORTANT:** In addition to the normal installation as a pure flashable zip, there are plans for the future (but not in the short term) to also support the installation as a *Magisk* module.
+.. _gitlab: https://gitlab.com/micro5k/google-sync-addon
 
-Although you may find various references to *Magisk* in the code, support is **NOT** yet ready.
+.. _xda: https://xdaforums.com/t/3432360/
+
+**IMPORTANT:** In addition to the normal installation as a pure flashable zip,
+there are plans for the future (but not in the short term) to also support the
+installation as a *Magisk* module.
+
+Although you may find various references to *Magisk* in the code, support is
+**NOT** yet ready.
 
 
 .. _readme-download:
 
 Download
 ========
-Grab the latest stable release or, if you like to live dangerously, the nightly build.
-The badges below show the current version and download statistics.
+
+Grab the latest stable release or, if you like to live dangerously, the nightly
+build. The badges below show the current version and download statistics.
 
 .. image:: https://img.shields.io/github/v/release/micro5k/google-sync-addon.svg?cacheSeconds=3600
    :alt: GitHub: latest release version
    :target: ./docs/INSTRUCTIONS.rst
 
-`Read before you flash <./docs/INSTRUCTIONS.rst>`_ *(ten minutes of reading beats one hour of re-flashing)*
+`Read before you flash <./docs/INSTRUCTIONS.rst>`_ *(ten minutes of reading
+beats one hour of re-flashing)*
 
 
 Code analysis
 =============
-Yes, the code is actually linted. No, it wasn't always pretty. Yes, it's better now. 🔍
 
-CI pipelines run on every push to keep the build healthy — the code-lint workflow checks style and correctness, while the nightly workflow validates a full automated build.
-In addition, SonarQube, Codacy, and CodeFactor provide continuous code quality analysis from multiple angles, because one linter is never enough.
+Yes, the code is actually linted. No, it wasn't always pretty. Yes, it's better
+now. 🔍
+
+CI pipelines run on every push to keep the build healthy — the code-lint
+workflow checks style and correctness, while the nightly workflow validates a
+full automated build. In addition, SonarQube, Codacy, and CodeFactor provide
+continuous code quality analysis from multiple angles, because one linter is
+never enough.
 
 .. image:: https://github.com/micro5k/google-sync-addon/actions/workflows/code-lint.yml/badge.svg
    :alt: Code lint: CI status
@@ -81,30 +103,47 @@ In addition, SonarQube, Codacy, and CodeFactor provide continuous code quality a
 
 Contributing
 ============
-If you want to improve the project, please review our `contributing guidelines <./docs/CONTRIBUTING.rst>`_.
 
-We are grateful for all our contributors! 🎉
-Seriously — every bug fix, improvement, or creative complaint has made this better.
+If you want to improve the project, please review our `contributing guidelines
+<./docs/CONTRIBUTING.rst>`_.
 
-Please check the `contributors list <./docs/CONTRIBUTORS.md>`_ for more details.
+We are grateful for all our contributors! 🎉 Seriously — every bug fix,
+improvement, or creative complaint has made this better.
 
-*(Even fixing a typo counts. Probably. We'll review it very carefully either way.)*
+Please check the `contributors list <./docs/CONTRIBUTORS.md>`_ for more
+details.
+
+*(Even fixing a typo counts. Probably. We'll review it very carefully either
+way.)*
 
 
 Donations
 =========
+
 .. image:: https://img.shields.io/badge/Donate-FFF000?style=for-the-badge&logo=ko-fi&logoSize=auto&logoColor=black&cacheSeconds=21600
    :alt: Support this project
    :target: ./docs/DONATE.rst
 
-I maintain this project on my own in my spare time — the finite, precious kind that competes with sleep, meals eaten while staring at a terminal, and the occasional social obligation.
+I maintain this project on my own in my spare time — the finite, precious
+kind that competes with sleep, meals eaten while staring at a terminal, and the
+occasional social obligation.
 
-If it's saved you time, or frustration, please consider supporting its development!
+If it's saved you time, or frustration, please consider supporting its
+development!
 
-Wondering how? Check out all the ways to `fuel this project <./docs/DONATE.rst>`_ — coffee, kind words, or cold hard crypto, it's all welcome.
-*(No pressure. But the coffee does make the bugs fix themselves slightly faster.)*
+Wondering how? Check out all the ways to `fuel this project
+<./docs/DONATE.rst>`_ — coffee, kind words, or cold hard crypto, it's all
+welcome. *(No pressure. But the coffee does make the bugs fix themselves
+slightly faster.)*
 
 
 Copyright
 =========
+
+..
+   REUSE-IgnoreStart
+
 © 2016-2019, 2021-2026 ale5000
+
+..
+   REUSE-IgnoreEnd
