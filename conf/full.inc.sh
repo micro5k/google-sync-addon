@@ -1,8 +1,8 @@
-#!/usr/bin/env bash
+#!/usr/bin/env sh
 # SPDX-FileCopyrightText: NONE
 # SPDX-License-Identifier: CC0-1.0
 
-files_to_download()
+conf_full_files_to_download()
 {
   cat << 'EOF'
 GoogleContactsSyncAdapter12|priv-app|31||GoogleContactsSyncAdapter|com.google.android.syncadapters.contacts|b680052da895d9a198b856162148de78bc5ad550e46d92239ee9c9308c86ee04|www.apkmirror.com/apk/google-inc/google-contacts-sync/google-contacts-sync-12-8361351-release/google-contacts-sync-12-8361351-android-apk-download/|cold1.gofile.io/download/web/e9cee2f5-0c8c-4fe1-9d5a-3cf13ab395f7/GoogleContactsSyncAdapter12.apk
