@@ -13,51 +13,68 @@ plugins {
     //id 'com.github.spotbugs' version '4.7.6'
 }
 
-develocity.buildScan {
-    termsOfUseUrl.set 'https://gradle.com/help/legal-terms-of-use'
-    termsOfUseAgree.set 'yes'
-    publishing.onlyIf { System.getenv('UPLOAD_BUILD_SCAN') != null }
+def moduleProps = providers.fileContents(layout.projectDirectory.file('zip-content/module.prop'))
+    .asText
+    .map { text ->
+        def p = new Properties()
+        p.load(new StringReader(text))
+        return p
+    }
+
+//def moduleProps = providers.properties(layout.projectDirectory.file('zip-content/module.prop'))
+
+configure(project) {
+    layout.buildDirectory = 'output'
+    defaultTasks 'tasks'
+
+    ext {
+        lazyDescription = moduleProps.map { it.getProperty('description', 'Unknown flashable ZIP') }
+        lazyVersion = moduleProps.map { it.getProperty('version', 'v0.0.0-unknown').trim().toLowerCase(Locale.ROOT) }
+        lazyGroup = moduleProps.map { it.getProperty('group', 'unknown').trim() }
+        lazyProjectId = moduleProps.map { it.getProperty('id', '').trim() }
+    }
+
+    if (!JavaVersion.current().isCompatibleWith(JavaVersion.VERSION_17)) {
+        throw new GradleException('Java 17 or later is required.')
+    }
+}
+
+/* ===HEADER=== */
+
+interface HeaderParams extends FlowParameters {
+    @Input Property<String> getProjectName()
+    @Input Property<String> getVersion()
+}
+
+abstract class HeaderAction implements FlowAction<HeaderParams> {
+    private static final log = Logging.getLogger(HeaderAction)
+
+    void execute(FlowParameters p) {
+        log.lifecycle '=' * 36
+        log.lifecycle "Project: ${p.projectName.get()}"
+        log.lifecycle "Version: ${p.version.get()}"
+        log.lifecycle "OS:      ${System.getProperty('os.name')}"
+        log.lifecycle '=' * 36
+    }
+}
+
+services.get(FlowScope).always(HeaderAction) {
+    parameters.projectName.set(project.name)
+    parameters.version.set(ext.lazyVersion)
 }
 
 /* ===FUNCTIONS=== */
-
-private void initialize() {
-    Properties props = new Properties()
-
-    defaultTasks 'tasks'
-
-    // Define the custom build directory
-    layout.buildDirectory = 'output'
-
-    // Load properties from module.prop
-    def moduleProp = project.file('zip-content/module.prop')
-    if (moduleProp.exists()) {
-        moduleProp.withInputStream { props.load(it) }
-    }
-
-    description = String.valueOf(props.getProperty('description', 'Unknown flashable ZIP'))
-    version = String.valueOf(props.getProperty('version', 'v0.0.0-unknown')).toLowerCase(Locale.ENGLISH).trim()
-    group = String.valueOf(props.getProperty('group', 'unknown'))
-    ext.projectId = String.valueOf(props.getProperty('id', '')).trim()
-
-    ext.isAlpha = version.endsWith('-alpha')
-    //ext.isBeta = version.endsWith('-beta')
-
-    if(JavaVersion.current() < JavaVersion.VERSION_17) {
-        throw new GradleException('Java 17 or later is required')
-    }
-}
 
 private static String getScriptExt() {
     System.getProperty('os.name').toLowerCase(Locale.ROOT).contains('windows') ? '.bat' : '.sh'
 }
 
+private Provider<String> getMavenVersion() {
+    ext.lazyVersion.map { it.endsWith('-alpha') ? "${it}-SNAPSHOT" : it }
+}
+
 private Provider<String> getProjectId() {
-    project.provider {
-        project.findProperty('projectId') ?: { 
-            throw new InvalidUserDataException('projectId is empty or null.') 
-        }()
-    }
+    ext.lazyProjectId.map { it ?: { throw new InvalidUserDataException('id in "zip-content/module.prop" is empty or not set.') }() }
 }
 
 private Provider<String> getGitCommitHash() {
@@ -67,12 +84,20 @@ private Provider<String> getGitCommitHash() {
 }
 
 private Provider<String> getZipName(String variant = '*') {
-    getProjectId().zip(getGitCommitHash()) { id, gitCommitHash ->
-        "${id}-${project.version}-g${gitCommitHash}-${variant}-by-ale5000-signed.zip"
+    ext.lazyVersion.flatMap { v ->
+        getProjectId().zip(getGitCommitHash()) { id, hash ->
+            "${id}-${v}-g${hash}-${variant}-by-ale5000-signed.zip"
+        }
     }
 }
 
-private void configureSigning(def android, File keystorePropsFile) {
+/*private Provider<String> getZipName(String variant = '*') {
+    providers.zip(getProjectId(), getGitCommitHash(), ext.lazyVersion) { id, hash, v ->
+        "${id}-${v}-g${hash}-${variant}-by-ale5000-signed.zip"
+    }
+}*/
+
+/*private void configureSigning(def android, File keystorePropsFile) {
     if(!keystorePropsFile.exists()) return
     if(android == null) throw new GradleException('android is null inside configureSigning()')
 
@@ -102,9 +127,7 @@ private void configureSigning(def android, File keystorePropsFile) {
     }
 
     android.buildTypes.release.signingConfig android.signingConfigs.config
-}
-
-initialize()
+}*/
 
 /* ===BLOCKS=== */
 
@@ -112,15 +135,30 @@ base {
     archivesName.set(getProjectId())
 }
 
-/* ==TASKS=== */
+project.afterEvaluate {
+    // Keep it as lazy as possible while ensuring values show up correctly in 'gradlew properties',
+    // since these Gradle properties and the maven-publish plugin don't support Providers.
 
-gradle.taskGraph.whenReady {
-    logger.lifecycle '='*36
-    logger.lifecycle "Project: ${project.name}"
-    logger.lifecycle "Version: ${project.version}"
-    logger.lifecycle "OS:      ${System.getProperty('os.name')}"
-    logger.lifecycle '='*36
+    description = "${-> ext.lazyDescription.get()}"
+    version = "${-> ext.lazyVersion.get()}"
+    group = "${-> ext.lazyGroup.get()}"
+
+    publishing {
+        publications {
+            maven(MavenPublication) {
+                groupId = 'com.github.micro5k'
+                artifactId = "${-> getProjectId().get()}"
+                version = "${-> getMavenVersion().get()}"
+                pom {
+                    name = "${-> project.name}"
+                    packaging = 'zip'
+                }
+            }
+        }
+    }
 }
+
+/* ===TASKS=== */
 
 tasks.register('cleanRecoveryOutput', Delete) {
     group = '- Cleanup'
@@ -225,8 +263,11 @@ tasks.named('build') {
 }
 
 tasks.register('installTest', Exec) {
+    notCompatibleWithConfigurationCache('Not yet compatible with CC.')
     group = 'verification'
     description = 'Test the flashable zip in a simulated Android recovery environment on your PC.'
+
+    doNotTrackState('Force task execution by disabling up-to-date checks.')
     mustRunAfter build, buildOta, buildOtaOSS
 
     doFirst {
@@ -242,29 +283,17 @@ tasks.register('test') {
     dependsOn installTest
 }
 
-tasks.named('wrapper').configure {
-    println 'Gradle: ' + gradleVersionTarget
+tasks.named('wrapper') {
     gradleVersion = gradleVersionTarget
     distributionSha256Sum = gradleSha256Sum
-}
 
-/* === PUBLISHING === */
-
-publishing {
-    publications {
-        maven(MavenPublication) {
-            groupId = 'com.github.micro5k'
-            artifactId = getProjectId().get()
-            version = project.ext.isAlpha ? "${project.version}-SNAPSHOT" : project.version
-            pom {
-                name = project.name
-                packaging = 'zip'
-            }
-        }
+    doFirst {
+        logger.lifecycle("Gradle: ${gradleVersionTarget}")
     }
 }
 
 tasks.withType(PublishToMavenLocal).configureEach {
+    notCompatibleWithConfigurationCache('Not yet compatible with CC.')
     // Ensure builds run before this task
     mustRunAfter 'build', 'buildOta', 'buildOtaOSS'
 
