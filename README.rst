@@ -10,9 +10,6 @@ Google sync add-on
 :Author:
    `ale5000 <https://github.com/ale5000-git>`_
 
-:License:
-   `GPLv3.0 or later <https://www.gnu.org/licenses/gpl-3.0.html>`_
-
 .. image:: https://app.readthedocs.org/projects/google-sync-addon/badge/?version=latest
    :alt: Documentation status
    :target: https://google-sync-addon.readthedocs.io/en/latest/
@@ -135,6 +132,31 @@ development!
    coffee, kind words, or cold hard crypto, it's all welcome.
 |  *(No pressure. But the coffee does make the bugs fix themselves slightly
    faster.)*
+
+
+License
+=======
+
+This project is licensed under the **GNU General Public License v3.0 or later**
+(GPLv3+), with a custom **Archive Packaging Exception** to facilitate
+distribution in compressed packages.
+
+-  **Core license**: The full text of the GPLv3 can be found in `LICENSE.rst
+   <./LICENSE.rst>`__.
+-  **Exception terms**: The specific permissions for creating archives are
+   detailed in `LICENSE-EXCEPTION.rst <./LICENSE-EXCEPTION.rst>`__.
+
+**What this means for you:** You are free to bundle this software into your own
+archives (such as flashable ZIPs or tarballs) alongside proprietary or
+differently licensed modules, provided those modules are independent and not
+derived from this software.
+
+**Note for developers:** The following SPDX identifier is used in this project's
+source files to enable the archive packaging exception:
+
+.. code:: yaml
+
+   SPDX-License-Identifier: GPL-3.0-or-later WITH LicenseRef-Archive-packaging-exception
 
 
 Copyright
