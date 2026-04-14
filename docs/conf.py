@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 # SPDX-FileCopyrightText: 2026 ale5000
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: LGPL-3.0-or-later
 
 """Configuration file for the Sphinx documentation builder.
 
@@ -12,7 +12,7 @@ https://www.sphinx-doc.org/en/master/usage/configuration.html
 
 import datetime
 import os
-import subprocess  # nosec B404
+import subprocess  # nosec: B404
 import sys
 
 from docutils import nodes
@@ -30,7 +30,7 @@ except ImportError:
     pass
 
 try:
-    from subprocess import DEVNULL as _TMP_DEVNULL
+    from subprocess import DEVNULL as _TMP_DEVNULL  # nosec: B404
 
     _DEVNULL = _TMP_DEVNULL  # type: int | IO[Any]
 except ImportError:
@@ -143,14 +143,14 @@ def get_revision():
     try:
         return (
             # Safe: uses list-based arguments (no shell) to prevent injection
-            subprocess.check_output(  # nosec B603 # noqa: S603
-                [git, "rev-parse", "--short=8", "HEAD"],
+            subprocess.check_output(  # nosec: B603 # noqa: S603
+                [git, "rev-parse", "--short=8", "HEAD"],  # nosemgrep
                 stderr=_DEVNULL,
             )
             .decode("utf-8")
             .strip()
         )
-    except Exception:
+    except (FileNotFoundError, subprocess.CalledProcessError):
         return None
 
 
@@ -197,11 +197,10 @@ def _transform_rst_links(app, doctree):
         parts = uri.split("#", 1)
         has_anchor = len(parts) > 1
         reftype = "ref" if has_anchor else "doc"
-        reftarget = (
-            parts[1]
-            if has_anchor
-            else (parts[0][:-4] if parts[0].endswith(".rst") else parts[0])
-        )
+        if has_anchor:
+            reftarget = parts[1]
+        else:
+            reftarget = parts[0][:-4] if parts[0].endswith(".rst") else parts[0]
         logger.info(
             "[DEBUG] Converting %s -> :%s:`%s`",
             uri,
@@ -275,7 +274,8 @@ source_suffix = {".rst": "restructuredtext", ".md": "markdown"}
 
 # Links are working using implicit references but MyST still emit warnings
 # instead of verify
-suppress_warnings = ["myst.xref_missing"]  # TODO: Find an alternative way
+# TODO: Find an alternative way
+suppress_warnings = ["myst.xref_missing"]
 
 # Options for HTML output
 html_theme = "sphinx_rtd_theme"

@@ -41,22 +41,28 @@ configure(project) {
 
 /* ===FUNCTIONS=== */
 
-private Provider<String> getScriptExt() {
-    ext.lazyOsName.map { it.toLowerCase(Locale.ROOT).contains('windows') ? '.bat' : '.sh' }
-}
+import groovy.transform.Memoized
 
-private Provider<String> getMavenVersion() {
-    ext.lazyVersion.map { it.endsWith('-alpha') ? "${it}-SNAPSHOT" : it }
-}
-
+@Memoized
 private Provider<String> getProjectId() {
     ext.lazyProjectId.map { it ?: { throw new InvalidUserDataException('id in "zip-content/module.prop" is empty or not set.') }() }
 }
 
+@Memoized
+private Provider<String> getScriptExt() {
+    ext.lazyOsName.map { it.toLowerCase(Locale.ROOT).contains('windows') ? '.bat' : '.sh' }
+}
+
+@Memoized
 private Provider<String> getGitCommitHash() {
     providers.exec {
         commandLine 'git', 'rev-parse', '--short=8', 'HEAD'
     }.standardOutput.asText.map{ it.trim() }.orElse('unknown')
+}
+
+@Memoized
+private Provider<String> getMavenVersion() {
+    ext.lazyVersion.map { it.endsWith('-alpha') ? "${it}-SNAPSHOT" : it }
 }
 
 private Provider<String> getZipName(String variant = '*') {
@@ -181,7 +187,7 @@ tasks.register('cleanRecoveryOutput', Delete) {
 
 tasks.named('clean') {
     group = '- Cleanup'
-    dependsOn tasks.named('cleanRecoveryOutput')
+    dependsOn 'cleanRecoveryOutput'
 }
 
 tasks.register('cleanCache', Delete) {
@@ -190,10 +196,26 @@ tasks.register('cleanCache', Delete) {
     delete layout.projectDirectory.dir('cache')
 }
 
+tasks.register('cleanPubTmpFiles', Delete) {
+    group = '- Cleanup'
+    dependsOn 'cleanGeneratePomFileForMavenPublication'
+
+    delete layout.buildDirectory.dir('tmp/publishMavenPublicationToMavenLocal')
+    delete layout.buildDirectory.dir('tmp/generatedChecksums')
+
+    doLast {
+        ['publications/maven', 'publications', 'tmp'].each {
+            if(layout.buildDirectory.dir(it).get().asFile?.delete()) {
+                logger.info "Removed empty temporary folder: ${-> it}"
+            }
+        }
+    }
+}
+
 tasks.register('distClean') {
     group = '- Cleanup'
     description = 'Cleans all build outputs, local caches, and removes all untracked/ignored files via Git.'
-    dependsOn tasks.named('clean'), tasks.named('cleanCache')
+    dependsOn 'clean', 'cleanCache', 'cleanPubTmpFiles'
 
     doLast {
         if (layout.projectDirectory.dir('.git').asFile.exists()) {
@@ -268,7 +290,7 @@ tasks.register('buildOtaOSS', Exec) {
 tasks.named('assemble') {
     group = null
     description = 'Alias of "buildOtaOSS" task.'
-    dependsOn tasks.named('buildOtaOSS')
+    dependsOn 'buildOtaOSS'
 }
 
 tasks.named('build') {
@@ -277,20 +299,23 @@ tasks.named('build') {
 }
 
 tasks.register('installTest', Exec) {
-    notCompatibleWithConfigurationCache('Not yet compatible with CC.')
     group = 'verification'
     description = 'Test the flashable zip in a simulated Android recovery environment on your PC.'
 
     doNotTrackState('Force task execution by disabling up-to-date checks.')
     mustRunAfter buildOta, buildOtaOSS
 
-    doFirst {
-        environment LIVE_SETUP_ALLOWED: 'false' /* Live setup doesn't work when executed through Gradle */
-        environment NO_PAUSE: '1'
-        environment BB_GLOBBING: '1'
-        executable "${projectDir}/recovery-simulator/recovery" + getScriptExt()
-        args "${projectDir}/output/*.zip"
-    }
+    workingDir = layout.projectDirectory
+    executable = "${-> layout.projectDirectory.dir('recovery-simulator').file("recovery${ getScriptExt().get() }") }"
+
+    final Provider<RegularFile> outFilesProv = layout.buildDirectory.file('*.zip')
+    argumentProviders.add({ [outFilesProv.get().asFile.absolutePath] } as CommandLineArgumentProvider)
+
+    environment([
+        'LIVE_SETUP_ALLOWED': 'false', /* Live setup doesn't work when executed through Gradle */
+        'NO_PAUSE': '1',
+        'BB_GLOBBING': '1'
+    ])
 }
 
 tasks.register('test') {
@@ -310,8 +335,7 @@ tasks.named('wrapper') {
 
 /* === PUBLISHING === */
 
-final Closure<String> getMemoizedZipName = { getZipName().get() }.memoize()
-final Provider<FileTree> zipFilesTree = layout.buildDirectory.map { dir -> dir.asFileTree.matching { include getMemoizedZipName() } }
+final Provider<FileTree> zipFilesTree = getZipName().map { name -> layout.buildDirectory.asFileTree.matching { include name } }
 
 /*abstract class DynamicArtifactSource implements ValueSource<Integer, DynamicArtifactParams> {
     private static final List<String> artifactTypes = ['oss', 'full'].asImmutable()
@@ -327,8 +351,8 @@ final Provider<FileTree> zipFilesTree = layout.buildDirectory.map { dir -> dir.a
         parameters.zipFiles.files.each { foundFile ->
             String type = artifactTypes.find { foundFile.name.contains("-${it}-") } ?: { throw new GradleException("Publishing failed: File ${foundFile.name} is missing a valid build type.") }()
             if(!seen.add(type)) throw new GradleException("Publishing failed: The type '${type}' already exists.")
-            String currClsf = (type == 'oss' ? null : type)
-            mavenPub.artifact(foundFile) { extension = 'zip'; classifier = currClsf; builtBy 'collectArtifacts' }
+            String clsf = (type == 'oss' ? null : type)
+            mavenPub.artifact(foundFile) { extension = 'zip'; classifier = clsf; builtBy 'collectArtifacts' }
         }
         if(seen.isEmpty()) throw new GradleException("Publishing failed: No artifact found. Check if build tasks were executed.")
         seen.size()
@@ -342,33 +366,39 @@ final Provider<Integer> artifactsProcessor = providers.of(DynamicArtifactSource)
 import java.security.MessageDigest
 import java.security.DigestInputStream
 
-File generateChecksum(targetFile, algorithm) {
-    final MessageDigest md = MessageDigest.getInstance(algorithm.toUpperCase().replace('SHA256', 'SHA-256').replace('SHA1', 'SHA-1'))
+File generateChecksum(targetFile, hashExt, checksumsDir) {
+    final MessageDigest md = MessageDigest.getInstance(hashExt.toUpperCase().replace('SHA256', 'SHA-256').replace('SHA1', 'SHA-1'))
     final byte[] buffer = new byte[65536]
     targetFile.withInputStream {
         final DigestInputStream dis = new DigestInputStream(it, md)
         while(dis.read(buffer) != -1) { }
     }
-    final File chksumFile = file("${targetFile.absolutePath}.${algorithm}")
+    final File chksumFile = new File(checksumsDir, "${targetFile.name}.${hashExt}")
     chksumFile.text = md.digest().encodeHex().toString()
 
     chksumFile
 }
 
 Integer processArtifacts(parameters, mavenPub) {
+    final Directory tmpDir = layout.buildDirectory.dir('tmp').get()
+    final File checksumsDir = tmpDir.dir('generatedChecksums').asFile
+    checksumsDir?.deleteDir()
+    checksumsDir.mkdirs()
+    tmpDir.asFile?.deleteOnExit()
+
     final List<String> artifactTypes = ['oss', 'full'].asImmutable()
     final HashSet<String> seen = []
     final boolean isLocal = gradle.startParameter.taskNames.any { it == 'publishToMavenLocal' || it.endsWith(':publishToMavenLocal') }
     parameters.zipFiles.files.each { foundFile ->
         final String type = artifactTypes.find { foundFile.name.contains("-${it}-") } ?: { throw new GradleException("Publishing failed: File ${foundFile.name} is missing a valid build type.") }()
         if(!seen.add(type)) throw new GradleException("Publishing failed: The type '${type}' already exists.")
-        final String currClsf = (type == 'oss' ? null : type)
-        mavenPub.artifact(foundFile) { extension = 'zip'; classifier = currClsf; builtBy 'collectArtifacts' }
+        final String clsf = (type == 'oss' ? null : type)
+        mavenPub.artifact(foundFile) { extension = 'zip'; classifier = clsf; builtBy 'collectArtifacts' }
         if(isLocal) {
             ['sha256', 'sha1', 'md5'].each { hashExt ->
                 final File existChksumFile = file("${foundFile.absolutePath}.${hashExt}")
-                final File chksumFile = existChksumFile.exists() ? existChksumFile : generateChecksum(foundFile, hashExt)
-                mavenPub.artifact(chksumFile) { extension = "zip.${hashExt}"; classifier = currClsf; builtBy 'collectArtifacts' }
+                final File chksumFile = existChksumFile.exists() ? existChksumFile : generateChecksum(foundFile, hashExt, checksumsDir)
+                mavenPub.artifact(chksumFile) { extension = "zip.${hashExt}"; classifier = clsf; builtBy 'collectArtifacts' }
             }
         }
     }
@@ -417,6 +447,10 @@ tasks.register('showPublishedArtifacts') {
     }
 }
 
+tasks.named('publishToMavenLocal') {
+    finalizedBy 'cleanPubTmpFiles'
+}
+
 tasks.withType(GenerateMavenPom).configureEach {
     dependsOn 'collectArtifacts'
 }
@@ -431,7 +465,7 @@ tasks.withType(GenerateMavenPom).configureEach {
 
 /* ===HEADER=== */
 
-abstract class HeaderPrinter implements ValueSource<Boolean, HeaderParams> {
+abstract class HeaderPrinter implements ValueSource<String, HeaderParams> {
     private static final log = Logging.getLogger(HeaderPrinter)
 
     interface HeaderParams extends ValueSourceParameters {
@@ -441,13 +475,13 @@ abstract class HeaderPrinter implements ValueSource<Boolean, HeaderParams> {
     }
 
     @Override
-    Boolean obtain() {
+    String obtain() {
         log.lifecycle '=' * 36
         log.lifecycle "Project: ${parameters.projectName.get()}"
         log.lifecycle "Version: ${parameters.version.get()}"
         log.lifecycle "OS:      ${parameters.osName.get()}"
         log.lifecycle '=' * 36
-        true
+        ''
     }
 }
 
@@ -458,5 +492,5 @@ def headerTrigger = providers.of(HeaderPrinter) {
 }
 
 gradle.taskGraph.whenReady {
-    { headerTrigger.get() }
+    logger.info "${-> headerTrigger.get()}"
 }
