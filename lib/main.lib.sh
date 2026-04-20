@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later WITH LicenseRef-Archive-packaging-exception
 
 # shellcheck enable=all
+# shellcheck disable=SC2240 # Ignore: The dot command does not support arguments in sh/dash
 # shellcheck disable=SC3028 # Ignore: In POSIX sh, FUNCNAME is undefined
 # shellcheck disable=SC3043 # Ignore: In POSIX sh, 'local' is undefined
 
@@ -116,6 +117,17 @@ ui_debug()
 ui_nl()
 {
   printf 1>&2 '\n'
+}
+
+run_hook()
+{
+  local hook_file="${MAIN_DIR:?}/build-hooks/${1:?}.hook.sh"
+
+  if test -f "${hook_file:?}"; then
+    ui_debug "Running hook: ${1?}..."
+    # shellcheck source=/dev/null
+    . "${hook_file:?}" "${hook_file:?}" "${@}" || ui_error "Hook '${1?}' failed with exit code ${?}" "${LINENO-}" "${FUNCNAME-}"
+  fi
 }
 
 export DL_DEBUG="${DL_DEBUG:-false}"
@@ -1592,6 +1604,11 @@ init_cmdline()
   bundle()
   {
     HOME="${USER_HOME:-${HOME:?}}" command -- bundle "${@}"
+  }
+
+  bundler()
+  {
+    HOME="${USER_HOME:-${HOME:?}}" command -- bundler "${@}"
   }
 
   if test "${CI:-false}" = 'false'; then
