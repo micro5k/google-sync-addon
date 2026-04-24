@@ -1,0 +1,27 @@
+---
+# SPDX-FileCopyrightText: NONE
+# SPDX-License-Identifier: CC0-1.0
+
+cff-version: 1.2.0
+title: "Google sync add-on"
+message: "If you use this software, please cite it using the metadata from this file."
+type: software
+authors:
+  - alias: "ale5000"
+    orcid: "https://orcid.org/0009-0002-1106-0669"
+identifiers:
+  - type: other
+    value: "License: GPL-3.0-or-later WITH LicenseRef-Archive-packaging-exception"
+    description: >-
+      Licensed under GPL-3.0-or-later WITH LicenseRef-Archive-packaging-exception.
+      The full text of this exception is available in the LICENSE-EXCEPTION.rst file at the root of this repository.
+repository-code: "https://github.com/micro5k/google-sync-addon"
+abstract: "A tool to simplify Google sync adapters installation on Android devices."
+keywords:
+  - android
+  - flashable-zip
+  - flashable
+  - sync
+  - microg
+  - gapps
+license: "GPL-3.0-or-later"
