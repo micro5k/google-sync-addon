@@ -19,6 +19,7 @@ docs/CODEOWNERS     text eol=lf
 .shellcheckrc       text eol=lf
 .tool-versions      text eol=lf
 
+*.cff               text eol=lf
 *.gpg               text eol=lf
 *.js                text eol=lf
 *.json              text eol=lf

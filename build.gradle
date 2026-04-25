@@ -13,23 +13,23 @@ plugins {
     //id 'com.github.spotbugs' version '4.7.6'
 }
 
-def moduleProps = providers.fileContents(layout.projectDirectory.file('zip-content/module.prop'))
-    .asText
-    .map { text ->
-        def p = new Properties()
-        p.load(new StringReader(text))
-        return p
-    }
-
-//def moduleProps = providers.properties(layout.projectDirectory.file('zip-content/module.prop'))
-
 configure(project) {
     defaultTasks 'tasks'
 
     ext {
-        lazyDescription = moduleProps.map { it.getProperty('description', 'Unknown flashable ZIP') }
+        moduleProps = providers.fileContents(layout.projectDirectory.file('zip-content/module.prop'))
+            .asText
+            .map {
+                final Properties p = new Properties()
+                p.load(new StringReader(it))
+                p
+            } as Provider<Properties>
+
+        //moduleProps = providers.properties(layout.projectDirectory.file('zip-content/module.prop')) as Provider<Properties>
+
+        //lazyDescription = moduleProps.map { it.getProperty('description', 'Unknown flashable ZIP') }
         lazyVersion = moduleProps.map { it.getProperty('version', 'v0.0.0-unknown').trim().toLowerCase(Locale.ROOT) }
-        lazyGroup = moduleProps.map { it.getProperty('group', 'unknown').trim() }
+        //lazyGroup = moduleProps.map { it.getProperty('group', 'unknown') }
         lazyProjectId = moduleProps.map { it.getProperty('id', '').trim() }
         lazyOsName = providers.systemProperty('os.name')
     }
@@ -49,15 +49,46 @@ private Provider<String> getProjectId() {
 }
 
 @Memoized
+private Provider<String> getLazyAuthor() {
+    moduleProps.map { it.getProperty('author', 'unknown') }
+}
+
+@Memoized
+private Provider<String> getLazyDescription() {
+    moduleProps.map { it.getProperty('description', 'Unknown flashable ZIP.') }
+}
+
+@Memoized
+private Provider<String> getLazyGroup() {
+    moduleProps.map { it.getProperty('group', 'unknown') }
+}
+
+@Memoized
+private Provider<String> getLazyOrg() {
+    moduleProps.map { it.getProperty('organization', 'unknown') }
+}
+
+@Memoized
+private Provider<String> getLazyLicense() {
+    moduleProps.map { it.getProperty('license', 'unknown') }
+}
+
+@Memoized
 private Provider<String> getScriptExt() {
     ext.lazyOsName.map { it.toLowerCase(Locale.ROOT).contains('windows') ? '.bat' : '.sh' }
 }
 
 @Memoized
 private Provider<String> getGitCommitHash() {
-    providers.exec {
-        commandLine 'git', 'rev-parse', '--short=8', 'HEAD'
-    }.standardOutput.asText.map{ it.trim() }.orElse('unknown')
+    providers.provider { layout.projectDirectory.dir('.git').asFile.exists() }.flatMap { exists ->
+        if(!exists) {
+            return providers.provider { 'NOGIT' }
+        }
+
+        providers.exec {
+            commandLine 'git', 'rev-parse', '--short=8', 'HEAD'
+        }.standardOutput.asText.map { "g${ it.trim() }" }.orElse('unknown')
+    }
 }
 
 @Memoized
@@ -68,14 +99,14 @@ private Provider<String> getMavenVersion() {
 private Provider<String> getZipName(String variant = '*') {
     ext.lazyVersion.flatMap { v ->
         getProjectId().zip(getGitCommitHash()) { id, hash ->
-            "${id}-${v}-g${hash}-${variant}-by-ale5000-signed.zip"
+            "${id}-${v}-${hash}-${variant}-by-ale5000-signed.zip"
         }
     }
 }
 
 /*private Provider<String> getZipName(String variant = '*') {
     providers.zip(getProjectId(), getGitCommitHash(), ext.lazyVersion) { id, hash, v ->
-        "${id}-${v}-g${hash}-${variant}-by-ale5000-signed.zip"
+        "${id}-${v}-${hash}-${variant}-by-ale5000-signed.zip"
     }
 }*/
 
@@ -143,32 +174,32 @@ project.afterEvaluate {
     // Keep it as lazy as possible while ensuring values show up correctly in 'gradlew properties',
     // since these Gradle properties and the maven-publish plugin don't support Providers.
 
-    description = "${-> ext.lazyDescription.get()}"
-    version = "${-> ext.lazyVersion.get()}"
-    group = "${-> ext.lazyGroup.get()}"
+    description = "${-> lazyDescription.get() }"
+    version = "${-> ext.lazyVersion.get() }"
+    group = "${-> lazyGroup.get() }"
 
     publishing {
         publications {
             maven(MavenPublication) {
-                groupId = 'com.github.micro5k'
-                artifactId = "${-> getProjectId().get()}"
-                version = "${-> getMavenVersion().get()}"
+                groupId = "com.github.${-> lazyOrg.get() }"
+                artifactId = "${-> getProjectId().get() }"
+                version = "${-> getMavenVersion().get() }"
                 pom {
-                    name = "${-> project.name}"
+                    name = "${-> project.name }"
                     packaging = 'zip'
 
                     licenses {
                         license {
-                            name = 'GPL-3.0-or-later WITH LicenseRef-Archive-packaging-exception'
+                            name = "${-> lazyLicense.get() }"
                             url = 'https://www.gnu.org/licenses/gpl-3.0.txt'
                             distribution = 'repo'
-                            comments = 'Licensed under GNU General Public License v3.0 or later with Archive Packaging Exception. Full license texts are available in LICENSES within the ZIP.'
+                            comments = 'The full text of the licenses can be found in the LICENSES directory contained in the ZIP archive.'
                         }
                     }
 
                     developers {
                         developer {
-                            id = 'ale5000'
+                            id = "${-> lazyAuthor.get() }"
                         }
                     }
                 }
