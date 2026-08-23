@@ -389,11 +389,17 @@ if test -n "${CYGPATH?}"; then
 else
   _android_path="${_our_overrider_dir:?}${PATHSEP:?}${_android_sys:?}/bin"
 fi
-_android_tmp="${_base_simulation_path:?}/tmp"
 
+_android_tmp="${_base_simulation_path:?}/tmp"
 _android_busybox="${_android_sys:?}/bin/busybox"
 
-readonly _android_ext_stor _android_sec_stor _android_lib_path _android_data _android_sys _android_path _android_tmp _android_busybox
+if test "${COVERAGE:-false}" = 'false'; then
+  _android_update_bin="${_android_tmp:?}/update-binary"
+else
+  _android_update_bin="${_android_tmp:?}/update-binary.sh"
+fi
+
+readonly _android_ext_stor _android_sec_stor _android_lib_path _android_data _android_sys _android_path _android_tmp _android_busybox _android_update_bin
 
 # Simulate the Android recovery environment inside the temp folder
 mkdir -p "${_base_simulation_path:?}"
@@ -436,8 +442,8 @@ mkdir -p "${_android_sys:?}/framework"
 zip -D -9 -X -UN=n -nw -q "${_android_sys:?}/framework/framework-res.apk" 'AndroidManifest.xml' || fail_with_msg 'Failed compressing framework-res.apk'
 rm -f -- "${_base_simulation_path:?}/AndroidManifest.xml"
 
-cp -pf -- "${THIS_SCRIPT_DIR:?}/updater.sh" "${_android_tmp:?}/updater" || fail_with_msg 'Failed to copy the updater script'
-chmod +x "${_android_tmp:?}/updater" || fail_with_msg "chmod failed on '${_android_tmp?}/updater'"
+cp -pf -- "${THIS_SCRIPT_DIR:?}/updater.sh" "${_android_tmp:?}/updater.sh" || fail_with_msg 'Failed to copy the updater.sh script'
+chmod 0755 "${_android_tmp:?}/updater.sh" || fail_with_msg "chmod failed on '${_android_tmp?}/updater.sh'"
 
 if test "${COVERAGE:-false}" != 'false'; then
   cd "${_init_dir:?}" || fail_with_msg 'Failed to change back the folder'
@@ -555,13 +561,14 @@ flash_zips()
     # Simulate the environment variables of a real recovery
     simulate_env || return "${?}"
 
-    "${_android_busybox:?}" unzip -opq "${_android_sec_stor:?}/${FLASHABLE_ZIP_NAME:?}" 'META-INF/com/google/android/update-binary' > "${_android_tmp:?}/update-binary" || fail_with_msg 'Failed to extract the update-binary'
+    "${_android_busybox:?}" unzip -opq "${_android_sec_stor:?}/${FLASHABLE_ZIP_NAME:?}" 'META-INF/com/google/android/update-binary' > "${_android_update_bin:?}" || fail_with_msg 'Failed to extract the update-binary'
+    chmod 0755 "${_android_update_bin:?}" || fail_with_msg "chmod failed on '${_android_update_bin?}'"
 
     echo "custom_flash_start ${_android_sec_stor:?}/${FLASHABLE_ZIP_NAME:?}" 1>&"${recovery_fd:?}"
     set +e
     # Execute the script that will run the flashable zip
     if test "${COVERAGE:-false}" = 'false'; then
-      "${_android_busybox:?}" sh -- "${_android_tmp:?}/updater" 3 "${recovery_fd:?}" "${_android_sec_stor:?}/${FLASHABLE_ZIP_NAME:?}" 1> >("${_tee_cmd:?}" -a "${recovery_logs_dir:?}/recovery-raw.log" "${recovery_logs_dir:?}/recovery-stdout.log" || true) 2> >("${_tee_cmd:?}" -a "${recovery_logs_dir:?}/recovery-raw.log" "${recovery_logs_dir:?}/recovery-stderr.log" 1>&2 || true)
+      "${_android_busybox:?}" sh -- "${_android_tmp:?}/updater.sh" 3 "${recovery_fd:?}" "${_android_sec_stor:?}/${FLASHABLE_ZIP_NAME:?}" 1> >("${_tee_cmd:?}" -a "${recovery_logs_dir:?}/recovery-raw.log" "${recovery_logs_dir:?}/recovery-stdout.log" || true) 2> >("${_tee_cmd:?}" -a "${recovery_logs_dir:?}/recovery-raw.log" "${recovery_logs_dir:?}/recovery-stderr.log" 1>&2 || true)
     else
       COVERAGE_SHELL="${SHELL_CMD:?}" "${SHELL_CMD:?}" -x -- "${THIS_SCRIPT_DIR:?}/updater.sh" 3 "${recovery_fd:?}" "${_android_sec_stor:?}/${FLASHABLE_ZIP_NAME:?}" 1> >("${_tee_cmd:?}" -a "${recovery_logs_dir:?}/recovery-raw.log" "${recovery_logs_dir:?}/recovery-stdout.log" || true) 2> >("${_tee_cmd:?}" -a "${recovery_logs_dir:?}/recovery-raw.log" "${recovery_logs_dir:?}/recovery-stderr.log" 1>&2 || true)
     fi
@@ -627,6 +634,8 @@ cd "${_init_dir:?}" || fail_with_msg 'Failed to change back the folder'
 set +e
 
 # Final cleanup
-rm -rf -- "${OUR_TEMP_DIR:?}" &
+if test "${CI:-false}" = 'false'; then
+  rm -rf -- "${OUR_TEMP_DIR:?}" &
+fi
 
 if test "${STATUS:?}" -ne 0; then exit "${STATUS:?}"; fi
