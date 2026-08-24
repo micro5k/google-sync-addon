@@ -6,9 +6,13 @@
 # shellcheck disable=SC2240 # Ignore: The dot command does not support arguments in sh/dash
 # shellcheck disable=SC3028 # Ignore: In POSIX sh, FUNCNAME is undefined
 # shellcheck disable=SC3043 # Ignore: In POSIX sh, 'local' is undefined
+# shellcheck disable=SC2310 # Ignore: check-set-e-suppressed
 
-if test "${A5K_FUNCTIONS_INCLUDED:-false}" = 'false'; then readonly A5K_FUNCTIONS_INCLUDED='true'; fi
+unset A5K_FUNCTIONS_INCLUDED || return 2
+# shellcheck disable=SC2034 # IGNORE: FOO appears unused. Verify use (or export if used externally)
+readonly A5K_FUNCTIONS_INCLUDED='true'
 
+unset LIB_FILENAME
 readonly LIB_FILENAME="${USING_LIB:?}"
 unset USING_LIB
 
@@ -138,12 +142,26 @@ ui_nl()
 
 run_hook()
 {
-  local hook_file="${MAIN_DIR:?}/build-hooks/${1:?}.hook.sh"
+  local exit_code errexit hook_file
+
+  exit_code=0
+  errexit=0
+  hook_file="${MAIN_DIR:?}/build-hooks/${1:?}.hook.sh"
 
   if test -f "${hook_file:?}"; then
     ui_debug "Running hook: ${1?}..."
+    set -- 'hook' "${hook_file?}" "${@}"
+
+    case "${-}" in *e*) errexit=1 ;; *) ;; esac
+    set +e
     # shellcheck source=/dev/null
-    . "${hook_file:?}" "${hook_file:?}" "${@}" || ui_error "Hook '${1?}' failed with exit code ${?}" "${LINENO-}" "${FUNCNAME-}"
+    . "${hook_file?}" "${@}"
+    exit_code="${?}"
+    case "${errexit?}" in '1') set -e ;; *) ;; esac
+
+    if test "${exit_code?}" -ne 0; then
+      ui_error "Hook '${3?}' failed with exit code ${exit_code?}" "${LINENO-}" "${FUNCNAME-}"
+    fi
   fi
 }
 
@@ -173,17 +191,17 @@ get_shell_exe()
     printf '%s\n' "${_gse_shell_exe}"
     return 0
   elif _gse_tmp_var="$(ps 2> /dev/null -p "${$}" -o 'comm=')" && test -n "${_gse_tmp_var}" && _gse_tmp_var="$(command 2> /dev/null -v "${_gse_tmp_var}")"; then
-    # On Linux / macOS
-    # shellcheck disable=SC2230 # Ignore: 'which' is non-standard
-    case "${_gse_tmp_var}" in *'/'* | *"\\"*) ;; *) _gse_tmp_var="$(which 2> /dev/null "${_gse_tmp_var}")" || return 3 ;; esac # We may not get the full path with "command -v" on some old versions of Oils
+    # On Linux / macOS / BSD
+    case "${_gse_tmp_var}" in *'/'* | *"\\"*) ;; *) _gse_tmp_var="$(command 2> /dev/null -v "${_gse_tmp_var}")" || return 2 ;; esac
   elif _gse_tmp_var="${BASH:-${SHELL-}}" && test -n "${_gse_tmp_var}"; then
-    if test "${_gse_tmp_var}" = '/bin/sh' && test "$(uname 2> /dev/null || :)" = 'Windows_NT'; then _gse_tmp_var="$(command 2> /dev/null -v 'busybox')" || return 2; fi
-    if test ! -x "${_gse_tmp_var}" && test -x "${_gse_tmp_var}.exe"; then _gse_tmp_var="${_gse_tmp_var}.exe"; fi # Special fix for broken versions of Bash under Windows
+    if test "${_gse_tmp_var}" = '/bin/sh' && test "$(uname 2> /dev/null || :)" = 'Windows_NT'; then _gse_tmp_var="$(command 2> /dev/null -v 'busybox')" || return 3; fi
+    # shellcheck disable=SC1003 # IGNORE: Want to escape a single quote? echo 'This is how it'\''s done'
+    case "${_gse_tmp_var}" in *'/'*) ;; *"\\"*) _gse_tmp_var="$(printf '%s' "${_gse_tmp_var}" | tr '\\' '/')" || return 4 ;; *) ;; esac
   else
     return 1
   fi
 
-  _gse_shell_exe="$(readlink 2> /dev/null -f "${_gse_tmp_var}" || realpath 2> /dev/null "${_gse_tmp_var}")" || _gse_shell_exe="${_gse_tmp_var}"
+  _gse_shell_exe="$(realpath 2> /dev/null "${_gse_tmp_var}" || readlink 2> /dev/null -f "${_gse_tmp_var}")" || _gse_shell_exe="${_gse_tmp_var}"
   printf '%s\n' "${_gse_shell_exe}"
   return 0
 }
@@ -240,14 +258,13 @@ detect_os_and_other_things()
     esac
   fi
 
-  if test -n "${__SHELL_EXE-}" && test "${__SHELL_EXE:?}" != 'bash' && SHELL_EXE="${__SHELL_EXE:?}"; then
+  if test -n "${__SHELL_EXE-}" && SHELL_EXE="${__SHELL_EXE:?}"; then
     :
   elif SHELL_EXE="$(get_shell_exe)" && test -n "${SHELL_EXE?}"; then
     :
   else
     _ui_error_local 'Shell not found' "${LINENO-}" "${FUNCNAME-}"
   fi
-  if test "${SHELL_EXE:?}" = 'bash'; then _ui_error_local 'Shell executable must have the full path' "${LINENO-}" "${FUNCNAME-}"; fi
   unset __SHELL_EXE
 
   if test "${PLATFORM:?}" = 'win' && test -f '/usr/bin/cygpath'; then CYGPATH='/usr/bin/cygpath'; fi
@@ -1485,7 +1502,7 @@ init_cmdline()
   readonly UTILS_DATA_DIR="${UTILS_DIR:?}/data"
   export UTILS_DIR UTILS_DATA_DIR
 
-  if test -n "${GIT_SSH:="$(command -v 'TortoiseGitPlink' || :)"}"; then export GIT_SSH; else unset GIT_SSH; fi
+  if test -n "${GIT_SSH:="$(command 2> /dev/null -v 'TortoiseGitPlink' || :)"}"; then export GIT_SSH; else unset GIT_SSH; fi
 
   # Set the path of Android SDK if not already set
   if test -z "${ANDROID_SDK_ROOT-}"; then
@@ -1638,6 +1655,13 @@ if test "${DO_INIT_CMDLINE:-0}" != '0'; then
   case "$(set 2> /dev/null -o || set || :)" in *'pipefail'*) set -o pipefail || echo 1>&2 'Failed: pipefail' ;; *) ;; esac
   # shellcheck disable=SC3041,SC2015 # Ignore: In POSIX sh, set flag -H is undefined
   (set +H 2> /dev/null) && set +H || :
+
+  unset ENV
+
+  if test -n "${__OVERRIDE_0-}"; then
+    eval " 0='${__OVERRIDE_0}' " || :
+    unset __OVERRIDE_0
+  fi
 fi
 
 fix_posix_emulation_if_needed
@@ -1651,21 +1675,8 @@ init_vars
 detect_bb_and_id
 
 if test "${DO_INIT_CMDLINE:-0}" != '0'; then
-  if test -n "${__QUOTED_PARAMS-}" && test "${#}" -eq 0; then
-    _newline='
-'
-    _backup_ifs="${IFS-}"
-    IFS="${_newline:?}"
-    for _param in ${__QUOTED_PARAMS:?}; do
-      set -- "${@}" "${_param?}"
-    done
-    IFS="${_backup_ifs?}"
-    unset _newline _backup_ifs _param
-  fi
-
   unset DO_INIT_CMDLINE
-  unset __QUOTED_PARAMS
-  if test "${#}" -eq 0; then init_cmdline; else init_cmdline "${@}"; fi
+  if test "${#}" -gt 0; then init_cmdline "${@}"; else init_cmdline; fi
 fi
 
 export PATH

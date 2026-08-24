@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
 # SPDX-FileCopyrightText: 2025 ale5000
-# SPDX-License-Identifier: GPL-3.0-or-later OR Apache-2.0
+# SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later WITH LicenseRef-Archive-packaging-exception
 
 # @name AOSP system permissions downloader
 # @brief Download and parse AOSP system permission declarations for each supported Android API level.
@@ -17,7 +17,7 @@
 
 readonly SCRIPT_NAME='AOSP system permissions downloader'
 readonly SCRIPT_SHORTNAME='SysPermDl'
-readonly SCRIPT_VERSION='0.3.4'
+readonly SCRIPT_VERSION='0.3.6'
 readonly SCRIPT_AUTHOR='ale5000'
 
 set -u
@@ -29,7 +29,7 @@ set -u
 }
 
 readonly BASE_URL='https://android.googlesource.com/platform/frameworks/base/'
-readonly MAX_API='36'
+readonly MAX_API='37'
 
 # shellcheck disable=SC2034
 {
@@ -47,6 +47,7 @@ readonly MAX_API='36'
   readonly TAG_API_34='android-14.0.0_r75' # Android 14
   readonly TAG_API_35='android-15.0.0_r36' # Android 15
   readonly TAG_API_36='android-16.0.0_r4'  # Android 16
+  readonly TAG_API_37='android-17.0.0_r1'  # Android 17
 }
 
 readonly WGET_CMD='wget'
@@ -197,7 +198,7 @@ while test "${#}" -gt 0; do
       # REUSE-IgnoreStart
       printf '%s\n' "${SCRIPT_NAME:?} v${SCRIPT_VERSION:?}"
       printf '%s\n' "Copyright (C) 2025 ${SCRIPT_AUTHOR:?}"
-      printf '%s\n\n' 'License GPLv3+ or Apache v2'
+      printf '%s\n\n' 'License Apache v2 or GPLv3+ with APE'
       printf '%s\n' 'There is NO WARRANTY, to the extent permitted by law.'
       # REUSE-IgnoreEnd
       execute_script='false'

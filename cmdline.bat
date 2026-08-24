@@ -5,7 +5,7 @@
 SETLOCAL 2> nul
 
 REM Fix the working directory when using "Run as administrator"
-IF "%CD%" == "%windir%\system32" CD /D "%~dp0"
+IF "%CD%" == "%SystemRoot%\system32" CD /D "%~dp0"
 
 IF NOT EXIST "%~dp0tools\win\busybox.exe" (
   ENDLOCAL 2> nul
@@ -17,19 +17,21 @@ SET "LANG=en_US.UTF-8"
 SET "MAIN_DIR=%~dp0"
 
 IF "%USER_HOME%" == "" (
+  REM Change TERM_PROGRAM if it is 'mintty'; otherwise BusyBox for Windows will override HOME
   IF "%TERM_PROGRAM%" == "mintty" SET "TERM_PROGRAM=mintty-"
   SET "USER_HOME=%USERPROFILE%"
   SET "HOME=%MAIN_DIR%"
 )
 
-SET "DO_INIT_CMDLINE=1"
 SET "KILL_PPID=1"
 SET "STARTED_FROM_BATCH_FILE=1"
 SET "IS_PATH_INITIALIZED="
-SET "__QUOTED_PARAMS="
 SET "__SHELL_EXE=%~dp0tools\win\busybox.exe"
 
-"%__SHELL_EXE%" ash -s -c "USING_LIB='main.lib.sh'; . '%~dp0lib\main.lib.sh' || exit ${?}" "ash" %*
+SET "DO_INIT_CMDLINE=1"
+SET "USING_LIB=main.lib.sh"
+
+"%__SHELL_EXE%" ash -i -s -c ". '%~dp0lib\%USING_LIB%' || exit ${?}" "ash" %*
 
 ENDLOCAL 2> nul
 IF %ERRORLEVEL% NEQ 0 EXIT /B %ERRORLEVEL%
