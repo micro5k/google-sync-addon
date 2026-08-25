@@ -392,14 +392,17 @@ fi
 
 _android_tmp="${_base_simulation_path:?}/tmp"
 _android_busybox="${_android_sys:?}/bin/busybox"
+_zip_bootstrap_script_repo="${THIS_SCRIPT_DIR:?}/update-binary-loader.sh"
 
 if test "${COVERAGE:-false}" = 'false'; then
-  _android_update_bin="${_android_tmp:?}/update-binary"
+  _zip_bootstrap_script="${_android_tmp:?}/update-binary"
+  _zip_entry_point="${_android_tmp:?}/update-binary-real"
 else
-  _android_update_bin="${_android_tmp:?}/update-binary.sh"
+  _zip_bootstrap_script="${_zip_bootstrap_script_repo:?}"
+  _zip_entry_point="${_android_tmp:?}/update-binary.sh"
 fi
 
-readonly _android_ext_stor _android_sec_stor _android_lib_path _android_data _android_sys _android_path _android_tmp _android_busybox _android_update_bin
+readonly _android_ext_stor _android_sec_stor _android_lib_path _android_data _android_sys _android_path _android_tmp _android_busybox _zip_bootstrap_script_repo _zip_bootstrap_script _zip_entry_point
 
 # Simulate the Android recovery environment inside the temp folder
 mkdir -p "${_base_simulation_path:?}"
@@ -442,8 +445,10 @@ mkdir -p "${_android_sys:?}/framework"
 zip -D -9 -X -UN=n -nw -q "${_android_sys:?}/framework/framework-res.apk" 'AndroidManifest.xml' || fail_with_msg 'Failed compressing framework-res.apk'
 rm -f -- "${_base_simulation_path:?}/AndroidManifest.xml"
 
-cp -pf -- "${THIS_SCRIPT_DIR:?}/update-binary-loader.sh" "${_android_tmp:?}/update-binary-loader.sh" || fail_with_msg 'Failed to copy the update-binary-loader.sh script'
-chmod 0755 "${_android_tmp:?}/update-binary-loader.sh" || fail_with_msg "chmod failed on '${_android_tmp?}/update-binary-loader.sh'"
+if test "${COVERAGE:-false}" = 'false'; then
+  cp -pf -- "${_zip_bootstrap_script_repo:?}" "${_zip_bootstrap_script:?}" || fail_with_msg 'Failed to copy the update-binary-loader.sh script'
+  chmod 0755 "${_zip_bootstrap_script:?}" || fail_with_msg "chmod failed on update-binary-loader.sh"
+fi
 
 if test "${COVERAGE:-false}" != 'false'; then
   cd "${_init_dir:?}" || fail_with_msg 'Failed to change back the folder'
@@ -508,6 +513,7 @@ simulate_env()
   export OVERRIDE_DIR="${_our_overrider_dir:?}"
   export RS_OVERRIDE_SCRIPT="${_our_overrider_script:?}"
   export TEST_INSTALL=true
+  export __FLASHABLE_ZIP_ENTRY_POINT="${_zip_entry_point:?}"
 }
 
 restore_env()
@@ -519,6 +525,7 @@ restore_env()
 
   unset BB_OVERRIDE_APPLETS
   unset CUSTOM_BUSYBOX
+  unset __FLASHABLE_ZIP_ENTRY_POINT
 
   unset -f -- mount umount chown su sudo
 
@@ -561,16 +568,16 @@ flash_zips()
     # Simulate the environment variables of a real recovery
     simulate_env || return "${?}"
 
-    "${_android_busybox:?}" unzip -opq "${_android_sec_stor:?}/${FLASHABLE_ZIP_NAME:?}" 'META-INF/com/google/android/update-binary' > "${_android_update_bin:?}" || fail_with_msg 'Failed to extract the update-binary'
-    chmod 0755 "${_android_update_bin:?}" || fail_with_msg "chmod failed on '${_android_update_bin?}'"
+    "${_android_busybox:?}" unzip -opq "${_android_sec_stor:?}/${FLASHABLE_ZIP_NAME:?}" 'META-INF/com/google/android/update-binary' 1> "${_zip_entry_point:?}" || fail_with_msg "Failed to extract update-binary from '${FLASHABLE_ZIP_NAME?}'"
+    chmod 0755 "${_zip_entry_point:?}" || fail_with_msg "chmod failed on update-binary"
 
     echo "custom_flash_start ${_android_sec_stor:?}/${FLASHABLE_ZIP_NAME:?}" 1>&"${recovery_fd:?}"
     set +e
     # Execute the script that will run the flashable zip
     if test "${COVERAGE:-false}" = 'false'; then
-      "${_android_busybox:?}" sh -- "${_android_tmp:?}/update-binary-loader.sh" 3 "${recovery_fd:?}" "${_android_sec_stor:?}/${FLASHABLE_ZIP_NAME:?}" 1> >("${_tee_cmd:?}" -a "${recovery_logs_dir:?}/recovery-raw.log" "${recovery_logs_dir:?}/recovery-stdout.log" || true) 2> >("${_tee_cmd:?}" -a "${recovery_logs_dir:?}/recovery-raw.log" "${recovery_logs_dir:?}/recovery-stderr.log" 1>&2 || true)
+      "${_android_busybox:?}" sh -- "${_zip_bootstrap_script:?}" 3 "${recovery_fd:?}" "${_android_sec_stor:?}/${FLASHABLE_ZIP_NAME:?}" 1> >("${_tee_cmd:?}" -a "${recovery_logs_dir:?}/recovery-raw.log" "${recovery_logs_dir:?}/recovery-stdout.log" || true) 2> >("${_tee_cmd:?}" -a "${recovery_logs_dir:?}/recovery-raw.log" "${recovery_logs_dir:?}/recovery-stderr.log" 1>&2 || true)
     else
-      COVERAGE_SHELL="${SHELL_CMD:?}" "${SHELL_CMD:?}" -x -- "${THIS_SCRIPT_DIR:?}/update-binary-loader.sh" 3 "${recovery_fd:?}" "${_android_sec_stor:?}/${FLASHABLE_ZIP_NAME:?}" 1> >("${_tee_cmd:?}" -a "${recovery_logs_dir:?}/recovery-raw.log" "${recovery_logs_dir:?}/recovery-stdout.log" || true) 2> >("${_tee_cmd:?}" -a "${recovery_logs_dir:?}/recovery-raw.log" "${recovery_logs_dir:?}/recovery-stderr.log" 1>&2 || true)
+      COVERAGE_SHELL="${SHELL_CMD:?}" "${SHELL_CMD:?}" -x -- "${_zip_bootstrap_script:?}" 3 "${recovery_fd:?}" "${_android_sec_stor:?}/${FLASHABLE_ZIP_NAME:?}" 1> >("${_tee_cmd:?}" -a "${recovery_logs_dir:?}/recovery-raw.log" "${recovery_logs_dir:?}/recovery-stdout.log" || true) 2> >("${_tee_cmd:?}" -a "${recovery_logs_dir:?}/recovery-raw.log" "${recovery_logs_dir:?}/recovery-stderr.log" 1>&2 || true)
     fi
     STATUS="${?}"
     set -e

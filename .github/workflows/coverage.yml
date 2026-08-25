@@ -16,13 +16,14 @@ on:
     tags:
       - "v*.*"
   pull_request:
+  workflow_dispatch:
 jobs:
   coverage:
     name: "Coverage"
     runs-on: ubuntu-latest
     timeout-minutes: 30
     concurrency:
-      group: "${{ github.repository_id }}-${{ github.workflow }}-coverage"
+      group: "${{ github.repository_id }}-coverage"
       cancel-in-progress: false
     permissions:
       contents: read # Needed to checkout the repository (only required for private repositories)
@@ -107,8 +108,12 @@ jobs:
         uses: codecov/codecov-action@v7
         timeout-minutes: 10
         with:
-          fail_ci_if_error: true
           token: "${{ secrets.CODECOV_TOKEN }}"
+          files: "./coverage/coverage.xml"
+          plugins: "noop"
+          disable_search: true
+          disable_telem: true
+          fail_ci_if_error: true
       - name: "Verify Codacy token"
         id: "codacy-token"
         shell: bash
@@ -124,3 +129,12 @@ jobs:
         timeout-minutes: 10
         with:
           project-token: "${{ secrets.CODACY_PROJECT_TOKEN }}"
+          coverage-reports: "./coverage/coverage.xml"
+      - name: "Store JSON coverage report"
+        uses: actions/upload-artifact@v7
+        with:
+          path: "${{ github.workspace }}/coverage/coverage.json"
+          retention-days: 1
+          archive: false
+          overwrite: false
+          if-no-files-found: "error"
