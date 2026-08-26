@@ -2,12 +2,15 @@
 # SPDX-FileCopyrightText: NONE
 # SPDX-License-Identifier: CC0-1.0
 
-name: "Code scan"
+name: "SAST"
 permissions: {}
 on:
   push:
-    paths:
-      - "**"
+    paths-ignore:
+      - ".github/**"
+      - ".gitlab/**"
+      - ".gitlab-ci.yml"
+      - ".travis.yml"
     branches:
       - "main"
   schedule:
@@ -78,6 +81,8 @@ jobs:
         uses: actions/checkout@v7
         with:
           lfs: false
+          submodules: false
+          fetch-tags: false
       - name: "Setup Java"
         uses: actions/setup-java@v5
         with:
@@ -112,14 +117,6 @@ jobs:
           dependency-graph: "generate-and-submit"
           cache-disabled: true
           validate-wrappers: true
-      - name: "Dependency review"
-        if: "${{ success() || steps.submit-deps-1.outcome == 'success' }}"
-        uses: actions/dependency-review-action@v5
-        with:
-          base-ref: "${{ github.event.before }}"
-          head-ref: "${{ github.event.after }}"
-          retry-on-snapshot-warnings: true
-          retry-on-snapshot-warnings-timeout: 180
 
   codacy:
     name: "Codacy"
@@ -139,9 +136,13 @@ jobs:
         uses: actions/checkout@v7
         with:
           lfs: false
+          submodules: false
+          fetch-tags: false
       - name: "Codacy analysis"
         uses: codacy/codacy-analysis-cli-action@v4
         timeout-minutes: 10
+        env:
+          CODACY_ANALYSIS_CLI_VERSION: "7.10.1"
         with:
           project-token: "${{ secrets.CODACY_PROJECT_TOKEN }}"
           #verbose: true
@@ -204,7 +205,9 @@ jobs:
         uses: actions/checkout@v7
         with:
           lfs: false
-          fetch-depth: "0" # Shallow clones should be disabled for a better relevancy of analysis
+          submodules: false
+          fetch-tags: false
+          fetch-depth: 0 # Shallow clones should be disabled for a better relevancy of analysis
       - name: "Await the twin coverage workflow"
         id: "await-coverage"
         uses: actions/github-script@v9
@@ -249,7 +252,7 @@ jobs:
           name: "coverage.json"
           path: "${{ github.workspace }}/coverage/"
       - name: "Convert SimpleCov JSON coverage to SonarQube generic XML coverage"
-        if: "${{ steps.download-coverage.outputs.artifact-id != '' }}"
+        if: "${{ steps.download-coverage.outcome != 'skipped' }}"
         shell: bash
         timeout-minutes: 10
         run: |
@@ -280,7 +283,7 @@ jobs:
           SONAR_TOKEN: "${{ secrets.SONAR_TOKEN }}"
         with:
           args: >
-            ${{ steps.download-coverage.outputs.artifact-id != '' && '-Dsonar.coverageReportPaths=./coverage/sonar-generic-coverage.xml' || '' }}
+            ${{ steps.download-coverage.outcome != 'skipped' && '-Dsonar.coverageReportPaths=./coverage/sonar-generic-coverage.xml' || '' }}
       - name: "Post Avoid SonarQube warning"
         shell: bash
         if: "always()"
