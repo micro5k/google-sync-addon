@@ -13,16 +13,12 @@ on:
       - ".travis.yml"
     branches:
       - "main"
-  schedule:
-    # At 12:00 AM, every 31 days, only in January (UTC)
-    - cron: "0 0 */31 1 *"
 
 jobs:
   pre-requisites:
     name: "Pre-requisites"
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    if: "${{ github.event_name == 'push' }}"
     outputs:
       dependency-graph-enabled: "${{ steps.dependency-graph.outputs.result }}"
       codacy-token-set: "${{ steps.check-tokens.outputs.CODACY_TOKEN_SET }}"
@@ -33,12 +29,12 @@ jobs:
         id: check-tokens
         shell: bash
         env:
-          CODACY_TOKEN: "${{ secrets.CODACY_PROJECT_TOKEN }}"
+          CODACY_PROJECT_TOKEN: "${{ secrets.CODACY_PROJECT_TOKEN }}"
           SONAR_TOKEN: "${{ secrets.SONAR_TOKEN }}"
         run: |
           # Verifying tokens...
           # Codacy
-          if test -n "${CODACY_TOKEN?}"; then token_set='true'; else token_set='false'; fi
+          if test -n "${CODACY_PROJECT_TOKEN?}"; then token_set='true'; else token_set='false'; fi
           printf 'CODACY_TOKEN_SET=%s\n' "${token_set:?}" 1>> "${GITHUB_OUTPUT?}"
           # SonarQube
           if test -n "${SONAR_TOKEN?}"; then token_set='true'; else token_set='false'; fi
@@ -72,7 +68,7 @@ jobs:
     needs: [pre-requisites]
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    if: "${{ github.event_name == 'push' && needs.pre-requisites.outputs.dependency-graph-enabled == 'true' }}"
+    if: "${{ needs.pre-requisites.outputs.dependency-graph-enabled == 'true' }}"
     permissions:
       contents: write
 
@@ -123,7 +119,7 @@ jobs:
     needs: [pre-requisites]
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    if: "${{ github.event_name == 'push' && needs.pre-requisites.outputs.codacy-token-set == 'true' }}"
+    if: "${{ needs.pre-requisites.outputs.codacy-token-set == 'true' }}"
     concurrency:
       group: "${{ github.repository_id }}-${{ github.workflow }}-codacy"
       cancel-in-progress: false
@@ -183,7 +179,10 @@ jobs:
         shell: bash
         timeout-minutes: 5
         run: |
+          # Combining all SARIF runs by tool name...
           jq '.runs |= (
+            # Shorten tool driver name by replacing " (reported by " with " ("
+            map(.tool.driver.name |= sub(" \\(reported by "; " (")) |
             # Group runs by tool name to create unique categories (Post-March 27, 2026 GitHub requirement)
             group_by(.tool.driver.name) |
             map(
@@ -192,28 +191,34 @@ jobs:
               .[0] as $first |
               # Rebuild the run object by collecting data in a single pass
               $first + {
-                # Add mandatory category ID
-                "automationDetails": ($first.automationDetails + { "id": ("Codacy/" + $first.tool.driver.name) }),
-                # Collect all results and artifacts from the group
-                "results": ([$group[].results[]] | unique),
+                # Collect all results and artifacts from the group, removing ruleIndex if it is -1
+                "results": ([$group[].results[] | if .ruleIndex == -1 then del(.ruleIndex) else . end] | unique),
                 "artifacts": ([$group[].artifacts[]] | unique),
-                # Merge all invocation fields and calculate global success
-                "invocations": [
-                  (
-                    reduce $group[].invocations[] as $item ({}; . + $item) |
-                    . + { "executionSuccessful": ([$group[].invocations[].executionSuccessful] | all) }
-                  )
-                ]
+                # Keep individual invocations and remove workingDirectory if it matches "file:///codacy"
+                "invocations": ([$group[].invocations[] | if .workingDirectory.uri == "file:///codacy" then del(.workingDirectory) else . end])
               }
             )
           )' -- './results.sarif' 1> './results-combined.sarif'
+      - name: "Validate the SARIF file"
+        uses: microsoft/sarif-actions@v0.2
+        timeout-minutes: 5
+        with:
+          command: "validate ./results-combined.sarif"
+      - name: "Store the SARIF file"
+        uses: actions/upload-artifact@v7
+        timeout-minutes: 10
+        with:
+          path: "${{ github.workspace }}/results-combined.sarif"
+          retention-days: 1
+          archive: false
+          overwrite: false
       - name: "Upload SARIF results file to GitHub"
         uses: github/codeql-action/upload-sarif@v4
         timeout-minutes: 10
         if: "${{ github.ref == 'refs/heads/main' }}"
         with:
           token: "${{ github.token }}"
-          sarif_file: "results-combined.sarif"
+          sarif_file: "./results-combined.sarif"
           category: "Codacy"
 
   sonarqube:
@@ -221,7 +226,7 @@ jobs:
     needs: [pre-requisites]
     runs-on: ubuntu-latest
     timeout-minutes: 40
-    if: "${{ github.event_name == 'push' && needs.pre-requisites.outputs.sonar-token-set == 'true' }}"
+    if: "${{ needs.pre-requisites.outputs.sonar-token-set == 'true' }}"
     permissions:
       contents: read # Needed to checkout the repository (only required for private repositories)
       actions: read
