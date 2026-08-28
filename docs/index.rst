@@ -13,13 +13,14 @@ Welcome to the documentation for **Google sync add-on** |release|. 🔄
 companion flashable zip created by *ale5000* that brings back seamless data
 synchronization on Android devices running **microG**.
 
-|  No complex manual configurations required — the add-on bridges the gap
-   for you — just a compatible recovery and about five minutes of your time.
-|  *(The five minutes is for reading the instructions. The installation itself is
-   faster. Unless you forgot to back up your contacts. But let's stay positive.)*
+|  No complex manual configurations required — the add-on bridges the gap for
+   you — just a compatible recovery and about five minutes of your time.
+|  *(The five minutes is for reading the instructions. The installation itself
+   is faster. Unless you forgot to back up your contacts. But let's stay
+   positive.)*
 
-**What it does:** 🔧 It re-introduces the necessary sync adapters required to get
-your Calendars, Contacts, and other essential data syncing flawlessly with
+**What it does:** 🔧 It re-introduces the necessary sync adapters required to
+get your Calendars, Contacts, and other essential data syncing flawlessly with
 your microG setup. Your cloud data stays connected.
 
 .. toctree::
