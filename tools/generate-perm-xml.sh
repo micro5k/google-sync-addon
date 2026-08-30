@@ -19,8 +19,9 @@
 
 readonly SCRIPT_NAME='Android ROM permissions XML generator'
 readonly SCRIPT_SHORTNAME='PermXmlGen'
-readonly SCRIPT_VERSION='0.3.9'
+readonly SCRIPT_VERSION='0.3.16'
 readonly SCRIPT_AUTHOR='ale5000'
+readonly SCRIPT_YEAR='2025'
 
 set -u
 # shellcheck disable=SC3040,SC3041,SC2015
@@ -168,6 +169,8 @@ is_system_permission()
 
 begin_xml()
 {
+  local __fn_cert_digest=''
+
   # REUSE-IgnoreStart
   printf '%s\n' '<?xml version="1.0" encoding="utf-8"?>'
   printf '%s\n' '<!--'
@@ -177,12 +180,16 @@ begin_xml()
   printf '%s\n\n' '-->'
   # REUSE-IgnoreEnd
 
+  if test "${NO_CERT_DIGEST:?}" = 'false'; then
+    __fn_cert_digest=" sha256-cert-digest=\"${2:?}\""
+  fi
+
   if test "${3:?}" = 'privapp-permissions'; then
     printf '%s\n' '<permissions>'
-    printf '%s\n' "    <privapp-permissions package=\"${1:?}\" sha256-cert-digest=\"${2:?}\">"
+    printf '%s\n' "    <privapp-permissions package=\"${1:?}\"${__fn_cert_digest?}>"
   elif test "${3:?}" = 'default-permissions'; then
     printf '%s\n' '<exceptions>'
-    printf '%s\n' "    <exception package=\"${1:?}\" sha256-cert-digest=\"${2:?}\">"
+    printf '%s\n' "    <exception package=\"${1:?}\"${__fn_cert_digest?}>"
   else
     return 1
   fi
@@ -265,7 +272,7 @@ parse_perms_and_generate_xml_files()
 
   _base_name="${1%".apk"}"
   _pkg_name="${2:?}"
-  _cert_sha256="${3:?}"
+  _cert_sha256="${3?}"
 
   test ! -t 0 || ui_error "Failed to retrieve the permissions list"
   _input="$(cat)" || ui_error "Failed to retrieve the permissions list"
@@ -391,24 +398,24 @@ parse_perms_and_generate_xml_files()
   if test -n "${_privileged_perm_list?}"; then
     _filename="privapp-permissions-${_base_name:?}.xml"
     {
-      begin_xml "${_pkg_name:?}" "${_cert_sha256:?}" 'privapp-permissions'
+      begin_xml "${_pkg_name:?}" "${_cert_sha256?}" 'privapp-permissions'
       printf '%s' "${_privileged_perm_list:?}" | while IFS='|' read -r NAME MIN_API; do
         append_perm_to_xml "${NAME:?}" "${MIN_API:?}" 'privapp-permissions' '' '' || ui_error "Failed to append the '${NAME?}' permission on '${_filename?}'"
       done
       terminate_xml 'privapp-permissions'
-    } 1> "${BASE_DIR:?}/output/${_filename:?}"
+    } 1> "${OUTPUT_DIR:?}/${_filename:?}"
   fi
   if test -n "${_dangerous_perm_list?}"; then
     _filename="default-permissions-${_base_name:?}.xml"
     {
-      begin_xml "${_pkg_name:?}" "${_cert_sha256:?}" 'default-permissions'
+      begin_xml "${_pkg_name:?}" "${_cert_sha256?}" 'default-permissions'
       LAST_PERM_GROUP=''
       printf '%s' "${_dangerous_perm_list:?}" | LC_ALL=C sort | while IFS='|' read -r GROUP _ NAME WHITELIST MIN_API; do
         append_perm_to_xml "${NAME:?}" "${MIN_API:?}" 'default-permissions' "${GROUP:?}" "${WHITELIST:?}" || ui_error "Failed to append the '${NAME?}' permission on '${_filename?}'"
       done
       unset LAST_PERM_GROUP
       terminate_xml 'default-permissions'
-    } 1> "${BASE_DIR:?}/output/${_filename:?}"
+    } 1> "${OUTPUT_DIR:?}/${_filename:?}"
   fi
 }
 
@@ -417,7 +424,7 @@ get_cert_sha256()
   if test -n "${APKSIGNER_PATH-}"; then
     show_status 'Using apksigner...'
     set_red_color
-    "${APKSIGNER_PATH:?}" verify --min-sdk-version 24 --print-certs -- "${1:?}" | grep -m 1 -F -e 'certificate SHA-256 digest:' | cut -d ':' -f '2-' -s | tr -d -- ' ' | tr -- '[:lower:]' '[:upper:]' | sed -e 's/../&:/g;s/:$//'
+    "${APKSIGNER_PATH:?}" verify --min-sdk-version 24 --print-certs -- "${1:?}" | grep -m 1 -o -e 'certificate SHA-256 digest:.*' | cut -d ':' -f '2' -s | tr -d -- ' ' | tr -- '[:lower:]' '[:upper:]' | sed -e 's/../&:/g; s/:$//'
   elif test -n "${KEYTOOL_PATH-}"; then
     show_status 'Using keytool...'
     set_red_color
@@ -433,7 +440,7 @@ find_android_build_tool()
 
   if _tool_path="$(command -v "${1:?}")" && test -n "${_tool_path?}"; then
     :
-  elif test -n "${ANDROID_SDK_ROOT-}" && test -d "${ANDROID_SDK_ROOT:?}/build-tools" && _tool_path="$(find "${ANDROID_SDK_ROOT:?}/build-tools" -maxdepth 2 -iname "${1:?}*" | sort -V -r | head -n 1)" && test -n "${_tool_path?}"; then
+  elif test -n "${ANDROID_HOME-}" && test -d "${ANDROID_HOME:?}/build-tools" && _tool_path="$(find "${ANDROID_HOME:?}/build-tools" -maxdepth 2 -iname "${1:?}*" | sort -V -r | head -n 1)" && test -n "${_tool_path?}"; then
     :
   else
     return 1
@@ -444,9 +451,31 @@ find_android_build_tool()
 
 main()
 {
-  local status backup_ifs base_name cmd_output pkg_name perm_list cert_sha256
+  local status backup_ifs base_name cmd_output pkg_name perm_list cert_sha256=''
 
   fix_posix_emulation_if_needed
+
+  # Global configuration (can be overridden via environment variables)
+  export OUTPUT_DIR="${OUTPUT_DIR-}"
+  export AAPT_PATH="${AAPT_PATH-}"
+  export APKSIGNER_PATH="${APKSIGNER_PATH-}"
+  export KEYTOOL_PATH="${KEYTOOL_PATH-}"
+  export ANDROID_HOME="${ANDROID_HOME:-${ANDROID_SDK_ROOT-}}"
+
+  # Set the path of Android SDK if not already set
+  if test -z "${ANDROID_HOME?}"; then
+    if test -n "${LOCALAPPDATA-}" && test -d "${LOCALAPPDATA?}/Android/Sdk"; then
+      ANDROID_HOME="${LOCALAPPDATA?}/Android/Sdk" # Windows
+    elif test -n "${HOME-}" && test -d "${HOME?}/Library/Android/sdk"; then
+      ANDROID_HOME="${HOME?}/Library/Android/sdk" # macOS
+    elif test -n "${HOME-}" && test -d "${HOME?}/.local/share/android/sdk"; then
+      ANDROID_HOME="${HOME?}/.local/share/android/sdk" # Linux (XDG)
+    elif test -n "${HOME-}" && test -d "${HOME?}/Android/Sdk"; then
+      ANDROID_HOME="${HOME?}/Android/Sdk" # Linux (Standard)
+    elif test -d '/usr/lib/android-sdk'; then
+      ANDROID_HOME='/usr/lib/android-sdk' # Linux (APT)
+    fi
+  fi
 
   if DATA_DIR="$(find_data_dir)" && test -d "${DATA_DIR:?}/perms"; then
     :
@@ -472,43 +501,33 @@ main()
     IFS="${backup_ifs?}"
   }
 
-  BASE_DIR="$(realpath 2> /dev/null . || readlink -f .)" || return 7
-  test -d "${BASE_DIR:?}/output" || mkdir -p -- "${BASE_DIR:?}/output" || return 8
+  BASE_DIR="$(realpath 2> /dev/null . || readlink 2> /dev/null -f .)" || return 7
 
-  # Set the path of Android SDK if not already set
-  export ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME-}}"
-  if test -z "${ANDROID_SDK_ROOT?}"; then
-    if test -n "${LOCALAPPDATA-}" && test -d "${LOCALAPPDATA:?}/Android/Sdk"; then
-      ANDROID_SDK_ROOT="${LOCALAPPDATA:?}/Android/Sdk" # Windows
-    elif test -n "${HOME-}" && test -d "${HOME:?}/Android/Sdk"; then
-      ANDROID_SDK_ROOT="${HOME:?}/Android/Sdk" # Linux
-    elif test -n "${HOME-}" && test -d "${HOME:?}/Library/Android/sdk"; then
-      ANDROID_SDK_ROOT="${HOME:?}/Library/Android/sdk" # macOS
-    elif test -d '/usr/lib/android-sdk'; then
-      ANDROID_SDK_ROOT='/usr/lib/android-sdk' # Linux (apt)
-    fi
-  fi
+  test -n "${OUTPUT_DIR?}" || OUTPUT_DIR="${BASE_DIR:?}/output"
+  test -d "${OUTPUT_DIR:?}" || mkdir -p -- "${OUTPUT_DIR:?}" || return 8
 
-  if test -n "${AAPT_PATH-}" || AAPT_PATH="$(find_android_build_tool 'aapt2' || find_android_build_tool 'aapt')"; then
+  if test -n "${AAPT_PATH?}" || AAPT_PATH="$(find_android_build_tool 'aapt2' || find_android_build_tool 'aapt')"; then
     :
   else
     show_error "Neither aapt2 nor aapt were found. You need to set AAPT_PATH"
     return 255
   fi
 
-  if test -n "${APKSIGNER_PATH-}" || APKSIGNER_PATH="$(find_android_build_tool 'apksigner' || command -v 'apksigner.bat')"; then
-    :
-  elif test -n "${KEYTOOL_PATH-}" || KEYTOOL_PATH="$(command -v 'keytool')"; then
-    :
-  else
-    show_error "Neither apksigner nor keytool were found. You need to set either APKSIGNER_PATH or KEYTOOL_PATH"
-    return 255
+  if test "${NO_CERT_DIGEST:?}" = 'false'; then
+    if test -n "${APKSIGNER_PATH?}" || APKSIGNER_PATH="$(find_android_build_tool 'apksigner' || command -v 'apksigner.bat')"; then
+      :
+    elif test -n "${KEYTOOL_PATH?}" || KEYTOOL_PATH="$(command -v 'keytool')"; then
+      :
+    else
+      show_error "Neither apksigner nor keytool were found. You need to set either APKSIGNER_PATH or KEYTOOL_PATH"
+      return 255
+    fi
   fi
 
-  printf 1>&2 '%s\n' "Output dir: ${BASE_DIR:?}/output"
+  printf 1>&2 '%s\n' "Output dir: ${OUTPUT_DIR:?}"
 
   status=0
-  while test "${#}" -gt 0; do
+  while test "$#" -gt 0; do
     base_name="$(basename "${1:?}" || printf '%s\n' 'unknown')"
     printf 1>&2 '\n%s\n' "Filename: ${base_name:?}"
 
@@ -525,15 +544,24 @@ main()
     perm_list="$(printf '%s\n' "${cmd_output:?}" | grep -F -e 'uses-permission: ' | cut -d "'" -f '2' -s | LC_ALL=C sort)" || return 11
     cmd_output=''
 
-    cert_sha256="$(get_cert_sha256 "${1:?}")" || {
-      status=12
-      show_error "get_cert_sha256() failed"
-      shift || return 254
-      continue
-    }
+    if test "${NO_CERT_DIGEST:?}" = 'false'; then
+      cert_sha256="$(get_cert_sha256 "${1:?}")" || {
+        status=12
+        show_error "get_cert_sha256() failed"
+        shift || return 254
+        continue
+      }
+
+      test "${#cert_sha256}" -eq 95 || {
+        status=13
+        show_error "get_cert_sha256() returned wrong digest"
+        shift || return 254
+        continue
+      }
+    fi
 
     show_status 'Parsing...'
-    printf '%s\n' "${perm_list:?}" | parse_perms_and_generate_xml_files "${base_name:?}" "${pkg_name:?}" "${cert_sha256:?}" || {
+    printf '%s\n' "${perm_list:?}" | parse_perms_and_generate_xml_files "${base_name:?}" "${pkg_name:?}" "${cert_sha256?}" || {
       status="${?}"
       show_error "Parsing failed"
     }
@@ -544,44 +572,45 @@ main()
   return "${status:?}"
 }
 
-STATUS=0
-SCRIPT_VERBOSE='false'
-PLACEHOLDERS='false'
 execute_script='true'
+STATUS=0
+export SCRIPT_VERBOSE='false'
+export PLACEHOLDERS='false'
+export NO_CERT_DIGEST='false'
 
-while test "${#}" -gt 0; do
+while test "$#" -gt 0; do
   case "${1?}" in
     -V | --version)
+      execute_script='false'
       # REUSE-IgnoreStart
-      printf '%s\n' "${SCRIPT_NAME:?} v${SCRIPT_VERSION:?}"
-      printf '%s\n' "Copyright (C) 2025 ${SCRIPT_AUTHOR:?}"
-      printf '%s\n\n' 'License Apache v2 or GPLv3+ with APE'
+      printf '%s\n' "${SCRIPT_NAME:?}, version ${SCRIPT_VERSION:?}"
+      printf '%s\n' "Copyright (C) ${SCRIPT_YEAR:?} ${SCRIPT_AUTHOR:?}"
+      printf '%s\n\n' 'License Apache-2.0 or GPLv3+ with APE.'
       printf '%s\n' 'There is NO WARRANTY, to the extent permitted by law.'
       # REUSE-IgnoreEnd
-      execute_script='false'
       ;;
 
     -v) SCRIPT_VERBOSE='true' ;;
-
     --use-placeholders) PLACEHOLDERS='true' ;;
+    --no-cert-digest) NO_CERT_DIGEST='true' ;;
 
-    -) break ;;
-
-    --)
+    -) # Read from STDIN (implies end of options)
+      break
+      ;;
+    --) # End of options / Positional arguments follow
       shift
       break
       ;;
     --*)
-      printf 1>&2 '%s\n' "${SCRIPT_SHORTNAME?}: unrecognized option '${1}'"
       execute_script='false'
       STATUS=2
+      printf 1>&2 '%s\n' "${SCRIPT_SHORTNAME?}: unrecognized option '${1}'"
       ;;
     -*)
-      printf 1>&2 '%s\n' "${SCRIPT_SHORTNAME?}: invalid option -- '${1#-}'"
       execute_script='false'
       STATUS=2
+      printf 1>&2 '%s\n' "${SCRIPT_SHORTNAME?}: invalid option -- '${1#-}'"
       ;;
-
     *) break ;;
   esac
 
@@ -591,7 +620,7 @@ done
 if test "${execute_script:?}" = 'true'; then
   show_status "${SCRIPT_NAME:?} v${SCRIPT_VERSION:?} by ${SCRIPT_AUTHOR:?}"
 
-  if test "${#}" -eq 0; then set -- ''; fi
+  test "$#" -ne 0 || set -- ''
   main "${@}" || STATUS="${?}"
   reset_color
 fi

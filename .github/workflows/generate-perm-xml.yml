@@ -2,17 +2,17 @@
 # SPDX-FileCopyrightText: NONE
 # SPDX-License-Identifier: CC0-1.0
 
-name: "Generate permission XML files"
+name: "Android permissions generation"
 permissions: {}
 on:
   workflow_dispatch:
   schedule:
-    # At 02:00 AM, every 6 days (UTC)
+    # Runs at 02:00, every 6 days
     - cron: "0 2 */6 * *"
 
 jobs:
-  generation:
-    name: "Generation"
+  generate-permissions:
+    name: "Generate permission XMLs"
     runs-on: ubuntu-latest
     timeout-minutes: 20
     if: "${{ github.event_name != 'schedule' }}"
@@ -20,38 +20,61 @@ jobs:
       contents: read # Needed to checkout the repository (only required for private repositories)
 
     steps:
-      - name: "Checkout sources"
+      - name: "Checkout repo"
         uses: actions/checkout@v7
-      - name: "Use cache"
-        id: cache-step
+        with:
+          path: "./repo"
+          lfs: false
+          sparse-checkout: |
+            **/*.apk
+          sparse-checkout-cone-mode: false
+      - name: "Checkout scripts"
+        uses: actions/checkout@v7
+        timeout-minutes: 5
+        with:
+          path: "./scripts-repo"
+          repository: "micro5k/microg-unofficial-installer"
+          persist-credentials: false
+          lfs: false
+          sparse-checkout: |
+            tools/dl-perm-list.sh
+            tools/generate-perm-xml.sh
+          sparse-checkout-cone-mode: false
+      - name: "Use perms cache"
+        id: perms-cache
         uses: actions/cache@v6
         timeout-minutes: 5
         with:
-          key: "perms-${{ hashFiles('tools/dl-perm-list.sh') }}"
-          restore-keys: "perms-"
-          path: "cache/tools/perms"
+          key: "perms-${{ hashFiles('scripts-repo/tools/dl-perm-list.sh') }}"
+          path: "cache/perms"
           enableCrossOsArchive: true
-      - name: "Execute script"
+      - name: "Execute scripts"
         shell: bash
         timeout-minutes: 10
+        env:
+          CACHE_HIT: "${{ steps.perms-cache.outputs.cache-hit }}"
         run: |
-          # Executing script...
-          export TOOLS_DATA_DIR='./cache/tools'
-          if test ! -d './cache/tools/perms' || '${{ steps.cache-step.outputs.cache-hit != 'true' }}'; then
-            './tools/dl-perm-list.sh' || exit "${?}"
+          # Executing scripts...
+          export OUTPUT_DIR='./scripts-repo/output'
+          export TOOLS_DATA_DIR='./cache'
+          if test "${CACHE_HIT?}" != 'true' || test ! -f './cache/perms/.completed'; then
+            './scripts-repo/tools/dl-perm-list.sh' || exit "${?}"
           fi
-          find './zip-content' './cache' -name '*.apk' | './tools/generate-perm-xml.sh' --use-placeholders - || exit "${?}"
-      - name: "Upload artifacts"
+          set -- './repo/zip-content' || exit "${?}"
+          test ! -d './cache/build' || set -- "${@}" './cache/build' || exit "${?}"
+          find "${@}" -name '*.apk' | './scripts-repo/tools/generate-perm-xml.sh' --use-placeholders - || exit "${?}"
+      - name: "Store artifacts"
         uses: actions/upload-artifact@v7
+        timeout-minutes: 10
         with:
           name: "XML permissions"
-          path: "output/*.xml"
-          overwrite: false
+          path: "${{ github.workspace }}/scripts-repo/output/*.xml"
           retention-days: 10
+          overwrite: false
           if-no-files-found: "error"
 
-  keep-alive:
-    name: "Keep alive"
+  keep-cache-alive:
+    name: "Keep cache alive"
     runs-on: ubuntu-latest
     timeout-minutes: 10
     if: "${{ github.event_name == 'schedule' }}"
@@ -62,38 +85,31 @@ jobs:
     steps:
       - name: "Checkout file"
         uses: actions/checkout@v7
+        timeout-minutes: 5
         with:
+          path: "./scripts-repo"
+          repository: "micro5k/microg-unofficial-installer"
+          persist-credentials: false
           lfs: false
           sparse-checkout: |
             tools/dl-perm-list.sh
           sparse-checkout-cone-mode: false
-      - name: "Ping cache" # Cache expiration: 7 days
-        uses: actions/cache@v6
+      - name: "Ping perms cache" # Cache expiration: 7 days
+        uses: actions/cache/restore@v6
         timeout-minutes: 5
         with:
-          key: "perms-${{ hashFiles('tools/dl-perm-list.sh') }}"
-          path: "cache/tools/perms"
+          key: "perms-${{ hashFiles('scripts-repo/tools/dl-perm-list.sh') }}"
+          path: "cache/perms"
           enableCrossOsArchive: true
           lookup-only: true
-      - name: "Keep workflow alive"
+      - name: "Keep this workflow alive"
         uses: actions/github-script@v9
         timeout-minutes: 5
-        env:
-          WORKFLOW_REF: "${{ github.workflow_ref }}"
         with:
           retries: 3
           script: |
             /* jshint esversion: 11 */
-            const workflow_filename = process.env.WORKFLOW_REF.split('@', 1).at(0).split('/').slice(2).join('/');
-            const response = await github.rest.actions.enableWorkflow({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              workflow_id: workflow_filename
-            }).catch(response => response);
-            if(response && response.status === 204) {
-              console.log('Workflow enabled.');
-            } else {
-              let errorMsg = 'enableWorkflow failed';
-              if(response && response.status && response.message) errorMsg += ' with error ' + response.status + ' (' + response.message + ')';
-              throw new Error(errorMsg);
-            }
+            const workflow_id = process.env.GITHUB_WORKFLOW_REF.split('@', 1).at(0).split('/').pop(); // context.workflow_ref
+            await github.rest.actions.enableWorkflow({ ...context.repo, workflow_id })
+              .then(() => console.log('Success.'))
+              .catch(err => { throw new Error('enableWorkflow failed with error ' + err.status + ' (' + err.message + ')'); });
