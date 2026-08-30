@@ -16,10 +16,8 @@ identifiers:
 repository-code: "https://github.com/micro5k/google-sync-addon"
 abstract: "A tool to simplify Google sync adapters installation on Android devices."
 keywords:
-  - android
-  - flashable-zip
-  - flashable
-  - sync
-  - microg
-  - gapps
+  - "android"
+  - "gapps"
+  - "sync-adapter"
+  - "flashable-zip"
 license: "GPL-3.0-or-later"
