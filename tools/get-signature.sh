@@ -10,18 +10,28 @@
 # @author ale5000
 
 # Get the latest version from here: https://github.com/micro5k/microg-unofficial-installer/tree/main/tools
+
 # shellcheck enable=all
 # shellcheck disable=SC3043 # In POSIX sh, local is undefined
 
+# @section GLOBAL CONSTANTS ----
+#region
 readonly SCRIPT_NAME='Android app signing certificate extractor'
 readonly SCRIPT_SHORTNAME='AppSignExt'
-readonly SCRIPT_VERSION='0.1.6'
+readonly SCRIPT_VERSION='0.1.9'
 readonly SCRIPT_AUTHOR='ale5000'
 readonly SCRIPT_YEAR='2025'
 
-# shellcheck disable=SC3040 # Ignore: In POSIX sh, set option pipefail is undefined
-case "$(set 2> /dev/null -o || set || :)" in *'pipefail'*) set -o pipefail || echo 1>&2 'Failed: pipefail' ;; *) ;; esac
+readonly EX_UNAVAILABLE=69
+readonly EX_SOFTWARE=70
+#endregion
 
+set -u 2> /dev/null || :
+# shellcheck disable=SC3040 # IGNORE: In POSIX sh, set option pipefail is undefined
+case "$(set -o 2> /dev/null || set || :)" in *'pipefail'*) set -o pipefail || echo 1>&2 'ERROR: pipefail failed' ;; *) ;; esac
+
+# @section UTILITY & UI FUNCTIONS ----
+#region
 fix_posix_emulation_if_needed()
 {
   # Workarounds for shells using Windows-POSIX emulation layers (e.g., Git Bash under Windows)
@@ -40,6 +50,26 @@ fix_posix_emulation_if_needed()
   fi
 }
 
+set_red_color()
+{
+  printf 1>&2 '\033[1;31m\r'
+}
+
+reset_color()
+{
+  printf 1>&2 '\033[0m\r'
+}
+
+show_status()
+{
+  printf 1>&2 '\033[1;32m%s\033[0m\n' "${1?}"
+}
+
+show_error()
+{
+  printf 1>&2 '\033[1;31m%s\033[0m\n' "ERROR: ${1?}"
+}
+
 pause_if_needed()
 {
   # shellcheck disable=SC3028 # Ignore: In POSIX sh, SHLVL is undefined
@@ -56,49 +86,111 @@ pause_if_needed()
   unset no_pause
   return "${1:-0}"
 }
+#endregion
 
-show_status()
+# @section CORE FUNCTIONS ----
+#region
+set_android_sdk_path_if_unset()
 {
-  printf 1>&2 '\033[1;32m%s\033[0m\n' "${1?}"
-}
+  test -z "${ANDROID_HOME-}" || return
 
-show_error()
-{
-  printf 1>&2 '\033[1;31m%s\033[0m\n' "ERROR: ${1?}"
-}
-
-get_cert_sha256()
-{
-  local _cert_sha256
-
-  test -n "${1-}" || {
-    show_error "You must pass the filename of the file to be processed."
-    return 3
-  }
-
-  if : "${APKSIGNER_PATH:="$(command -v 'apksigner' || command -v 'apksigner.bat' || :)"}" && test -n "${APKSIGNER_PATH?}"; then
-    _cert_sha256="$("${APKSIGNER_PATH:?}" verify --min-sdk-version 24 --print-certs -- "${1:?}" | grep -m 1 -o -e 'certificate SHA-256 digest:.*' | cut -d ':' -f '2' -s | tr -d -- ' ' | tr -- '[:lower:]' '[:upper:]' | sed -e 's/../&:/g; s/:$//')" || return 4
-  elif : "${KEYTOOL_PATH:="$(command -v 'keytool' || :)"}" && test -n "${KEYTOOL_PATH-}"; then
-    _cert_sha256="$("${KEYTOOL_PATH:?}" -printcert -jarfile "${1:?}" | grep -m 1 -F -e 'SHA256:' | cut -d ':' -f '2-' -s | tr -d -- ' ')" || return 5
-  else
-    show_error "Neither apksigner nor keytool were found. You must set either APKSIGNER_PATH or KEYTOOL_PATH"
-    return 255
+  # Set the path of Android SDK if not already set
+  if test -n "${LOCALAPPDATA-}" && test -d "${LOCALAPPDATA?}/Android/Sdk"; then
+    ANDROID_HOME="${LOCALAPPDATA?}/Android/Sdk" # Windows
+  elif test -n "${HOME-}" && test -d "${HOME?}/Library/Android/sdk"; then
+    ANDROID_HOME="${HOME?}/Library/Android/sdk" # macOS
+  elif test -n "${HOME-}" && test -d "${HOME?}/.local/share/android/sdk"; then
+    ANDROID_HOME="${HOME?}/.local/share/android/sdk" # Linux (XDG)
+  elif test -n "${HOME-}" && test -d "${HOME?}/Android/Sdk"; then
+    ANDROID_HOME="${HOME?}/Android/Sdk" # Linux (Standard)
+  elif test -d '/usr/lib/android-sdk'; then
+    ANDROID_HOME='/usr/lib/android-sdk' # Linux (APT)
   fi
+}
 
-  if test -n "${_cert_sha256?}"; then
-    printf '%s\n' "sha256-cert-digest=\"${_cert_sha256:?}\""
+find_android_build_tool()
+{
+  local __fn_tool_path
+
+  if __fn_tool_path="$(
+    unalias "${1:?}" 2> /dev/null
+    command 2> /dev/null -v "${1:?}"
+  )" && test -n "${__fn_tool_path?}"; then
+    :
+  elif test -n "${ANDROID_HOME-}" && test -d "${ANDROID_HOME?}/build-tools" && __fn_tool_path="$(find "${ANDROID_HOME?}/build-tools" -maxdepth 2 -iname "${1:?}*" | sort -V -r | head -n 1)" && test -n "${__fn_tool_path?}"; then
+    :
   else
     return 1
   fi
+
+  printf '%s\n' "${__fn_tool_path:?}"
 }
 
+get_apk_cert_sha256()
+{
+  local __fn_cert_sha256=''
+
+  if test -n "${APKSIGNER_PATH?}"; then
+    show_status 'Using apksigner...'
+    set_red_color
+    __fn_cert_sha256="$("${APKSIGNER_PATH?}" verify --min-sdk-version 24 --print-certs -- "${1:?}" | grep -m 1 -o -i -e 'certificate SHA-256 digest:.*' | cut -d ':' -f '2' -s | tr -d -- ' ' | tr -- '[:lower:]' '[:upper:]')" || return "${?}"
+  else
+    show_status 'Using keytool...'
+    set_red_color
+    # IMPORTANT: This is slow and limited to v1 signatures
+    __fn_cert_sha256="$(LC_ALL=C "${KEYTOOL_PATH:?}" -printcert -jarfile "${1:?}" | grep -m 1 -F -e 'SHA256:' | cut -d ':' -f '2-' -s | tr -d -- ' :')" || return "${?}"
+  fi
+
+  # IMPORTANT: This is faster but limited to v1 RSA signatures
+  # WARNING: Will fail if the META-INF folder contains an EC signature file instead of RSA
+  # __fn_cert_sha256="$(unzip -p "${1:?}" 'META-INF/*.RSA' | openssl pkcs7 -inform 'DER' -print_certs -quiet | openssl x509 -noout -sha256 -fingerprint | cut -d '=' -f '2' -s | tr -d -- ':')" || return "${?}"
+
+  test "${#__fn_cert_sha256}" -eq 64 || {
+    show_error 'Invalid SHA-256 hash length extracted'
+    return "${EX_SOFTWARE?}"
+  }
+
+  printf '%s\n' "${__fn_cert_sha256?}" | sed -e 's/../&:/g; s/:$//'
+}
+#endregion
+
+# @section MAIN FUNCTION ----
+#region
 main()
 {
+  local cert_sha256=''
+
   fix_posix_emulation_if_needed
 
-  get_cert_sha256 "${@}"
-}
+  # BEGIN: Global config (overridable via env)
+  export ANDROID_HOME="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+  set_android_sdk_path_if_unset
+  export APKSIGNER_PATH="${APKSIGNER_PATH:-$(find_android_build_tool 'apksigner' || command 2> /dev/null -v 'apksigner.bat' || :)}"
+  export KEYTOOL_PATH="${KEYTOOL_PATH-}"
+  # END: Global config
 
+  test -n "${1-}" || {
+    show_error 'You must pass the filename of the file to be processed'
+    return 3
+  }
+
+  if test -n "${APKSIGNER_PATH?}"; then
+    :
+  elif test -n "${KEYTOOL_PATH?}" || KEYTOOL_PATH="$(command 2> /dev/null -v 'keytool')"; then
+    :
+  else
+    show_error 'Neither apksigner nor keytool were found. You need to set either APKSIGNER_PATH or KEYTOOL_PATH'
+    return "${EX_UNAVAILABLE?}"
+  fi
+
+  cert_sha256="$(get_apk_cert_sha256 "${@}")" || return "${?}"
+  reset_color
+  printf '%s\n' "sha256-cert-digest=\"${cert_sha256:?}\""
+}
+#endregion
+
+# @section CLI ARGUMENTS PARSING ----
+#region
 execute_script='true'
 STATUS=0
 
@@ -136,13 +228,18 @@ while test "$#" -gt 0; do
 
   shift
 done
+#endregion
 
+# @section EXECUTION ENTRY POINT ----
+#region
 if test "${execute_script:?}" = 'true'; then
   show_status "${SCRIPT_NAME:?} v${SCRIPT_VERSION:?} by ${SCRIPT_AUTHOR:?}"
 
   test "$#" -ne 0 || set -- ''
   main "${@}" || STATUS="${?}"
+  reset_color
 fi
 
 pause_if_needed "${STATUS:?}"
 exit "${?}"
+#endregion
