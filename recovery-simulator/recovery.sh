@@ -10,17 +10,15 @@
 # REALLY IMPORTANT: A misbehaving flashable zip can damage your real system.
 
 set -e
-# shellcheck disable=SC3040,SC3041,SC2015 # Ignore: In POSIX sh, set option xxx is undefined. / In POSIX sh, set flag -X is undefined. / C may run when A is true.
-{
-  # Unsupported set options may cause the shell to exit (even without set -e), so first try them in a subshell to avoid this issue
-  (set 2> /dev/null -o posix) && set -o posix || true
-  (set 2> /dev/null +H) && set +H || true
-  (set 2> /dev/null -o pipefail) && set -o pipefail || true
-}
+set -u 2> /dev/null || :
+# shellcheck disable=SC3040 # IGNORE: In POSIX sh, set option pipefail is undefined
+case "$(set -o 2> /dev/null || set || :)" in *'pipefail'*) set -o pipefail || echo 1>&2 'ERROR: pipefail failed' ;; *) echo 1>&2 'WARNING: pipefail not supported' ;; esac
+# shellcheck disable=SC3041 # IGNORE: In POSIX sh, set flag -H is undefined
+(set +H 2> /dev/null) && set +H || :
 
 # shellcheck disable=SC3028
 case ":${SHELLOPTS-}:" in
-  *':xtrace:'*) # Auto-enable `set -x` for shells that do NOT support SHELLOPTS
+  *':xtrace:'*) # Auto-enable "set -x" for shells that do NOT support SHELLOPTS
     set -x
     export COVERAGE='true'
     ;;
@@ -36,7 +34,7 @@ fail_with_msg()
 show_cmdline()
 {
   printf "'%s'" "${0-}"
-  if test "${#}" -gt 0; then printf " '%s'" "${@}"; fi
+  if test "$#" -gt 0; then printf " '%s'" "${@}"; fi
   printf '\n'
 }
 
@@ -46,7 +44,7 @@ if test "${ENV_RESETTED:-false}" = 'false'; then
   show_cmdline "${@}"
   printf '\n'
 
-  if test "${#}" -eq 0; then fail_with_msg 'You must pass the filename of the flashable ZIP as parameter'; fi
+  if test "$#" -eq 0; then fail_with_msg 'You must pass the filename of the flashable ZIP as parameter'; fi
 
   SHELL="${BASH:-${SHELL-}}"
   if test -z "${SHELL?}"; then SHELL="$(command -v 'bash')" || fail_with_msg 'Unable to find current shell path'; fi
@@ -79,7 +77,7 @@ fix_posix_emulation_if_needed()
     #  working directory to 'C:\WINDOWS\system32'
     # shellcheck disable=SC3028 # IGNORE: In POSIX sh, BASH_SOURCE is undefined
     if test "$(/usr/bin/cygpath -m -- "${PWD:?}" || :)" = "$(/usr/bin/cygpath -m -S || :)" && test -n "${BASH_SOURCE-}"; then
-      cd "${BASH_SOURCE:?}/.." || printf '%s\n' 'ERROR: Failed to restore the correct working directory'
+      cd "${BASH_SOURCE:?}/.." || printf 1>&2 '%s\n' 'ERROR: Failed to set the correct working directory'
     fi
   fi
 }

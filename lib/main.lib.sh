@@ -55,7 +55,7 @@ fix_posix_emulation_if_needed()
     #  working directory to 'C:\WINDOWS\system32'
     # shellcheck disable=SC3028 # IGNORE: In POSIX sh, BASH_SOURCE is undefined
     if test "$(/usr/bin/cygpath -m -- "${PWD:?}" || :)" = "$(/usr/bin/cygpath -m -S || :)" && test -n "${BASH_SOURCE-}"; then
-      cd "${BASH_SOURCE:?}/.." || printf '%s\n' 'ERROR: Failed to restore the correct working directory'
+      cd "${BASH_SOURCE:?}/.." || printf 1>&2 '%s\n' 'ERROR: Failed to set the correct working directory'
     fi
   fi
 }
@@ -174,7 +174,7 @@ if test "${CI:-false}" != 'false' && test "${CI_DEBUG_TRACE:-${RUNNER_DEBUG:-fal
 # shellcheck disable=SC2034
 {
   readonly WGET_CMD='wget'
-  readonly DL_UA='Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0'
+  readonly DL_UA='Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0'
   readonly DL_ACCEPT_HEADER='Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
   readonly DL_ACCEPT_ALL_HEADER='Accept: */*'
   readonly DL_ACCEPT_LANG_HEADER='Accept-Language: en-US,en;q=0.5'
@@ -324,7 +324,7 @@ __update_title_and_ps1()
 {
   local _title
   # shellcheck disable=SC3028 # Ignore: In POSIX sh, SHLVL is undefined
-  _title="CLI: ${__TITLE_CMD_PREFIX-}$(basename 2> /dev/null "${0:--}" || printf '%s' "${0:--}" || :)$(test "${#}" -eq 0 || printf ' "%s"' "${@}" || :) (${SHLVL-}) - ${MODULE_NAME-}"
+  _title="CLI: ${__TITLE_CMD_PREFIX-}$(basename 2> /dev/null "${0:--}" || printf '%s' "${0:--}" || :)$(test "$#" -eq 0 || printf ' "%s"' "${@}" || :) (${SHLVL-}) - ${MODULE_NAME-}"
   PS1="${__DEFAULT_PS1-}"
 
   if is_root; then
@@ -570,17 +570,17 @@ dl_debug()
   ui_debug "  Host: $(get_domain_from_url "${1:?}" || true)"
   shift 2
 
-  while test "${#}" -gt 0; do
+  while test "$#" -gt 0; do
     case "${1?}" in
       -U)
-        if test "${#}" -ge 2; then
+        if test "$#" -ge 2; then
           shift
           ui_debug "  User-Agent: ${1?}"
         fi
         ;;
 
       --header)
-        if test "${#}" -ge 2; then
+        if test "$#" -ge 2; then
           shift
           ui_debug "  ${1?}"
         fi
@@ -591,7 +591,7 @@ dl_debug()
         ;;
 
       --post-data)
-        if test "${#}" -ge 2; then
+        if test "$#" -ge 2; then
           shift
         fi
         ;;
@@ -1343,6 +1343,42 @@ alias_scripts()
   return
 }
 
+set_android_sdk_path_if_unset()
+{
+  test -z "${ANDROID_HOME-}" || return
+
+  # Set the path of Android SDK if not already set
+  if test -n "${LOCALAPPDATA-}" && test -d "${LOCALAPPDATA?}/Android/Sdk"; then
+    ANDROID_HOME="${LOCALAPPDATA?}/Android/Sdk" # Windows
+  elif test -n "${USER_HOME-}" && test -d "${USER_HOME?}/Library/Android/sdk"; then
+    ANDROID_HOME="${USER_HOME?}/Library/Android/sdk" # macOS
+  elif test -n "${USER_HOME-}" && test -d "${USER_HOME?}/.local/share/android/sdk"; then
+    ANDROID_HOME="${USER_HOME?}/.local/share/android/sdk" # Linux (XDG)
+  elif test -n "${USER_HOME-}" && test -d "${USER_HOME?}/Android/Sdk"; then
+    ANDROID_HOME="${USER_HOME?}/Android/Sdk" # Linux (Standard)
+  elif test -d '/usr/lib/android-sdk'; then
+    ANDROID_HOME='/usr/lib/android-sdk' # Linux (APT)
+  fi
+}
+
+find_android_build_tool()
+{
+  local __fn_tool_path
+
+  if __fn_tool_path="$(
+    unalias "${1:?}" 2> /dev/null
+    command 2> /dev/null -v "${1:?}"
+  )" && test -n "${__fn_tool_path?}"; then
+    :
+  elif test -n "${ANDROID_HOME-}" && test -d "${ANDROID_HOME?}/build-tools" && __fn_tool_path="$(find "${ANDROID_HOME?}/build-tools" -maxdepth 2 -iname "${1:?}*" | sort -V -r | head -n 1)" && test -n "${__fn_tool_path?}"; then
+    :
+  else
+    return 1
+  fi
+
+  printf '%s\n' "${__fn_tool_path:?}"
+}
+
 init_base()
 {
   local _main_dir
@@ -1376,7 +1412,7 @@ init_base()
   if test "${DO_INIT_CMDLINE:-0}" != '0' && test "${PLATFORM:?}" = 'win' && test "${USR_BIN_FIXED:-0}" = '0'; then
     # Prioritize POSIX-emulated binaries over Windows natives to prevent hangs and obscure errors
 
-    # While this environment fix is typically handled by `fix_posix_emulation_if_needed`,
+    # While this environment fix is typically handled by "fix_posix_emulation_if_needed",
     #  it must also be explicitly applied here to resolve a specific edge case:
     #  when an emulated environment (e.g., Git Bash) is invoked as a subshell
     #  from a native, non-emulated Windows host shell (e.g., BusyBox for Windows).
@@ -1454,11 +1490,11 @@ is_root()
 
 shellhelp()
 {
-  if test "${#}" -gt 0; then
-    PATH="%builtin${PATHSEP:?}${PATH-}" \help "${@}"
+  if test "$#" -gt 0; then
+    PATH="%builtin${PATHSEP:?}${PATH:-%empty}" help "${@}"
   else
     # shellcheck disable=SC2016 # It is intended: Expressions don't expand in single quotes
-    PATH="%builtin${PATHSEP:?}${PATH-}" \help | sed -e 's/Type `help/Type `shellhelp/g'
+    PATH="%builtin${PATHSEP:?}${PATH:-%empty}" help | sed -e 's/Type `help/Type `shellhelp/g'
   fi
 }
 
@@ -1473,7 +1509,7 @@ init_cmdline()
 
   test "${IS_BUSYBOX:?}" = 'false' || __TITLE_CMD_PREFIX='busybox '
   __TITLE_CMD_0="$(basename "${0:--}" || printf '%s' "${0:--}")"
-  test "${#}" -eq 0 || __TITLE_CMD_PARAMS="$(printf ' "%s"' "${@}")"
+  test "$#" -eq 0 || __TITLE_CMD_PARAMS="$(printf ' "%s"' "${@}")"
   readonly __TITLE_CMD_PREFIX __TITLE_CMD_0 __TITLE_CMD_PARAMS
 
   A5K_LAST_TITLE="${A5K_LAST_TITLE-}"
@@ -1504,48 +1540,19 @@ init_cmdline()
 
   if test -n "${GIT_SSH:="$(command 2> /dev/null -v 'TortoiseGitPlink' || :)"}"; then export GIT_SSH; else unset GIT_SSH; fi
 
-  # Set the path of Android SDK if not already set
-  if test -z "${ANDROID_SDK_ROOT-}"; then
-    if test -n "${USER_HOME-}" && test -e "${USER_HOME:?}/Android/Sdk"; then
-      # Linux
-      export ANDROID_SDK_ROOT="${USER_HOME:?}/Android/Sdk"
-    elif test -n "${LOCALAPPDATA-}" && test -e "${LOCALAPPDATA:?}/Android/Sdk"; then
-      # Windows
-      export ANDROID_SDK_ROOT="${LOCALAPPDATA:?}/Android/Sdk"
-    elif test -n "${USER_HOME-}" && test -e "${USER_HOME:?}/Library/Android/sdk"; then
-      # macOS
-      export ANDROID_SDK_ROOT="${USER_HOME:?}/Library/Android/sdk"
-    fi
-  fi
+  export ANDROID_HOME="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+  set_android_sdk_path_if_unset
+  export AAPT_PATH="${AAPT_PATH:-$(find_android_build_tool 'aapt2' || find_android_build_tool 'aapt' || :)}"
+  export APKSIGNER_PATH="${APKSIGNER_PATH:-$(find_android_build_tool 'apksigner' || command 2> /dev/null -v 'apksigner.bat' || :)}"
 
-  if test -n "${ANDROID_SDK_ROOT-}"; then
+  if test -n "${ANDROID_HOME?}"; then
     if test -n "${CYGPATH?}"; then
       # Only on Bash under Windows
-      ANDROID_SDK_ROOT="$("${CYGPATH:?}" -m -l -a -- "${ANDROID_SDK_ROOT:?}")" || _ui_error_local 'Unable to convert the Android SDK dir' "${LINENO-}" "${FUNCNAME-}"
+      ANDROID_HOME="$("${CYGPATH?}" -m -l -a -- "${ANDROID_HOME?}")" || _ui_error_local 'Unable to convert the Android SDK dir' "${LINENO-}" "${FUNCNAME-}"
     fi
+    export ANDROID_SDK_ROOT="${ANDROID_HOME?}"
 
-    add_to_path_env "${ANDROID_SDK_ROOT:?}/platform-tools"
-
-    if test -e "${ANDROID_SDK_ROOT:?}/build-tools"; then
-      if AAPT2_PATH="$(find "${ANDROID_SDK_ROOT:?}/build-tools" -maxdepth 2 -iname 'aapt2*' | LC_ALL=C sort -V -r | head -n 1)" && test -n "${AAPT2_PATH?}"; then
-        export AAPT2_PATH
-        if command 1> /dev/null 2>&1 -v 'alias'; then
-          # shellcheck disable=SC2139
-          alias 'aapt2'="'${AAPT2_PATH:?}'"
-        fi
-      else
-        unset AAPT2_PATH
-      fi
-      if APKSIGNER_PATH="$(find "${ANDROID_SDK_ROOT:?}/build-tools" -maxdepth 2 -iname 'apksigner*' | LC_ALL=C sort -V -r | head -n 1)" && test -n "${APKSIGNER_PATH?}"; then
-        export APKSIGNER_PATH
-        if command 1> /dev/null 2>&1 -v 'alias'; then
-          # shellcheck disable=SC2139
-          alias 'apksigner'="'${APKSIGNER_PATH:?}'"
-        fi
-      else
-        unset APKSIGNER_PATH
-      fi
-    fi
+    add_to_path_env "${ANDROID_HOME?}/platform-tools"
   fi
 
   if test "${PLATFORM:?}" = 'win'; then
@@ -1577,6 +1584,12 @@ init_cmdline()
       alias 'gradlew'='gradlew.bat'
       alias 'start'='start.sh'
     fi
+
+    # shellcheck disable=SC2139 # IGNORE: This expands when defined, not when used
+    {
+      test -z "${AAPT_PATH?}" || alias aapt="'${AAPT_PATH?}'"
+      test -z "${APKSIGNER_PATH?}" || alias apksigner="'${APKSIGNER_PATH?}'"
+    }
   fi
 
   add_to_path_env "${UTILS_DIR:?}"
@@ -1650,10 +1663,9 @@ init_cmdline()
 
 if test "${DO_INIT_CMDLINE:-0}" != '0'; then
   set -u 2> /dev/null || :
-
-  # shellcheck disable=SC3040 # Ignore: In POSIX sh, set option pipefail is undefined
-  case "$(set 2> /dev/null -o || set || :)" in *'pipefail'*) set -o pipefail || echo 1>&2 'Failed: pipefail' ;; *) ;; esac
-  # shellcheck disable=SC3041,SC2015 # Ignore: In POSIX sh, set flag -H is undefined
+  # shellcheck disable=SC3040 # IGNORE: In POSIX sh, set option pipefail is undefined
+  case "$(set -o 2> /dev/null || set || :)" in *'pipefail'*) set -o pipefail || echo 1>&2 'ERROR: pipefail failed' ;; *) echo 1>&2 'WARNING: pipefail not supported' ;; esac
+  # shellcheck disable=SC3041 # IGNORE: In POSIX sh, set flag -H is undefined
   (set +H 2> /dev/null) && set +H || :
 
   unset ENV
@@ -1676,15 +1688,15 @@ detect_bb_and_id
 
 if test "${DO_INIT_CMDLINE:-0}" != '0'; then
   unset DO_INIT_CMDLINE
-  if test "${#}" -gt 0; then init_cmdline "${@}"; else init_cmdline; fi
+  if test "$#" -gt 0; then init_cmdline "${@}"; else init_cmdline; fi
 fi
 
 export PATH
 
-if test -n "${ANDROID_SDK_ROOT:-}" && test -e "${ANDROID_SDK_ROOT:?}/emulator/emulator.exe"; then
+if test -n "${ANDROID_HOME:-}" && test -e "${ANDROID_HOME:?}/emulator/emulator.exe"; then
   # shellcheck disable=SC2139
   {
-    alias 'emu'="'${ANDROID_SDK_ROOT:?}/emulator/emulator.exe' -no-boot-anim"
-    alias 'emu-w'="'${ANDROID_SDK_ROOT:?}/emulator/emulator.exe' -writable-system -no-snapshot-load -no-boot-anim"
+    alias 'emu'="'${ANDROID_HOME:?}/emulator/emulator.exe' -no-boot-anim"
+    alias 'emu-w'="'${ANDROID_HOME:?}/emulator/emulator.exe' -writable-system -no-snapshot-load -no-boot-anim"
   }
 fi
