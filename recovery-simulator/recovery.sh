@@ -13,8 +13,13 @@ set -e
 set -u 2> /dev/null || :
 # shellcheck disable=SC3040 # IGNORE: In POSIX sh, set option pipefail is undefined
 case "$(set -o 2> /dev/null || set || :)" in *'pipefail'*) set -o pipefail || echo 1>&2 'ERROR: pipefail failed' ;; *) echo 1>&2 'WARNING: pipefail not supported' ;; esac
-# shellcheck disable=SC3041 # IGNORE: In POSIX sh, set flag -H is undefined
-(set +H 2> /dev/null) && set +H || :
+# shellcheck disable=SC3040 # IGNORE: In POSIX sh, set option 'foo' is undefined
+if test -f '/usr/bin/cygpath'; then
+  # IMPORTANT: Double-clicking a script file on Windows opens Bash as an interactive shell and enables 'monitor', 'history' and 'histexpand' contrary to any logic
+  set +o monitor || :
+  (set +o history 2> /dev/null) && set +o history || :
+  (set +o histexpand 2> /dev/null) && set +o histexpand || :
+fi
 
 # shellcheck disable=SC3028
 case ":${SHELLOPTS-}:" in
@@ -70,7 +75,7 @@ fix_posix_emulation_if_needed()
   if test -f '/usr/bin/cygpath'; then
     # Prioritize POSIX-emulated binaries over Windows natives to prevent hangs and obscure errors
     if test "${USR_BIN_FIXED:-0}" = '0'; then
-      case "${PATH-}" in '/usr/bin:'*) ;; *) PATH="/usr/bin:${PATH:-%empty}" ;; esac
+      case "${PATH-}" in '/usr/bin:'*) ;; *) PATH="/usr/bin:${PATH:-/bin}" ;; esac
     fi
 
     # Resolve an issue where dragging and dropping a file onto the script inexplicably resets the
@@ -135,7 +140,7 @@ detect_os_and_other_things()
     esac
   fi
 
-  if test "${PLATFORM:?}" = 'win' && test -f '/usr/bin/cygpath'; then CYGPATH='/usr/bin/cygpath'; fi
+  if test -f '/usr/bin/cygpath'; then CYGPATH='/usr/bin/cygpath'; fi # Exists only on Windows
   if test -n "${CYGPATH?}"; then
     SHELL_CMD="$("${CYGPATH:?}" -m -a -l -- "${SHELL_CMD:?}")" || ui_error 'Unable to convert the path of the shell'
   fi

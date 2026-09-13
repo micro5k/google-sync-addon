@@ -5,6 +5,7 @@
 # shellcheck enable=all
 # shellcheck disable=SC3028 # Ignore: In POSIX sh, FUNCNAME is undefined
 # shellcheck disable=SC2310 # Ignore: This function is invoked in an 'if' condition so set -e will be disabled
+# shellcheck disable=SC2317 # Ignore: Command appears to be unreachable
 last_command="${_}" # IMPORTANT: This line must be at the start of the script before any other command otherwise it will not work
 
 set -e
@@ -77,15 +78,30 @@ fi
 
 # Parse parameters
 default_build_type='true'
+no_pause=0
 while test "$#" -gt 0; do
   case "${1?}" in
-    --no-default-build-type) default_build_type='false' ;;
-    --no-pause) export NO_PAUSE=1 ;;
-    --)
+    --no-default-build-type)
+      default_build_type='false'
+      ;;
+
+    --no-pause)
+      # shellcheck disable=SC2034 # IGNORE: 'foo' appears unused
+      no_pause=1
+      ;;
+    -) # Read from STDIN (implies end of options)
+      break
+      ;;
+    --) # End of options / Positional arguments follow
       shift
       break
       ;;
-    --* | -*) ;; # Ignore unsupported options
+    --*)
+      printf 1>&2 '%s\n' "unrecognized option '${1}'"
+      ;;
+    -*)
+      printf 1>&2 '%s\n' "invalid option -- '${1#-}'"
+      ;;
     *) break ;;
   esac
 

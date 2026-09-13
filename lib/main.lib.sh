@@ -48,7 +48,7 @@ fix_posix_emulation_if_needed()
   if test -f '/usr/bin/cygpath'; then
     # Prioritize POSIX-emulated binaries over Windows natives to prevent hangs and obscure errors
     if test "${USR_BIN_FIXED:-0}" = '0'; then
-      case "${PATH-}" in '/usr/bin:'*) ;; *) PATH="/usr/bin:${PATH:-%empty}" ;; esac
+      case "${PATH-}" in '/usr/bin:'*) ;; *) PATH="/usr/bin:${PATH:-/bin}" ;; esac
     fi
 
     # Resolve an issue where dragging and dropping a file onto the script inexplicably resets the
@@ -152,7 +152,7 @@ run_hook()
     ui_debug "Running hook: ${1?}..."
     set -- 'hook' "${hook_file?}" "${@}"
 
-    case "${-}" in *e*) errexit=1 ;; *) ;; esac
+    case "$-" in *e*) errexit=1 ;; *) ;; esac
     set +e
     # shellcheck source=/dev/null
     . "${hook_file?}" "${@}"
@@ -267,7 +267,7 @@ detect_os_and_other_things()
   fi
   unset __SHELL_EXE
 
-  if test "${PLATFORM:?}" = 'win' && test -f '/usr/bin/cygpath'; then CYGPATH='/usr/bin/cygpath'; fi
+  if test -f '/usr/bin/cygpath'; then CYGPATH='/usr/bin/cygpath'; fi # Exists only on Windows
   if test -n "${CYGPATH?}"; then
     SHELL_EXE="$("${CYGPATH:?}" -m -a -l -- "${SHELL_EXE:?}")" || _ui_error_local 'Unable to convert the path of the shell' "${LINENO-}" "${FUNCNAME-}"
   fi
@@ -462,9 +462,12 @@ verify_sha256_or_delete()
 
 _get_byte_length()
 {
-  local LC_ALL
-  export LC_ALL=C
+  local LC_ALL=''
+
+  export LC_ALL='C'
+  set -- "${1?}" || return "${?}"
   printf '%s\n' "${#1}"
+  unset LC_ALL
 }
 
 _dl_validate_exit_code()
@@ -1568,7 +1571,7 @@ init_cmdline()
     else
       alias 'cls'='clear'
     fi
-    alias 'clear-prev'="printf '\033[A\33[2K\033[A\33[2K\r'"
+    alias 'clear-prev'="printf '%b' '\033[A\033[2K\033[A\033[2K\r'"
 
     alias_scripts "${MAIN_DIR:?}/tools"
     alias_scripts "${MAIN_DIR:?}/utils"
@@ -1665,8 +1668,8 @@ if test "${DO_INIT_CMDLINE:-0}" != '0'; then
   set -u 2> /dev/null || :
   # shellcheck disable=SC3040 # IGNORE: In POSIX sh, set option pipefail is undefined
   case "$(set -o 2> /dev/null || set || :)" in *'pipefail'*) set -o pipefail || echo 1>&2 'ERROR: pipefail failed' ;; *) echo 1>&2 'WARNING: pipefail not supported' ;; esac
-  # shellcheck disable=SC3041 # IGNORE: In POSIX sh, set flag -H is undefined
-  (set +H 2> /dev/null) && set +H || :
+  # shellcheck disable=SC3040 # IGNORE: In POSIX sh, set option histexpand is undefined
+  (set +o histexpand 2> /dev/null) && set +o histexpand || :
 
   unset ENV
 

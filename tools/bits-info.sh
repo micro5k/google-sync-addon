@@ -20,17 +20,25 @@
 # shellcheck enable=all
 # shellcheck disable=SC3043 # In POSIX sh, local is undefined
 
+# @section GLOBAL CONSTANTS ----
+#region
 SCRIPT_NAME='Bits info'
 SCRIPT_SHORTNAME='BitsInfo'
-SCRIPT_VERSION='1.5.37'
+SCRIPT_VERSION='1.5.46'
 SCRIPT_AUTHOR='ale5000'
 SCRIPT_YEAR='2024'
-
-### CONFIGURATION ###
+#endregion
 
 set -u 2> /dev/null || :
 # shellcheck disable=SC3040 # IGNORE: In POSIX sh, set option pipefail is undefined
-case "$(set -o 2> /dev/null || set || :)" in *'pipefail'*) set -o pipefail || echo 1>&2 'ERROR: pipefail failed' ;; *) echo 1>&2 'WARNING: pipefail not supported' ;; esac
+case "$(set -o 2> /dev/null || set || :)" in *'pipefail'*) set -o pipefail || echo 1>&2 'ERROR: pipefail failed' ;; *) ;; esac
+# shellcheck disable=SC3040 # IGNORE: In POSIX sh, set option 'foo' is undefined
+if test -f '/usr/bin/cygpath'; then
+  # IMPORTANT: Double-clicking a script file on Windows opens Bash as an interactive shell and enables 'monitor', 'history' and 'histexpand' contrary to any logic
+  set +o monitor || :
+  (set +o history 2> /dev/null) && set +o history || :
+  (set +o histexpand 2> /dev/null) && set +o histexpand || :
+fi
 
 # The "obosh" shell does NOT support "command" while the "posh" shell does NOT support "type"
 {
@@ -42,10 +50,8 @@ case "$(set -o 2> /dev/null || set || :)" in *'pipefail'*) set -o pipefail || ec
   type "${@}"
 }
 
-# For "zsh" shell
-if command 1> /dev/null 2>&1 -v 'setopt'; then
-  setopt SH_WORD_SPLIT || printf 1>&2 '%s\n' 'Failed: setopt'
-fi
+# Only for "zsh" shell
+if command -v 'setopt' 1> /dev/null 2>&1; then setopt SH_WORD_SPLIT || echo 1>&2 'ERROR: setopt failed'; fi
 
 # Workaround for shells without support for local (example: ksh pbosh obosh)
 command 1> /dev/null 2>&1 -v 'local' || {
@@ -54,7 +60,113 @@ command 1> /dev/null 2>&1 -v 'local' || {
   if command 1> /dev/null 2>&1 -v 'typeset'; then alias 'local'='typeset'; fi
 }
 
-### SCRIPT ###
+# @section TERMINAL SETUP & LOGGING FUNCTIONS ----
+#region
+fix_posix_emulation_if_needed()
+{
+  # Workarounds for shells using Windows-POSIX emulation layers (e.g., Git Bash under Windows)
+  if test -f '/usr/bin/cygpath'; then
+    # Prioritize POSIX-emulated binaries over Windows natives to prevent hangs and obscure errors
+    if test "${USR_BIN_FIXED:-0}" = '0'; then
+      case "${PATH-}" in '/usr/bin:'*) ;; *) PATH="/usr/bin:${PATH:-/bin}" ;; esac
+    fi
+
+    # Resolve an issue where dragging and dropping a file onto the script inexplicably resets the
+    #  working directory to 'C:\WINDOWS\system32'
+    # shellcheck disable=SC3028 # IGNORE: In POSIX sh, BASH_SOURCE is undefined
+    if test "$(/usr/bin/cygpath -m -- "${PWD:?}" || :)" = "$(/usr/bin/cygpath -m -S || :)" && test -n "${BASH_SOURCE-}"; then
+      cd "${BASH_SOURCE:?}/.." || printf 1>&2 '%s\n' 'ERROR: Failed to set the correct working directory'
+    fi
+  fi
+}
+
+color_init()
+{
+  CLR_RESET=''
+  CLR_RED=''
+  CLR_GREEN=''
+  CLR_YELLOW_PLAIN=''
+  CLR_YELLOW=''
+  CLR_CYAN=''
+  CLR_LINE=''
+
+  # shellcheck disable=SC2034 # IGNORE: 'foo' appears unused
+  if test -z "${NO_COLOR-}" && test -t 2; then
+    CLR_RESET='\033[0m'
+    CLR_RED='\033[1;31m'
+    CLR_GREEN='\033[1;32m'
+    CLR_YELLOW_PLAIN='\033[0;33m'
+    CLR_YELLOW='\033[1;33m'
+    CLR_CYAN='\033[1;36m'
+    CLR_LINE='\r        \r'
+  fi
+}
+
+log_scope_init()
+{
+  LOG_LEVEL=0
+}
+
+# shellcheck disable=SC2329 # NOTE: Standard boilerplate function; may not be executed in this specific script
+log_scope_begin()
+{
+  LOG_LEVEL="$((LOG_LEVEL + 2))"
+}
+
+# shellcheck disable=SC2329 # NOTE: Standard boilerplate function; may not be executed in this specific script
+log_scope_end()
+{
+  test "${LOG_LEVEL}" -lt 2 || LOG_LEVEL="$((LOG_LEVEL - 2))"
+}
+
+log_empty_line()
+{
+  printf '\n'
+}
+
+log_output()
+{
+  printf '%*s%s\n' "${LOG_LEVEL}" '' "${1}"
+}
+
+log_warn()
+{
+  if test "${CI:-false}" = 'false'; then
+    printf 1>&2 '%b%*s%s\n%b' "${CLR_YELLOW_PLAIN}${CLR_LINE}" "${LOG_LEVEL}" '' "WARNING: ${1}" "${CLR_RESET}${CLR_LINE}"
+  else
+    printf 1>&2 '%b%*s%s%b\n' "${CLR_YELLOW_PLAIN}" "${LOG_LEVEL}" '' "WARNING: ${1}" "${CLR_RESET}"
+  fi
+}
+
+log_err()
+{
+  if test "${CI:-false}" = 'false'; then
+    printf 1>&2 '\n%b%s\n%b' "${CLR_RED}${CLR_LINE}" "ERROR: ${1}" "${CLR_RESET}${CLR_LINE}"
+  else
+    printf 1>&2 '\n%b%s%b\n' "${CLR_RED}" "ERROR: ${1}" "${CLR_RESET}"
+  fi
+}
+
+init()
+{
+  fix_posix_emulation_if_needed
+  color_init
+  log_scope_init
+}
+
+pause_if_needed()
+{
+  # shellcheck disable=SC3028 # IGNORE: In POSIX sh, SHLVL is undefined
+  if test "${no_pause:-0}" = '0' && test "${NO_PAUSE:-0}" = '0' && test "${SHLVL:-1}" = '1' && test -t 0 && test -t 1 && test -t 2 && test "${CI:-false}" = 'false' && test "${TERM_PROGRAM:-none}" != 'vscode'; then
+    case "$-" in *s*) return "${1:-0}" ;; *) ;; esac
+    printf 1>&2 '\n%b%s' "${CLR_GREEN-}${CLR_LINE-}" 'Press any key to exit... ' || :
+    # shellcheck disable=SC3045 # IGNORE: In POSIX sh, read -s / -n is undefined
+    IFS='' read 2> /dev/null 1>&2 -r -s -n1 _ || IFS='' read 1>&2 -r _ || :
+    printf 1>&2 '\n%b' "${CLR_RESET-}${CLR_LINE-}" || :
+  fi
+  return "${1:-0}"
+}
+#endregion
 
 convert_max_signed_int_to_bit()
 {
@@ -115,17 +227,6 @@ convert_max_unsigned_int_to_bit()
   return 0
 }
 
-warn_msg()
-{
-  if test -n "${NO_COLOR-}"; then
-    printf 1>&2 '%s\n' "WARNING: ${1}"
-  elif test "${CI:-false}" = 'false'; then
-    printf 1>&2 '\033[0;33m\r%s\n\033[0m\r    \r' "WARNING: ${1}"
-  else
-    printf 1>&2 '\033[0;33m%s\033[0m\n' "WARNING: ${1}"
-  fi
-}
-
 inc_num()
 {
   # NOTE: We are going to test integers at (and over) the shell limit so we can NOT use shell arithmetic because it can overflow
@@ -150,7 +251,7 @@ inc_num()
     '18446744073709551615') printf '%s\n' '18446744073709551616' ;;
 
     *)
-      warn_msg "Unexpected number => ${1}"
+      log_warn "Unexpected number => ${1}"
       return 2
       ;;
   esac
@@ -209,9 +310,9 @@ dump_hex()
 {
   if test "${HEXDUMP_CMD:=$(detect_hex_dump_cmd || :)}" = 'xxd'; then
     xxd -p -s "${2}" -c "${3}" -l "${3}" -- "${1}"
-  elif test "${HEXDUMP_CMD?}" = 'hexdump'; then
+  elif test "${HEXDUMP_CMD}" = 'hexdump'; then
     hexdump -v -e '/1 "%02x"' -s "${2}" -n "${3}" -- "${1}" && printf '\n'
-  elif test "${HEXDUMP_CMD?}" = 'od'; then
+  elif test "${HEXDUMP_CMD}" = 'od'; then
     od -v -A 'n' -j "${2}" -N "${3}" -t 'x1' -- "${1}" | tr -d ' \n' && printf '\n'
   else
     return 1
@@ -668,86 +769,96 @@ detect_bitness_of_single_file()
 
 detect_bitness_of_single_file_caller()
 {
-  local _dbsfc_ret_code _dbsfc_lcall
+  local __fn_backup_lcall __fn_status
 
-  _dbsfc_lcall="${LC_ALL-unset}"
-  LC_ALL='C' # We only use bytes and not characters
-  export LC_ALL
+  # Save the current environment state to safely restore it later
+  __fn_backup_lcall="${LC_ALL-unset}"
 
-  _dbsfc_ret_code=0
-  detect_bitness_of_single_file "${1}" || _dbsfc_ret_code="${?}"
+  export LC_ALL='C' # NOTE: Process data as raw bytes rather than multi-byte characters
 
-  if test "${_dbsfc_lcall}" = 'unset'; then unset LC_ALL; else LC_ALL="${_dbsfc_lcall}"; fi
+  __fn_status=0
+  detect_bitness_of_single_file "${1}" || __fn_status="${?}"
 
-  return "${_dbsfc_ret_code}"
+  # Restore the environment state
+  if test "${__fn_backup_lcall}" = 'unset'; then unset LC_ALL; else LC_ALL="${__fn_backup_lcall}"; fi
+
+  return "${__fn_status}"
 }
 
 detect_bitness_of_files()
 {
-  local _dbof_ret_code _dbof_file_list _dbof_filename _dbof_lcall
+  local backup_ifs backup_lcall newline ret_code use_multifile_mode
 
-  # With a single file it returns the specific error code otherwise if there are multiple files it returns the number of files that were not recognized.
-  # If the number is greater than 125 then it returns 125.
-  _dbof_ret_code=0
+  # Save the current environment state to safely restore it later
+  backup_ifs="${IFS-unset}"
+  backup_lcall="${LC_ALL-unset}"
 
-  if is_shell_msys; then
-    # We must do this in all cases with Bash under Windows using this POSIX layer otherwise we may run into freezes, obscure errors and unknown infinite loops!!!
-    PATH="/usr/bin:${PATH:-%empty}"
-  fi
+  newline="$(printf '\nx')" && newline="${newline%x}" || return 193
 
-  # Detect usable utility
+  # IMPORTANT: Single-file mode returns the specific error code from the detector.
+  # Multi-file mode returns the count of unrecognized files, capped at a maximum of 125.
+  ret_code=0
+  use_multifile_mode='false'
+
+  # Detect and cache the hexadecimal dump utility if not already defined
   : "${HEXDUMP_CMD:=$(detect_hex_dump_cmd || :)}"
 
-  if test "${1:-empty}" = '-' && test "$#" -eq 1; then
+  # Process arguments supplied via standard input when '-' is specified
+  if test "$#" -eq 1 && test "${1:-empty}" = '-'; then
+    IFS="${newline}"
+    set -f || :
+    # shellcheck disable=SC2046 # NOTE: Word splitting is intended here to split standard input line-by-line
+    set -- $(cat || printf '%s\n' '__CAT_FAILED__' || :) ||
+      {
+        log_err 'Too many arguments received from standard input or shell allocation failed'
+        set +f || :
+        if test "${backup_ifs}" = 'unset'; then unset IFS; else IFS="${backup_ifs}"; fi
+        return 194
+      }
+    set +f || :
+    if test "${backup_ifs}" = 'unset'; then unset IFS; else IFS="${backup_ifs}"; fi
 
-    (
-      _dbof_file_list="$(cat | tr -- '\0' '\n')" || _dbof_file_list=''
-
-      IFS="$(printf '\nx')" IFS="${IFS%x}"
-      # shellcheck disable=SC2030 # Intended: Modification of LC_ALL is local (to subshell)
-      LC_ALL='C' # We only use bytes and not characters
-      export LC_ALL
-
-      if test -n "${_dbof_file_list}"; then
-        for _dbof_filename in ${_dbof_file_list}; do
-          printf '%s: ' "${_dbof_filename}"
-          detect_bitness_of_single_file "${_dbof_filename}" || _dbof_ret_code="$((_dbof_ret_code + 1))"
-        done
-      else
-        _dbof_ret_code=1
-      fi
-      printf '\nUnidentified files: %s\n' "${_dbof_ret_code}"
-
-      test "${_dbof_ret_code}" -le 125 || return 125
-      return "${_dbof_ret_code}"
-    ) ||
-      _dbof_ret_code="${?}"
-
+    use_multifile_mode='true'
   else
-
-    # shellcheck disable=SC2031
-    _dbof_lcall="${LC_ALL-unset}"
-    LC_ALL='C' # We only use bytes and not characters
-    export LC_ALL
-
-    if test "$#" -le 1; then
-      detect_bitness_of_single_file "${1-}" || _dbof_ret_code="${?}"
-    else
-      test -n "${1}" || shift
-      while test "$#" -gt 0; do
-        printf '%s: ' "$1"
-        detect_bitness_of_single_file "$1" || _dbof_ret_code="$((_dbof_ret_code + 1))"
-        shift
-      done
-      printf '\nUnidentified files: %s\n' "${_dbof_ret_code}"
+    if test "$#" -gt 0 && test -z "${1}"; then
+      shift
+      use_multifile_mode='true' # IMPORTANT: Allow an initial empty element to force multi-file mode
     fi
-
-    if test "${_dbof_lcall}" = 'unset'; then unset LC_ALL; else LC_ALL="${_dbof_lcall}"; fi
-
   fi
 
-  test "${_dbof_ret_code}" -le 125 || return 125
-  return "${_dbof_ret_code}"
+  case "${1-}" in
+    '')
+      log_err 'Missing required argument. Please specify one or more file paths to process'
+      return 195
+      ;;
+    '__CAT_FAILED__')
+      log_err 'Failed to read arguments from standard input'
+      return 196
+      ;;
+    *) ;;
+  esac
+
+  export LC_ALL='C' # NOTE: Process data as raw bytes rather than multi-byte characters
+
+  # Process files using either multi-file or single file mode
+  if test "$#" -gt 1 || test "${use_multifile_mode}" = 'true'; then
+    while test "$#" -gt 0; do
+      printf '%s' "${1:-''}: "
+      detect_bitness_of_single_file "${1}" || ret_code="$((ret_code + 1))"
+      shift
+    done
+    log_empty_line
+    log_output "Unidentified files: ${ret_code}"
+  else
+    detect_bitness_of_single_file "${1-}" || ret_code="${?}"
+  fi
+
+  # Restore the environment state
+  if test "${backup_lcall}" = 'unset'; then unset LC_ALL; else LC_ALL="${backup_lcall}"; fi
+
+  # IMPORTANT: Enforce a maximum exit code limit of 125 to avoid collisions with shell reserved codes
+  if test "${ret_code}" -gt 125; then return 125; fi
+  return "${ret_code}"
 }
 
 get_shell_exe()
@@ -1070,9 +1181,9 @@ detect_bits_of_cut_b()
     else
       if _dbcb_num="$(inc_num "${_dbcb_max}")" && _dbcb_num="$(validate_num_for_cut_b "${_dbcb_num}" "${2}")" && _dbcb_tmp="$(: | cut 2> /dev/null -b "${_dbcb_num}")"; then
         if test "${2}" = 'mac'; then
-          warn_msg 'Detection of cut -b was inconclusive!!!'
+          log_warn 'Detection of cut -b was inconclusive!!!'
         else
-          warn_msg 'Detection of cut -b was inconclusive, please report it to the author!!!'
+          log_warn 'Detection of cut -b was inconclusive, please report it to the author!!!'
         fi
       fi
       break
@@ -1123,48 +1234,6 @@ list_available_shells()
   fi
 }
 
-clear_env()
-{
-  test "${prefer_included_utilities}" != '1' || unset ASH_STANDALONE
-  if test "${backup_posix}" = 'unset'; then unset POSIXLY_CORRECT; else POSIXLY_CORRECT="${backup_posix}"; fi
-  unset SCRIPT_NAME SCRIPT_VERSION HEXDUMP_CMD backup_posix backup_path execute_script prefer_included_utilities
-}
-
-fix_posix_emulation_if_needed()
-{
-  # Workarounds for shells using Windows-POSIX emulation layers (e.g., Git Bash under Windows)
-  if test -f '/usr/bin/cygpath'; then
-    # Prioritize POSIX-emulated binaries over Windows natives to prevent hangs and obscure errors
-    if test "${USR_BIN_FIXED:-0}" = '0'; then
-      case "${PATH-}" in '/usr/bin:'*) ;; *) PATH="/usr/bin:${PATH:-%empty}" ;; esac
-    fi
-
-    # Resolve an issue where dragging and dropping a file onto the script inexplicably resets the
-    #  working directory to 'C:\WINDOWS\system32'
-    # shellcheck disable=SC3028 # IGNORE: In POSIX sh, BASH_SOURCE is undefined
-    if test "$(/usr/bin/cygpath -m -- "${PWD:?}" || :)" = "$(/usr/bin/cygpath -m -S || :)" && test -n "${BASH_SOURCE-}"; then
-      cd "${BASH_SOURCE:?}/.." || printf 1>&2 '%s\n' 'ERROR: Failed to set the correct working directory'
-    fi
-  fi
-}
-
-pause_if_needed()
-{
-  # shellcheck disable=SC3028 # Ignore: In POSIX sh, SHLVL is undefined
-  if test "${NO_PAUSE:-0}" = '0' && test "${no_pause:-0}" = '0' && test "${CI:-false}" = 'false' && test "${TERM_PROGRAM:-none}" != 'vscode' && test "${SHLVL:-1}" = '1' && test -t 0 && test -t 1 && test -t 2; then
-    if test -n "${NO_COLOR-}"; then
-      printf 1>&2 '\n%s' 'Press any key to exit... ' || :
-    else
-      printf 1>&2 '\n\033[1;32m\r%s' 'Press any key to exit... ' || :
-    fi
-    # shellcheck disable=SC3045 # Ignore: In POSIX sh, read -s / -n is undefined
-    IFS='' read 2> /dev/null 1>&2 -r -s -n1 _ || IFS='' read 1>&2 -r _ || :
-    if test -n "${NO_COLOR-}"; then printf 1>&2 '\n' || :; else printf 1>&2 '\n\033[0m\r    \r' || :; fi
-  fi
-  unset no_pause
-  return "${1:-0}"
-}
-
 main()
 {
   local prefer_included_utilities shell_is_msys shell_exe shell_exe_original date_timezone_bug limits limits_date limits_u limits_rnd_u limits_s_u _max _num tmp_var
@@ -1183,8 +1252,6 @@ main()
   limits_rnd_u='65535 4294967295 18446744073709551615'
 
   limits_s_u='32767 65535 256446000 2147483647 4294967295 9223372036854775807 18446744073709551614 18446744073709551615'
-
-  fix_posix_emulation_if_needed
 
   shell_is_msys='false'
   if is_shell_msys; then shell_is_msys='true'; fi
@@ -1276,7 +1343,7 @@ main()
       _max="${_num}"
     else
       if _num="$(inc_num "${_max}")" && test 2> /dev/null "${_num}" -gt 0; then
-        warn_msg 'Detection of shell test int comparison was inconclusive, please report it to the author!!!'
+        log_warn 'Detection of shell test int comparison was inconclusive, please report it to the author!!!'
       fi
       break
     fi
@@ -1289,7 +1356,7 @@ main()
       _max="${_num}"
     else
       if _num="$(inc_num "${_max}")" && test "$((_num))" = "${_num}"; then
-        warn_msg 'Detection of shell arithmetic was inconclusive, please report it to the author!!!'
+        log_warn 'Detection of shell arithmetic was inconclusive, please report it to the author!!!'
       fi
       break
     fi
@@ -1306,7 +1373,7 @@ main()
       _max="${_num}"
     else
       if _num="$(inc_num "${_max}")" && tmp_var="$(printf 2> /dev/null "%u\n" "${_num}")" && test "${tmp_var}" = "${_num}"; then
-        warn_msg 'Detection of unsigned shell printf was inconclusive, please report it to the author!!!'
+        log_warn 'Detection of unsigned shell printf was inconclusive, please report it to the author!!!'
       fi
       break
     fi
@@ -1322,7 +1389,7 @@ main()
       _max="${_num}"
     else
       if _num="$(inc_num "${_max}")" && tmp_var="$(printf 2> /dev/null "%d\n" "${_num}")" && test "${tmp_var}" = "${_num}"; then
-        warn_msg 'Detection of signed shell printf was inconclusive, please report it to the author!!!'
+        log_warn 'Detection of signed shell printf was inconclusive, please report it to the author!!!'
       fi
       break
     fi
@@ -1356,7 +1423,7 @@ main()
           _num="$(inc_num "${_max}")" && next_random_val="$(seed_and_get_random "${_num}")" && test "${next_random_val}" != "${random_val}" &&
             _num="$((_max - 1))" && previous_random_val="$(seed_and_get_random "${_num}")" && test "${next_random_val}" != "${previous_random_val}"
         then
-          warn_msg 'Detection of RANDOM seed was inconclusive, please report it to the author!!!'
+          log_warn 'Detection of RANDOM seed was inconclusive, please report it to the author!!!'
         fi
         break
       fi
@@ -1374,7 +1441,7 @@ main()
       _max="${_num}"
     else
       if _num="$(inc_num "${_max}")" && tmp_var="$(awk -v n="${_num}" -- 'BEGIN { printf "%u\n", n }')" && permissively_comparison "${tmp_var}" "${_num}"; then
-        warn_msg 'Detection of unsigned awk printf was inconclusive, please report it to the author!!!'
+        log_warn 'Detection of unsigned awk printf was inconclusive, please report it to the author!!!'
       fi
       break
     fi
@@ -1387,7 +1454,7 @@ main()
       _max="${_num}"
     else
       if _num="$(inc_num "${_max}")" && tmp_var="$(awk -v n="${_num}" -- 'BEGIN { printf "%d\n", n }')" && permissively_comparison "${tmp_var}" "${_num}"; then
-        warn_msg 'Detection of signed awk printf was inconclusive, please report it to the author!!!'
+        log_warn 'Detection of signed awk printf was inconclusive, please report it to the author!!!'
       fi
       break
     fi
@@ -1414,7 +1481,7 @@ main()
         _max="${_num}"
       else
         if _num="$(inc_num "${_max}")" && tmp_var="$(TZ='CET-1' date 2> /dev/null -d "@${_num}" -- '+%s')" && test "${tmp_var}" = "${_num}"; then
-          warn_msg 'Detection of date timestamp was inconclusive, please report it to the author!!!'
+          log_warn 'Detection of date timestamp was inconclusive, please report it to the author!!!'
         fi
         break
       fi
@@ -1428,7 +1495,7 @@ main()
       _max="${_num}"
     else
       if _num="$(inc_num "${_max}")" && tmp_var="$(TZ='CET-1' date 2> /dev/null -u -d "@${_num}" -- '+%s')" && test "${tmp_var}" = "${_num}"; then
-        warn_msg 'Detection of date -u timestamp was inconclusive, please report it to the author!!!'
+        log_warn 'Detection of date -u timestamp was inconclusive, please report it to the author!!!'
       fi
       break
     fi
@@ -1470,10 +1537,32 @@ main()
   printf '%s\n' "Bits of 'date -u' timestamp: ${date_u_bit}"
 }
 
-backup_posix="${POSIXLY_CORRECT-unset}"
-POSIXLY_CORRECT='y'
-export POSIXLY_CORRECT
+init_env()
+{
+  init
+  backup_path="${PATH-unset}"
+}
 
+restore_env()
+{
+  if test "${backup_path}" = 'unset'; then unset PATH; else PATH="${backup_path}"; fi
+  unset HEXDUMP_CMD backup_path
+}
+
+final_cleanup()
+{
+  unset STATUS no_pause prefer_included_utilities execute_script
+  unset SCRIPT_YEAR SCRIPT_AUTHOR SCRIPT_VERSION SCRIPT_SHORTNAME SCRIPT_NAME
+
+  # shellcheck disable=SC3040 # IGNORE: In POSIX sh, set option pipefail is undefined
+  case "$(set -o 2> /dev/null || set || :)" in *'pipefail'*) set +o pipefail || : ;; *) ;; esac
+  set +u 2> /dev/null || :
+
+  return "${1:-0}"
+}
+
+# @section CLI ARGUMENTS PARSING ----
+#region
 execute_script='true'
 prefer_included_utilities=0
 no_pause=0
@@ -1515,19 +1604,6 @@ while test "$#" -gt 0; do
       printf '%s\n' "find './dir_to_test' -type f -print0 | xargs -0 -- '${script_filename}' -- ''"
       printf '%s\n' "find './dir_to_test' -type f | ${script_filename} -"
       ;;
-    -i | --prefer-included-utilities)
-      # Enable code to prefer utilities that are in the same directory of the shell
-      prefer_included_utilities=1
-
-      # Prefer internal applets over external utilities (only BusyBox under Windows)
-      unset BB_OVERRIDE_APPLETS
-      # Prefer internal applets over external utilities (only some versions of BusyBox under Android)
-      ASH_STANDALONE='1'
-      export ASH_STANDALONE
-      ;;
-    --no-pause)
-      no_pause=1
-      ;;
 
     -l | --list-available-shells)
       execute_script='false'
@@ -1535,6 +1611,18 @@ while test "$#" -gt 0; do
       list_available_shells || STATUS="${?}"
       ;;
 
+    -i | --prefer-included-utilities)
+      # Enable code to prefer utilities that are in the same directory of the shell
+      prefer_included_utilities=1
+      # Prefer internal applets over external utilities (only BusyBox under Windows)
+      unset BB_OVERRIDE_APPLETS
+      # Prefer internal applets over external utilities (only some versions of BusyBox under Android)
+      export ASH_STANDALONE=1
+      ;;
+
+    --no-pause)
+      no_pause=1
+      ;;
     -) # Read from STDIN (implies end of options)
       break
       ;;
@@ -1544,11 +1632,13 @@ while test "$#" -gt 0; do
       ;;
     --*)
       execute_script='false'
+      no_pause=1
       STATUS=2
       printf 1>&2 '%s\n' "${SCRIPT_SHORTNAME}: unrecognized option '${1}'"
       ;;
     -*)
       execute_script='false'
+      no_pause=1
       STATUS=2
       printf 1>&2 '%s\n' "${SCRIPT_SHORTNAME}: invalid option -- '${1#-}'"
       ;;
@@ -1557,9 +1647,12 @@ while test "$#" -gt 0; do
 
   shift
 done || :
+#endregion
 
+# @section EXECUTION ENTRY POINT ----
+#region
 if test "${execute_script}" = 'true'; then
-  backup_path="${PATH-unset}"
+  init_env
 
   if test "$#" -eq 0; then
     main "${prefer_included_utilities}" || STATUS="${?}"
@@ -1567,8 +1660,9 @@ if test "${execute_script}" = 'true'; then
     detect_bitness_of_files "${@}" || STATUS="${?}"
   fi
 
-  if test "${backup_path}" = 'unset'; then unset PATH; else PATH="${backup_path}"; fi
+  restore_env
 fi
 
-clear_env
-pause_if_needed "${STATUS}"
+pause_if_needed
+final_cleanup "${STATUS}"
+#endregion

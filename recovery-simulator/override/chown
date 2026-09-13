@@ -2,10 +2,10 @@
 # SPDX-FileCopyrightText: 2022 ale5000
 # SPDX-License-Identifier: GPL-3.0-or-later WITH LicenseRef-Archive-packaging-exception
 
-if test -n "$1"; then
-  #echo "Dummy chown: $*"
-  return 0 2>&- || exit 0
+if test -n "${1-}"; then
+  #echo 1>&2 "Dummy chown: ${*}"
+  exit 0
 fi
 
 echo 1>&2 "chown: bad usage"
-return 1 2>&- || exit 1
+exit 1

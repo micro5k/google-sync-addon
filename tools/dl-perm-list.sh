@@ -4,7 +4,7 @@
 
 # @name AOSP system permissions downloader
 # @brief Download and parse AOSP system permission declarations for each supported Android API level.
-# @description For every supported Android API level (23 to 36) fetches the
+# @description For every supported Android API level (23 to 37) fetches the
 # corresponding AndroidManifest.xml from AOSP, extracts all <permission>
 # entries, and saves one XML file per API level under data/perms/.
 #
@@ -16,18 +16,17 @@
 # shellcheck enable=all
 # shellcheck disable=SC3043 # In POSIX sh, local is undefined
 
+# @section GLOBAL CONSTANTS ----
+#region
 readonly SCRIPT_NAME='AOSP system permissions downloader'
 readonly SCRIPT_SHORTNAME='SysPermDl'
-readonly SCRIPT_VERSION='0.3.12'
+readonly SCRIPT_VERSION='0.3.18'
 readonly SCRIPT_AUTHOR='ale5000'
 readonly SCRIPT_YEAR='2025'
 
-set -u 2> /dev/null || :
-# shellcheck disable=SC3040 # IGNORE: In POSIX sh, set option pipefail is undefined
-case "$(set -o 2> /dev/null || set || :)" in *'pipefail'*) set -o pipefail || echo 1>&2 'ERROR: pipefail failed' ;; *) echo 1>&2 'WARNING: pipefail not supported' ;; esac
-
+readonly MAX_API=37
+readonly PERMS_DATA_PREFIX='base-permissions-api'
 readonly BASE_URL='https://android.googlesource.com/platform/frameworks/base/'
-readonly MAX_API='37'
 
 # shellcheck disable=SC2034
 {
@@ -52,14 +51,28 @@ readonly WGET_CMD='wget'
 readonly DL_UA='Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0'
 readonly DL_ACCEPT_HEADER='Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
 readonly DL_ACCEPT_LANG_HEADER='Accept-Language: en-US,en;q=0.5'
+#endregion
 
+set -u 2> /dev/null || :
+# shellcheck disable=SC3040 # IGNORE: In POSIX sh, set option pipefail is undefined
+case "$(set -o 2> /dev/null || set || :)" in *'pipefail'*) set -o pipefail || echo 1>&2 'ERROR: pipefail failed' ;; *) echo 1>&2 'WARNING: pipefail not supported' ;; esac
+# shellcheck disable=SC3040 # IGNORE: In POSIX sh, set option 'foo' is undefined
+if test -f '/usr/bin/cygpath'; then
+  # IMPORTANT: Double-clicking a script file on Windows opens Bash as an interactive shell and enables 'monitor', 'history' and 'histexpand' contrary to any logic
+  set +o monitor || :
+  (set +o history 2> /dev/null) && set +o history || :
+  (set +o histexpand 2> /dev/null) && set +o histexpand || :
+fi
+
+# @section TERMINAL SETUP & LOGGING FUNCTIONS ----
+#region
 fix_posix_emulation_if_needed()
 {
   # Workarounds for shells using Windows-POSIX emulation layers (e.g., Git Bash under Windows)
   if test -f '/usr/bin/cygpath'; then
     # Prioritize POSIX-emulated binaries over Windows natives to prevent hangs and obscure errors
     if test "${USR_BIN_FIXED:-0}" = '0'; then
-      case "${PATH-}" in '/usr/bin:'*) ;; *) PATH="/usr/bin:${PATH:-%empty}" ;; esac
+      case "${PATH-}" in '/usr/bin:'*) ;; *) PATH="/usr/bin:${PATH:-/bin}" ;; esac
     fi
 
     # Resolve an issue where dragging and dropping a file onto the script inexplicably resets the
@@ -71,33 +84,93 @@ fix_posix_emulation_if_needed()
   fi
 }
 
+color_init()
+{
+  CLR_RESET=''
+  CLR_RED=''
+  CLR_GREEN=''
+  CLR_YELLOW_PLAIN=''
+  CLR_YELLOW=''
+  CLR_CYAN=''
+  CLR_LINE=''
+
+  # shellcheck disable=SC2034 # IGNORE: 'foo' appears unused
+  if test -z "${NO_COLOR-}" && test -t 2; then
+    CLR_RESET='\033[0m'
+    CLR_RED='\033[1;31m'
+    CLR_GREEN='\033[1;32m'
+    CLR_YELLOW_PLAIN='\033[0;33m'
+    CLR_YELLOW='\033[1;33m'
+    CLR_CYAN='\033[1;36m'
+    CLR_LINE='\r        \r'
+  fi
+}
+
+log_scope_init()
+{
+  LOG_LEVEL=0
+}
+
+# shellcheck disable=SC2329 # NOTE: Standard boilerplate function; may not be executed in this specific script
+log_scope_begin()
+{
+  LOG_LEVEL="$((LOG_LEVEL + 2))"
+}
+
+# shellcheck disable=SC2329 # NOTE: Standard boilerplate function; may not be executed in this specific script
+log_scope_end()
+{
+  test "${LOG_LEVEL}" -lt 2 || LOG_LEVEL="$((LOG_LEVEL - 2))"
+}
+
+log_empty_line()
+{
+  printf '\n'
+}
+
+log_output()
+{
+  printf '%*s%s\n' "${LOG_LEVEL}" '' "${1}"
+}
+
+log_status()
+{
+  printf 1>&2 '%b%s%b\n' "${CLR_GREEN}" "${1}" "${CLR_RESET}"
+}
+
+log_warn()
+{
+  printf 1>&2 '%b%*s%s%b\n' "${CLR_YELLOW_PLAIN}" "${LOG_LEVEL}" '' "WARNING: ${1}" "${CLR_RESET}"
+}
+
+log_err()
+{
+  printf 1>&2 '\n%b%s%b\n' "${CLR_RED}" "ERROR: ${1}" "${CLR_RESET}"
+}
+
+init()
+{
+  fix_posix_emulation_if_needed
+  color_init
+  log_scope_init
+}
+
 pause_if_needed()
 {
-  # shellcheck disable=SC3028 # Ignore: In POSIX sh, SHLVL is undefined
-  if test "${NO_PAUSE:-0}" = '0' && test "${no_pause:-0}" = '0' && test "${CI:-false}" = 'false' && test "${TERM_PROGRAM:-none}" != 'vscode' && test "${SHLVL:-1}" = '1' && test -t 0 && test -t 1 && test -t 2; then
-    if test -n "${NO_COLOR-}"; then
-      printf 1>&2 '\n%s' 'Press any key to exit... ' || :
-    else
-      printf 1>&2 '\n\033[1;32m\r%s' 'Press any key to exit... ' || :
-    fi
-    # shellcheck disable=SC3045 # Ignore: In POSIX sh, read -s / -n is undefined
+  # shellcheck disable=SC3028 # IGNORE: In POSIX sh, SHLVL is undefined
+  if test "${no_pause:-0}" = '0' && test "${NO_PAUSE:-0}" = '0' && test "${SHLVL:-1}" = '1' && test -t 0 && test -t 1 && test -t 2 && test "${CI:-false}" = 'false' && test "${TERM_PROGRAM:-none}" != 'vscode'; then
+    case "$-" in *s*) return "${1:-0}" ;; *) ;; esac
+    printf 1>&2 '\n%b%s' "${CLR_GREEN-}${CLR_LINE-}" 'Press any key to exit... ' || :
+    # shellcheck disable=SC3045 # IGNORE: In POSIX sh, read -s / -n is undefined
     IFS='' read 2> /dev/null 1>&2 -r -s -n1 _ || IFS='' read 1>&2 -r _ || :
-    if test -n "${NO_COLOR-}"; then printf 1>&2 '\n' || :; else printf 1>&2 '\n\033[0m\r    \r' || :; fi
+    printf 1>&2 '\n%b' "${CLR_RESET-}${CLR_LINE-}" || :
   fi
-  unset no_pause
   return "${1:-0}"
 }
+#endregion
 
-show_status()
-{
-  printf 1>&2 '\033[1;32m%s\033[0m\n' "${1?}"
-}
-
-show_error()
-{
-  printf 1>&2 '\n\033[1;31m%s\033[0m\n' "ERROR: ${1?}"
-}
-
+# @section STORAGE & DIRECTORY FUNCTIONS ----
+#region
 find_data_dir()
 {
   local _path
@@ -115,7 +188,7 @@ find_data_dir()
     return 1
   fi
 
-  _path="$(realpath 2> /dev/null "${_path:?}" || readlink -f "${_path:?}")" || return 1
+  _path="$(realpath 2> /dev/null "${_path:?}" || readlink -f "${_path:?}")" || return 3
   printf '%s\n' "${_path:?}"
 }
 
@@ -148,7 +221,10 @@ clean_perms_dir_if_empty()
     rmdir 2> /dev/null -- "${DATA_DIR?}/perms" || :
   fi
 }
+#endregion
 
+# @section CORE FUNCTIONS ----
+#region
 dl()
 {
   "${WGET_CMD:?}" -q -O "${2:?}" -U "${DL_UA:?}" --header "${DL_ACCEPT_HEADER:?}" --header "${DL_ACCEPT_LANG_HEADER:?}" --no-cache -- "${1:?}" || return "${?}"
@@ -171,7 +247,7 @@ fetch_and_extract_manifest_permissions()
       return "${?}"
 
     printf '%s\n' '</manifest>'
-  } 1> "${DATA_DIR:?}/perms/base-permissions-api-${1:?}.xml"
+  } 1> "${DATA_DIR:?}/perms/${PERMS_DATA_PREFIX?}-${1:?}.xml"
 
   return "${?}"
 }
@@ -186,20 +262,19 @@ fetch_and_extract_manifest_permissions_with_retry()
     __fn_attempts_left="$((__fn_attempts_left - 1))" || return "${?}"
     test "${__fn_attempts_left}" -gt 0 || break
 
-    printf 1>&2 '  %s %s\n' "WARNING: Failed to download or parse API ${1?} XML." \
-      "Retrying in ${RETRY_DELAY?} seconds (attempts left: ${__fn_attempts_left?})..."
-
+    log_warn "Failed to download or parse API ${1?} XML. Retrying in ${RETRY_DELAY?} seconds (attempts left: ${__fn_attempts_left?})..."
     sleep "${RETRY_DELAY:?}" || return "${?}"
   done
 
   return 1
 }
+#endregion
 
+# @section MAIN FUNCTION ----
+#region
 main()
 {
   local api='' tag=''
-
-  fix_posix_emulation_if_needed
 
   # BEGIN: Global config (overridable via env)
   export REQUEST_DELAY="${REQUEST_DELAY-}" # Delay to wait after a successful request
@@ -217,37 +292,51 @@ main()
   DATA_DIR="$(find_data_dir || create_and_return_data_dir)" || return 1
 
   command 1> /dev/null -v "${WGET_CMD:?}" || {
-    show_error 'Missing: wget'
+    log_err 'Missing: wget'
     return 255
   }
 
   test -d "${DATA_DIR:?}/perms" || mkdir -p -- "${DATA_DIR:?}/perms" || return 1
+
+  log_empty_line
+  log_output 'Downloading...'
+  log_scope_begin
   rm -f -- "${DATA_DIR:?}/perms/.completed"
+  rm -f -- "${DATA_DIR:?}/perms/${PERMS_DATA_PREFIX:?}"-*.xml
 
   for api in $(seq -- 23 "${MAX_API:?}"); do
-    tag="$(eval " printf '%s\n' \"\${TAG_API_${api:?}:?}\" ")" || {
-      show_error "Failed to get tag for API ${api?}"
+    tag="$(eval " printf '%s\n' \"\${TAG_API_${api?}?}\" ")" || {
+      log_err "Failed to get tag for API ${api?}"
       return 4
     }
-    printf '%s\n' "API ${api:?}: ${tag:?}"
+    log_output "API ${api?}: ${tag?}"
+    log_scope_begin
     fetch_and_extract_manifest_permissions_with_retry "${api:?}" "${tag:?}" || {
-      show_error "Failed to download or parse API ${api?} XML"
-      rm -f -- "${DATA_DIR:?}/perms/base-permissions-api-${api:?}.xml"
+      log_err "Failed to download or parse API ${api?} XML"
+      rm -f -- "${DATA_DIR:?}/perms/${PERMS_DATA_PREFIX?}-${api:?}.xml"
       return 5
     }
+    log_scope_end
     sleep "${REQUEST_DELAY:?}" || return "${?}"
   done
 
-  touch -- "${DATA_DIR:?}/perms/.completed"
+  touch -- "${DATA_DIR:?}/perms/.completed" || return "${?}"
+  log_scope_end
+  log_output 'Done.'
 }
+#endregion
 
+# @section CLI ARGUMENTS PARSING ----
+#region
 execute_script='true'
+no_pause=0
 STATUS=0
 
 while test "$#" -gt 0; do
   case "${1?}" in
     -V | --version)
       execute_script='false'
+      no_pause=1
       # REUSE-IgnoreStart
       printf '%s\n' "${SCRIPT_NAME:?}, version ${SCRIPT_VERSION:?}"
       printf '%s\n' "Copyright (C) ${SCRIPT_YEAR:?} ${SCRIPT_AUTHOR:?}"
@@ -256,6 +345,9 @@ while test "$#" -gt 0; do
       # REUSE-IgnoreEnd
       ;;
 
+    --no-pause)
+      no_pause=1
+      ;;
     -) # Read from STDIN (implies end of options)
       break
       ;;
@@ -265,11 +357,13 @@ while test "$#" -gt 0; do
       ;;
     --*)
       execute_script='false'
+      no_pause=1
       STATUS=2
       printf 1>&2 '%s\n' "${SCRIPT_SHORTNAME?}: unrecognized option '${1}'"
       ;;
     -*)
       execute_script='false'
+      no_pause=1
       STATUS=2
       printf 1>&2 '%s\n' "${SCRIPT_SHORTNAME?}: invalid option -- '${1#-}'"
       ;;
@@ -278,9 +372,13 @@ while test "$#" -gt 0; do
 
   shift
 done
+#endregion
 
+# @section EXECUTION ENTRY POINT ----
+#region
 if test "${execute_script:?}" = 'true'; then
-  show_status "${SCRIPT_NAME:?} v${SCRIPT_VERSION:?} by ${SCRIPT_AUTHOR:?}"
+  init
+  log_status "${SCRIPT_NAME:?} v${SCRIPT_VERSION:?} by ${SCRIPT_AUTHOR:?}"
 
   test "$#" -ne 0 || set -- ''
   main "${@}" || STATUS="${?}"
@@ -289,3 +387,4 @@ fi
 
 pause_if_needed "${STATUS:?}"
 exit "${?}"
+#endregion

@@ -7,6 +7,3 @@ external-sources=true
 
 # Enable all optional checks
 enable=all
-
-# Disable "Command appears to be unreachable" check
-disable=SC2317

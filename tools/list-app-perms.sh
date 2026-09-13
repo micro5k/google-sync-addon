@@ -18,18 +18,29 @@
 #region
 readonly SCRIPT_NAME='Android app permissions lister'
 readonly SCRIPT_SHORTNAME='AppPermList'
-readonly SCRIPT_VERSION='0.1.8'
+readonly SCRIPT_VERSION='0.1.18'
 readonly SCRIPT_AUTHOR='ale5000'
 readonly SCRIPT_YEAR='2025'
 
+readonly EX_USAGE=64
+readonly EX_DATAERR=65
+readonly EX_NOINPUT=66
 readonly EX_UNAVAILABLE=69
+readonly EX_OSERR=71
 #endregion
 
 set -u 2> /dev/null || :
 # shellcheck disable=SC3040 # IGNORE: In POSIX sh, set option pipefail is undefined
 case "$(set -o 2> /dev/null || set || :)" in *'pipefail'*) set -o pipefail || echo 1>&2 'ERROR: pipefail failed' ;; *) echo 1>&2 'WARNING: pipefail not supported' ;; esac
+# shellcheck disable=SC3040 # IGNORE: In POSIX sh, set option 'foo' is undefined
+if test -f '/usr/bin/cygpath'; then
+  # IMPORTANT: Double-clicking a script file on Windows opens Bash as an interactive shell and enables 'monitor', 'history' and 'histexpand' contrary to any logic
+  set +o monitor || :
+  (set +o history 2> /dev/null) && set +o history || :
+  (set +o histexpand 2> /dev/null) && set +o histexpand || :
+fi
 
-# @section UTILITY & UI FUNCTIONS ----
+# @section TERMINAL SETUP & LOGGING FUNCTIONS ----
 #region
 fix_posix_emulation_if_needed()
 {
@@ -37,7 +48,7 @@ fix_posix_emulation_if_needed()
   if test -f '/usr/bin/cygpath'; then
     # Prioritize POSIX-emulated binaries over Windows natives to prevent hangs and obscure errors
     if test "${USR_BIN_FIXED:-0}" = '0'; then
-      case "${PATH-}" in '/usr/bin:'*) ;; *) PATH="/usr/bin:${PATH:-%empty}" ;; esac
+      case "${PATH-}" in '/usr/bin:'*) ;; *) PATH="/usr/bin:${PATH:-/bin}" ;; esac
     fi
 
     # Resolve an issue where dragging and dropping a file onto the script inexplicably resets the
@@ -49,35 +60,102 @@ fix_posix_emulation_if_needed()
   fi
 }
 
-show_status()
+color_init()
 {
-  printf 1>&2 '\033[1;32m%s\033[0m\n' "${1?}"
+  CLR_RESET=''
+  CLR_RED=''
+  CLR_GREEN=''
+  CLR_YELLOW_PLAIN=''
+  CLR_YELLOW=''
+  CLR_CYAN=''
+  CLR_LINE=''
+
+  # shellcheck disable=SC2034 # IGNORE: 'foo' appears unused
+  if test -z "${NO_COLOR-}" && test -t 2; then
+    CLR_RESET='\033[0m'
+    CLR_RED='\033[1;31m'
+    CLR_GREEN='\033[1;32m'
+    CLR_YELLOW_PLAIN='\033[0;33m'
+    CLR_YELLOW='\033[1;33m'
+    CLR_CYAN='\033[1;36m'
+    CLR_LINE='\r        \r'
+  fi
 }
 
-show_error()
+log_scope_init()
 {
-  printf 1>&2 '\033[1;31m%s\033[0m\n' "ERROR: ${1?}"
+  LOG_LEVEL=0
+}
+
+# shellcheck disable=SC2329 # NOTE: Standard boilerplate function; may not be executed in this specific script
+log_scope_begin()
+{
+  LOG_LEVEL="$((LOG_LEVEL + 2))"
+}
+
+# shellcheck disable=SC2329 # NOTE: Standard boilerplate function; may not be executed in this specific script
+log_scope_end()
+{
+  test "${LOG_LEVEL}" -lt 2 || LOG_LEVEL="$((LOG_LEVEL - 2))"
+}
+
+set_yellow_color()
+{
+  printf 1>&2 '%b' "${CLR_YELLOW}"
+}
+
+reset_color()
+{
+  printf 1>&2 '%b' "${CLR_RESET}"
+}
+
+log_empty_line()
+{
+  printf '\n'
+}
+
+log_output()
+{
+  printf '%*s%s\n' "${LOG_LEVEL}" '' "${1}"
+}
+
+log_status()
+{
+  printf 1>&2 '%b%s%b\n' "${CLR_GREEN}" "${1}" "${CLR_RESET}"
+}
+
+log_warn()
+{
+  printf 1>&2 '%b%*s%s%b\n' "${CLR_YELLOW_PLAIN}" "${LOG_LEVEL}" '' "WARNING: ${1}" "${CLR_RESET}"
+}
+
+log_err()
+{
+  printf 1>&2 '\n%b%s%b\n' "${CLR_RED}" "ERROR: ${1}" "${CLR_RESET}"
+}
+
+init()
+{
+  fix_posix_emulation_if_needed
+  color_init
+  log_scope_init
 }
 
 pause_if_needed()
 {
-  # shellcheck disable=SC3028 # Ignore: In POSIX sh, SHLVL is undefined
-  if test "${NO_PAUSE:-0}" = '0' && test "${no_pause:-0}" = '0' && test "${CI:-false}" = 'false' && test "${TERM_PROGRAM:-none}" != 'vscode' && test "${SHLVL:-1}" = '1' && test -t 0 && test -t 1 && test -t 2; then
-    if test -n "${NO_COLOR-}"; then
-      printf 1>&2 '\n%s' 'Press any key to exit... ' || :
-    else
-      printf 1>&2 '\n\033[1;32m\r%s' 'Press any key to exit... ' || :
-    fi
-    # shellcheck disable=SC3045 # Ignore: In POSIX sh, read -s / -n is undefined
+  # shellcheck disable=SC3028 # IGNORE: In POSIX sh, SHLVL is undefined
+  if test "${no_pause:-0}" = '0' && test "${NO_PAUSE:-0}" = '0' && test "${SHLVL:-1}" = '1' && test -t 0 && test -t 1 && test -t 2 && test "${CI:-false}" = 'false' && test "${TERM_PROGRAM:-none}" != 'vscode'; then
+    case "$-" in *s*) return "${1:-0}" ;; *) ;; esac
+    printf 1>&2 '\n%b%s' "${CLR_GREEN-}${CLR_LINE-}" 'Press any key to exit... ' || :
+    # shellcheck disable=SC3045 # IGNORE: In POSIX sh, read -s / -n is undefined
     IFS='' read 2> /dev/null 1>&2 -r -s -n1 _ || IFS='' read 1>&2 -r _ || :
-    if test -n "${NO_COLOR-}"; then printf 1>&2 '\n' || :; else printf 1>&2 '\n\033[0m\r    \r' || :; fi
+    printf 1>&2 '\n%b' "${CLR_RESET-}${CLR_LINE-}" || :
   fi
-  unset no_pause
   return "${1:-0}"
 }
 #endregion
 
-# @section CORE FUNCTIONS ----
+# @section ANDROID SDK FUNCTIONS ----
 #region
 set_android_sdk_path_if_unset()
 {
@@ -120,7 +198,8 @@ find_android_build_tool()
 #region
 main()
 {
-  fix_posix_emulation_if_needed
+  local backup_ifs="${IFS-unset}"
+  local status=0 base_name='' cmd_output='' pkg_name=''
 
   # BEGIN: Global config (overridable via env)
   export ANDROID_HOME="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
@@ -129,28 +208,89 @@ main()
   # END: Global config
 
   if test -z "${AAPT_PATH?}"; then
-    show_error 'Neither "aapt2" nor "aapt" could be found. You need to set AAPT_PATH'
+    log_err 'Neither "aapt2" nor "aapt" could be found. You need to set AAPT_PATH'
     return "${EX_UNAVAILABLE?}"
   fi
 
-  test -n "${1-}" || {
-    show_error 'Missing required argument. Please specify the APK file path to process'
-    return 3
-  }
+  unset JAVA_TOOL_OPTIONS
+  readonly NL='
+'
 
-  "${AAPT_PATH?}" dump permissions "${@}" | grep -F -e 'uses-permission: ' | cut -d ':' -f '2-' -s | cut -b '2-' | sort || return "${?}"
+  # Process arguments supplied via standard input when '-' is specified
+  if test "$#" -eq 1 && test "${1:-empty}" = '-'; then
+    IFS="${NL:?}"
+    set -f || :
+    # shellcheck disable=SC2046 # NOTE: Word splitting is intended here to split standard input line-by-line
+    set -- $(cat || printf '%s\n' '__CAT_FAILED__' || :) ||
+      {
+        log_err 'Too many arguments received from standard input or shell allocation failed'
+        set +f || :
+        if test "${backup_ifs?}" = 'unset'; then unset IFS; else IFS="${backup_ifs}"; fi
+        return "${EX_OSERR?}"
+      }
+    set +f || :
+    if test "${backup_ifs?}" = 'unset'; then unset IFS; else IFS="${backup_ifs}"; fi
+  fi
+
+  case "${1-}" in
+    '')
+      log_err 'Missing required argument. Please specify one or more APK file paths to process'
+      return "${EX_USAGE?}"
+      ;;
+    '__CAT_FAILED__')
+      log_err 'Failed to read arguments from standard input'
+      return "${EX_NOINPUT?}"
+      ;;
+    *) ;;
+  esac
+
+  while test "$#" -gt 0; do
+    reset_color
+    log_empty_line
+    base_name="$(basename "${1:-''}" || printf '%s\n' "${1:-''}" || :)"
+    log_output "Filename: ${base_name:?}"
+
+    log_status 'Using aapt...'
+    set_yellow_color
+    cmd_output="$("${AAPT_PATH?}" dump permissions "${1?}")" || {
+      log_err "Failed to extract package manifest metadata from '${1?}' (exit code: ${?})"
+      status="${EX_DATAERR?}"
+      shift
+      continue
+    }
+    reset_color
+
+    pkg_name="$(printf '%s\n' "${cmd_output:?}" | grep -F -e 'package: ' | cut -d ':' -f '2-' -s | cut -b '2-')" || pkg_name=''
+    if test -z "${pkg_name?}"; then
+      log_err "Failed to parse package name from metadata for '${1?}'"
+      status="${EX_DATAERR?}"
+      shift
+      continue
+    fi
+
+    printf '%s\n' "${cmd_output?}" | grep -F -e 'uses-permission: ' | cut -d ':' -f '2-' -s | cut -b '2-' | LC_ALL='C.UTF-8' sort || {
+      log_warn 'This APK file does NOT request any permissions'
+    }
+    cmd_output=''
+
+    shift
+  done
+
+  return "${status:?}"
 }
 #endregion
 
 # @section CLI ARGUMENTS PARSING ----
 #region
 execute_script='true'
+no_pause=0
 STATUS=0
 
 while test "$#" -gt 0; do
   case "${1?}" in
     -V | --version)
       execute_script='false'
+      no_pause=1
       # REUSE-IgnoreStart
       printf '%s\n' "${SCRIPT_NAME:?}, version ${SCRIPT_VERSION:?}"
       printf '%s\n' "Copyright (C) ${SCRIPT_YEAR:?} ${SCRIPT_AUTHOR:?}"
@@ -159,6 +299,9 @@ while test "$#" -gt 0; do
       # REUSE-IgnoreEnd
       ;;
 
+    --no-pause)
+      no_pause=1
+      ;;
     -) # Read from STDIN (implies end of options)
       break
       ;;
@@ -168,11 +311,13 @@ while test "$#" -gt 0; do
       ;;
     --*)
       execute_script='false'
+      no_pause=1
       STATUS=2
       printf 1>&2 '%s\n' "${SCRIPT_SHORTNAME?}: unrecognized option '${1}'"
       ;;
     -*)
       execute_script='false'
+      no_pause=1
       STATUS=2
       printf 1>&2 '%s\n' "${SCRIPT_SHORTNAME?}: invalid option -- '${1#-}'"
       ;;
@@ -186,10 +331,12 @@ done
 # @section EXECUTION ENTRY POINT ----
 #region
 if test "${execute_script:?}" = 'true'; then
-  show_status "${SCRIPT_NAME:?} v${SCRIPT_VERSION:?} by ${SCRIPT_AUTHOR:?}"
+  init
+  log_status "${SCRIPT_NAME:?} v${SCRIPT_VERSION:?} by ${SCRIPT_AUTHOR:?}"
 
   test "$#" -ne 0 || set -- ''
   main "${@}" || STATUS="${?}"
+  reset_color
 fi
 
 pause_if_needed "${STATUS:?}"

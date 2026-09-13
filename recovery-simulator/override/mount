@@ -2,9 +2,9 @@
 # SPDX-FileCopyrightText: 2022 ale5000
 # SPDX-License-Identifier: GPL-3.0-or-later WITH LicenseRef-Archive-packaging-exception
 
-if test -n "$1"; then
-  echo "Dummy mount: $*"
-  return 0 2>&- || exit 0
+if test "$#" -gt 0; then
+  echo 1>&2 "Dummy mount: ${*}"
+  exit 0
 fi
 
 echo "\
@@ -22,8 +22,9 @@ ${ANDROID_DATA:?} on /data type ext4 (rw,seclabel,relatime,data=ordered)
 /dev/block/bootdevice/by-name/sdcard0 on /sdcard0 type vfat (rw,relatime,errors=remount-ro)
 /dev/block/bootdevice/by-name/sdcard1 on /sdcard1 type vfat (rw,relatime,errors=remount-ro)
 /dev/block/bootdevice/by-name/system on ${ANDROID_ROOT:?} type ext4 (rw,seclabel,relatime,data=ordered)
-${ANDROID_ROOT:?} on /system type ext4 (rw,seclabel,relatime,data=ordered)\
-/system/system_ext on /system_ext type ext4 (rw,seclabel,relatime,data=ordered)\
-/system/product on /product type ext4 (rw,seclabel,relatime,data=ordered)\
-/system/vendor on /vendor type ext4 (rw,seclabel,relatime,data=ordered)\
+${ANDROID_ROOT:?} on /system type ext4 (rw,seclabel,relatime,data=ordered)
+/system/system_ext on /system_ext type ext4 (rw,seclabel,relatime,data=ordered)
+/system/product on /product type ext4 (rw,seclabel,relatime,data=ordered)
+/system/vendor on /vendor type ext4 (rw,seclabel,relatime,data=ordered)
 "
+exit 0

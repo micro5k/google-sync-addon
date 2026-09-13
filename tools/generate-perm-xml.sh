@@ -22,23 +22,34 @@
 #region
 readonly SCRIPT_NAME='Android ROM permissions XML generator'
 readonly SCRIPT_SHORTNAME='PermXmlGen'
-readonly SCRIPT_VERSION='0.3.21'
+readonly SCRIPT_VERSION='0.3.36'
 readonly SCRIPT_AUTHOR='ale5000'
 readonly SCRIPT_YEAR='2025'
 
-readonly MAX_API='37'
+readonly MAX_API=37
+readonly PERMS_DATA_PREFIX='base-permissions-api'
 
+readonly EX_USAGE=64
+readonly EX_DATAERR=65
+readonly EX_NOINPUT=66
 readonly EX_UNAVAILABLE=69
 readonly EX_SOFTWARE=70
+readonly EX_OSERR=71
+readonly EX_CONFIG=78
 #endregion
 
 set -u 2> /dev/null || :
 # shellcheck disable=SC3040 # IGNORE: In POSIX sh, set option pipefail is undefined
 case "$(set -o 2> /dev/null || set || :)" in *'pipefail'*) set -o pipefail || echo 1>&2 'ERROR: pipefail failed' ;; *) echo 1>&2 'WARNING: pipefail not supported' ;; esac
-# shellcheck disable=SC3041 # IGNORE: In POSIX sh, set flag -H is undefined
-(set +H 2> /dev/null) && set +H || :
+# shellcheck disable=SC3040 # IGNORE: In POSIX sh, set option 'foo' is undefined
+if test -f '/usr/bin/cygpath'; then
+  # IMPORTANT: Double-clicking a script file on Windows opens Bash as an interactive shell and enables 'monitor', 'history' and 'histexpand' contrary to any logic
+  set +o monitor || :
+  (set +o history 2> /dev/null) && set +o history || :
+  (set +o histexpand 2> /dev/null) && set +o histexpand || :
+fi
 
-# @section UTILITY & UI FUNCTIONS ----
+# @section TERMINAL SETUP & LOGGING FUNCTIONS ----
 #region
 fix_posix_emulation_if_needed()
 {
@@ -46,7 +57,7 @@ fix_posix_emulation_if_needed()
   if test -f '/usr/bin/cygpath'; then
     # Prioritize POSIX-emulated binaries over Windows natives to prevent hangs and obscure errors
     if test "${USR_BIN_FIXED:-0}" = '0'; then
-      case "${PATH-}" in '/usr/bin:'*) ;; *) PATH="/usr/bin:${PATH:-%empty}" ;; esac
+      case "${PATH-}" in '/usr/bin:'*) ;; *) PATH="/usr/bin:${PATH:-/bin}" ;; esac
     fi
 
     # Resolve an issue where dragging and dropping a file onto the script inexplicably resets the
@@ -58,57 +69,102 @@ fix_posix_emulation_if_needed()
   fi
 }
 
-set_red_color()
+color_init()
 {
-  printf 1>&2 '\033[1;31m\r'
+  CLR_RESET=''
+  CLR_RED=''
+  CLR_GREEN=''
+  CLR_YELLOW_PLAIN=''
+  CLR_YELLOW=''
+  CLR_CYAN=''
+  CLR_LINE=''
+
+  # shellcheck disable=SC2034 # IGNORE: 'foo' appears unused
+  if test -z "${NO_COLOR-}" && test -t 2; then
+    CLR_RESET='\033[0m'
+    CLR_RED='\033[1;31m'
+    CLR_GREEN='\033[1;32m'
+    CLR_YELLOW_PLAIN='\033[0;33m'
+    CLR_YELLOW='\033[1;33m'
+    CLR_CYAN='\033[1;36m'
+    CLR_LINE='\r        \r'
+  fi
+}
+
+log_scope_init()
+{
+  LOG_LEVEL=0
+}
+
+# shellcheck disable=SC2329 # NOTE: Standard boilerplate function; may not be executed in this specific script
+log_scope_begin()
+{
+  LOG_LEVEL="$((LOG_LEVEL + 2))"
+}
+
+# shellcheck disable=SC2329 # NOTE: Standard boilerplate function; may not be executed in this specific script
+log_scope_end()
+{
+  test "${LOG_LEVEL}" -lt 2 || LOG_LEVEL="$((LOG_LEVEL - 2))"
+}
+
+set_yellow_color()
+{
+  printf 1>&2 '%b' "${CLR_YELLOW}"
 }
 
 reset_color()
 {
-  printf 1>&2 '\033[0m\r'
+  printf 1>&2 '%b' "${CLR_RESET}"
 }
 
-show_status()
+log_empty_line()
 {
-  printf 1>&2 '\033[1;32m%s\033[0m\n' "${1?}"
+  printf '\n'
 }
 
-show_warn()
+log_output()
 {
-  printf 1>&2 '\033[0;33m%s\033[0m\n' "WARNING: ${1?}"
+  printf '%*s%s\n' "${LOG_LEVEL}" '' "${1}"
 }
 
-show_error()
+log_status()
 {
-  printf 1>&2 '\n\033[1;31m%s\033[0m\n' "ERROR: ${1?}"
+  printf 1>&2 '%b%s%b\n' "${CLR_GREEN}" "${1}" "${CLR_RESET}"
 }
 
-ui_error()
+log_warn()
 {
-  # ToDO: Remove this function
-  show_error "${1?}"
-  exit 55
+  printf 1>&2 '%b%*s%s%b\n' "${CLR_YELLOW_PLAIN}" "${LOG_LEVEL}" '' "WARNING: ${1}" "${CLR_RESET}"
+}
+
+log_err()
+{
+  printf 1>&2 '\n%b%s%b\n' "${CLR_RED}" "ERROR: ${1}" "${CLR_RESET}"
+}
+
+init()
+{
+  fix_posix_emulation_if_needed
+  color_init
+  log_scope_init
 }
 
 pause_if_needed()
 {
-  # shellcheck disable=SC3028 # Ignore: In POSIX sh, SHLVL is undefined
-  if test "${NO_PAUSE:-0}" = '0' && test "${no_pause:-0}" = '0' && test "${CI:-false}" = 'false' && test "${TERM_PROGRAM:-none}" != 'vscode' && test "${SHLVL:-1}" = '1' && test -t 0 && test -t 1 && test -t 2; then
-    if test -n "${NO_COLOR-}"; then
-      printf 1>&2 '\n%s' 'Press any key to exit... ' || :
-    else
-      printf 1>&2 '\n\033[1;32m\r%s' 'Press any key to exit... ' || :
-    fi
-    # shellcheck disable=SC3045 # Ignore: In POSIX sh, read -s / -n is undefined
+  # shellcheck disable=SC3028 # IGNORE: In POSIX sh, SHLVL is undefined
+  if test "${no_pause:-0}" = '0' && test "${NO_PAUSE:-0}" = '0' && test "${SHLVL:-1}" = '1' && test -t 0 && test -t 1 && test -t 2 && test "${CI:-false}" = 'false' && test "${TERM_PROGRAM:-none}" != 'vscode'; then
+    case "$-" in *s*) return "${1:-0}" ;; *) ;; esac
+    printf 1>&2 '\n%b%s' "${CLR_GREEN-}${CLR_LINE-}" 'Press any key to exit... ' || :
+    # shellcheck disable=SC3045 # IGNORE: In POSIX sh, read -s / -n is undefined
     IFS='' read 2> /dev/null 1>&2 -r -s -n1 _ || IFS='' read 1>&2 -r _ || :
-    if test -n "${NO_COLOR-}"; then printf 1>&2 '\n' || :; else printf 1>&2 '\n\033[0m\r    \r' || :; fi
+    printf 1>&2 '\n%b' "${CLR_RESET-}${CLR_LINE-}" || :
   fi
-  unset no_pause
   return "${1:-0}"
 }
 #endregion
 
-# @section CORE FUNCTIONS ----
+# @section ANDROID SDK FUNCTIONS ----
 #region
 set_android_sdk_path_if_unset()
 {
@@ -145,7 +201,10 @@ find_android_build_tool()
 
   printf '%s\n' "${__fn_tool_path:?}"
 }
+#endregion
 
+# @section STORAGE & DIRECTORY FUNCTIONS ----
+#region
 find_data_dir()
 {
   local _path
@@ -163,31 +222,35 @@ find_data_dir()
     return 1
   fi
 
-  _path="$(realpath 2> /dev/null "${_path:?}" || readlink -f "${_path:?}")" || return 1
+  _path="$(realpath 2> /dev/null "${_path:?}" || readlink -f "${_path:?}")" || return 3
   printf '%s\n' "${_path:?}"
 }
+#endregion
 
+# @section CORE FUNCTIONS ----
+#region
 get_apk_cert_sha256()
 {
   local __fn_cert_sha256=''
 
   if test -n "${APKSIGNER_PATH?}"; then
-    show_status 'Using apksigner...'
-    set_red_color
+    log_status 'Using apksigner...'
+    set_yellow_color
     __fn_cert_sha256="$("${APKSIGNER_PATH?}" verify --min-sdk-version 24 --print-certs -- "${1:?}" | grep -m 1 -o -i -e 'certificate SHA-256 digest:.*' | cut -d ':' -f '2' -s | tr -d -- ' ' | tr -- '[:lower:]' '[:upper:]')" || return "${?}"
   else
-    show_status 'Using keytool...'
-    set_red_color
+    log_status 'Using keytool...'
+    set_yellow_color
     # IMPORTANT: This is slow and limited to v1 signatures
     __fn_cert_sha256="$(LC_ALL=C "${KEYTOOL_PATH:?}" -printcert -jarfile "${1:?}" | grep -m 1 -F -e 'SHA256:' | cut -d ':' -f '2-' -s | tr -d -- ' :')" || return "${?}"
   fi
+  reset_color
 
   # IMPORTANT: This is faster but limited to v1 RSA signatures
   # WARNING: Will fail if the META-INF folder contains an EC signature file instead of RSA
   # __fn_cert_sha256="$(unzip -p "${1:?}" 'META-INF/*.RSA' | openssl pkcs7 -inform 'DER' -print_certs -quiet | openssl x509 -noout -sha256 -fingerprint | cut -d '=' -f '2' -s | tr -d -- ':')" || return "${?}"
 
   test "${#__fn_cert_sha256}" -eq 64 || {
-    show_error "Extracted SHA-256 hash length is invalid (got ${#__fn_cert_sha256} chars, expected 64)"
+    log_err "Extracted SHA-256 hash length is invalid (got ${#__fn_cert_sha256} chars, expected 64)"
     return "${EX_SOFTWARE?}"
   }
 
@@ -236,7 +299,7 @@ map_permission_group_to_label()
 
 get_permission_declaration()
 {
-  grep -m 1 -F -e "android:name=\"${1:?}\"" -- "${DATA_DIR:?}/perms/base-permissions-api-${2:?}.xml" || return 1
+  grep -m 1 -F -e "android:name=\"${1:?}\"" -- "${DATA_DIR:?}/perms/${PERMS_DATA_PREFIX?}-${2:?}.xml" || return 1
 }
 
 get_custom_permission_declaration()
@@ -341,7 +404,8 @@ terminate_xml()
 
 parse_perms_and_generate_xml_files()
 {
-  local _backup_ifs _filename _base_name _pkg_name _cert_sha256 _input _perm _api
+  local _backup_ifs="${IFS-}"
+  local _filename _base_name _pkg_name _cert_sha256 _input _perm _api
   local _perm_decl_all _perm_decl _perm_prot_level _perm_flags _perm_whitelist _no_api_difference _perm_group _perm_after _perm_min_api
   local _perm_is_privileged _perm_is_dangerous _perm_type_found _perm_fake_sign
   local _privileged_perm_list _dangerous_perm_list
@@ -350,17 +414,19 @@ parse_perms_and_generate_xml_files()
   _pkg_name="${2:?}"
   _cert_sha256="${3?}"
 
-  test ! -t 0 || ui_error "Failed to retrieve the permissions list"
-  _input="$(cat)" || ui_error "Failed to retrieve the permissions list"
+  # Ensure the function is receiving input via a pipe (STDIN is not a TTY)
+  test ! -t 0 || return 3
+  # Read the entire STDIN content into a variable
+  _input="$(cat)" || return 4
 
-  _backup_ifs="${IFS-}"
   IFS="${NL:?}"
-
   set -f || :
   # shellcheck disable=SC2086 # Word splitting is intended
-  set -- ${_input:?} || ui_error "Failed expanding \${_input} inside parse_perms_and_generate_xml_files()"
+  set -- ${_input:?} || {
+    set +f || :
+    return 5
+  }
   set +f || :
-
   IFS="${_backup_ifs?}"
 
   # Info:
@@ -397,18 +463,18 @@ parse_perms_and_generate_xml_files()
     elif _perm_decl_all="$(get_custom_permission_declaration "${_perm:?}")"; then
       _no_api_difference='true'
     else
-      show_warn "Unknown permission: ${_perm?}" # The permission cannot be found in any API, skip it
+      log_warn "Unknown permission: ${_perm?}" # The permission cannot be found in any API, skip it
       continue
     fi
 
     for _api in $(seq -- 23 "${MAX_API:?}"); do
-      _perm_decl="$(printf '%s\n' "${_perm_decl_all:?}" | grep -F -e "perms/base-permissions-api-${_api:?}.xml:" -e '(standard input):')" || {
-        test "${SCRIPT_VERBOSE:?}" = 'false' || show_warn "The '${_perm?}' permission cannot be found on API ${_api?}"
+      _perm_decl="$(printf '%s\n' "${_perm_decl_all:?}" | grep -F -e "perms/${PERMS_DATA_PREFIX?}-${_api:?}.xml:" -e '(standard input):')" || {
+        test "${SCRIPT_VERBOSE:?}" = 'false' || log_warn "The '${_perm?}' permission cannot be found on API ${_api?}"
         continue
       }
       : "${_perm_min_api:=${_api:?}}" # Set min API for this permission
       _perm_prot_level="$(printf '%s\n' "${_perm_decl:?}" | grep -o -e 'android:protectionLevel="[^"]*"' | cut -d '"' -f '2' -s)" || {
-        show_error "Failed to the parse protection level of '${_perm?}' on API ${_api?}"
+        log_err "Failed to the parse protection level of '${_perm?}' on API ${_api?}"
         continue
       }
 
@@ -435,7 +501,7 @@ parse_perms_and_generate_xml_files()
 
       case "${_perm_type_found?}" in
         'true') ;;
-        *) show_warn "Unknown protection level for '${_perm?}'$(test "${_no_api_difference:?}" = 'true' || printf '%s\n' " on API ${_api?}" || :)$(test "${SCRIPT_VERBOSE:?}" = 'false' || printf '%s\n' " => ${_perm_prot_level?}" || :)" ;;
+        *) log_warn "Unknown protection level for '${_perm?}'$(test "${_no_api_difference:?}" = 'true' || printf '%s\n' " on API ${_api?}" || :)$(test "${SCRIPT_VERBOSE:?}" = 'false' || printf '%s\n' " => ${_perm_prot_level?}" || :)" ;;
       esac
       test "${_no_api_difference:?}" = 'false' || break
     done
@@ -476,18 +542,25 @@ parse_perms_and_generate_xml_files()
     {
       begin_xml "${_pkg_name:?}" "${_cert_sha256?}" 'privapp-permissions'
       printf '%s' "${_privileged_perm_list:?}" | while IFS='|' read -r NAME MIN_API; do
-        append_perm_to_xml "${NAME:?}" "${MIN_API:?}" 'privapp-permissions' '' '' || ui_error "Failed to append the '${NAME?}' permission on '${_filename?}'"
+        append_perm_to_xml "${NAME:?}" "${MIN_API:?}" 'privapp-permissions' '' '' || {
+          log_err "Failed to append the '${NAME?}' permission on '${_filename?}'"
+          return 6
+        }
       done
       terminate_xml 'privapp-permissions'
     } 1> "${OUTPUT_DIR:?}/${_filename:?}"
   fi
+
   if test -n "${_dangerous_perm_list?}"; then
     _filename="default-permissions-${_base_name:?}.xml"
     {
       begin_xml "${_pkg_name:?}" "${_cert_sha256?}" 'default-permissions'
       LAST_PERM_GROUP=''
-      printf '%s' "${_dangerous_perm_list:?}" | LC_ALL=C sort | while IFS='|' read -r GROUP _ NAME WHITELIST MIN_API; do
-        append_perm_to_xml "${NAME:?}" "${MIN_API:?}" 'default-permissions' "${GROUP:?}" "${WHITELIST:?}" || ui_error "Failed to append the '${NAME?}' permission on '${_filename?}'"
+      printf '%s' "${_dangerous_perm_list:?}" | LC_ALL='C.UTF-8' sort | while IFS='|' read -r GROUP _ NAME WHITELIST MIN_API; do
+        append_perm_to_xml "${NAME:?}" "${MIN_API:?}" 'default-permissions' "${GROUP:?}" "${WHITELIST:?}" || {
+          log_err "Failed to append the '${NAME?}' permission on '${_filename?}'"
+          return 7
+        }
       done
       unset LAST_PERM_GROUP
       terminate_xml 'default-permissions'
@@ -500,9 +573,8 @@ parse_perms_and_generate_xml_files()
 #region
 main()
 {
-  local status backup_ifs base_name cmd_output pkg_name perm_list cert_sha256=''
-
-  fix_posix_emulation_if_needed
+  local backup_ifs="${IFS-unset}"
+  local status=0 base_name='' cmd_output='' pkg_name='' perm_list='' cert_sha256=''
 
   # BEGIN: Global config (overridable via env)
   export ANDROID_HOME="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
@@ -515,7 +587,7 @@ main()
   # END: Global config
 
   if test -z "${AAPT_PATH?}"; then
-    show_error 'Neither "aapt2" nor "aapt" could be found. You need to set AAPT_PATH'
+    log_err 'Neither "aapt2" nor "aapt" could be found. You need to set AAPT_PATH'
     return "${EX_UNAVAILABLE?}"
   fi
 
@@ -525,7 +597,7 @@ main()
     elif test -n "${KEYTOOL_PATH?}" || KEYTOOL_PATH="$(command 2> /dev/null -v 'keytool')"; then
       :
     else
-      show_error 'Neither "apksigner" nor "keytool" could be found. You need to set either APKSIGNER_PATH or KEYTOOL_PATH'
+      log_err 'Neither "apksigner" nor "keytool" could be found. You need to set either APKSIGNER_PATH or KEYTOOL_PATH'
       return "${EX_UNAVAILABLE?}"
     fi
   fi
@@ -533,68 +605,95 @@ main()
   if DATA_DIR="$(find_data_dir)" && test -f "${DATA_DIR:?}/perms/.completed"; then
     :
   else
-    show_error 'Required data not found. Please execute "dl-perm-list.sh" before running this script'
-    return 4
+    log_err 'Required data not found. Please execute "dl-perm-list.sh" before running this script'
+    return "${EX_CONFIG?}"
   fi
 
-  test -n "${1-}" || {
-    show_error 'Missing required argument. Please specify one or more APK file paths to process'
-    return 3
-  }
-
+  unset JAVA_TOOL_OPTIONS
   readonly NL='
 '
 
-  test "${1:?}" != '-' || {
-    backup_ifs="${IFS-}"
+  # Process arguments supplied via standard input when '-' is specified
+  if test "$#" -eq 1 && test "${1:-empty}" = '-'; then
     IFS="${NL:?}"
-
     set -f || :
-    # shellcheck disable=SC2046 # Word splitting is intended
-    set -- $(cat | sort || :) || ui_error 'Failed expanding stdin inside main()'
+    # shellcheck disable=SC2046 # NOTE: Word splitting is intended here to split standard input line-by-line
+    set -- $(cat || printf '%s\n' '__CAT_FAILED__' || :) ||
+      {
+        log_err 'Too many arguments received from standard input or shell allocation failed'
+        set +f || :
+        if test "${backup_ifs?}" = 'unset'; then unset IFS; else IFS="${backup_ifs}"; fi
+        return "${EX_OSERR?}"
+      }
     set +f || :
+    if test "${backup_ifs?}" = 'unset'; then unset IFS; else IFS="${backup_ifs}"; fi
+  fi
 
-    IFS="${backup_ifs?}"
-  }
+  case "${1-}" in
+    '')
+      log_err 'Missing required argument. Please specify one or more APK file paths to process'
+      return "${EX_USAGE?}"
+      ;;
+    '__CAT_FAILED__')
+      log_err 'Failed to read arguments from standard input'
+      return "${EX_NOINPUT?}"
+      ;;
+    *) ;;
+  esac
 
-  BASE_DIR="$(realpath 2> /dev/null . || readlink 2> /dev/null -f .)" || return 7
+  BASE_DIR="$(realpath 2> /dev/null . || readlink 2> /dev/null -f .)" || return 20
 
   test -n "${OUTPUT_DIR?}" || OUTPUT_DIR="${BASE_DIR:?}/output"
-  test -d "${OUTPUT_DIR:?}" || mkdir -p -- "${OUTPUT_DIR:?}" || return 8
+  test -d "${OUTPUT_DIR:?}" || mkdir -p -- "${OUTPUT_DIR:?}" || return 21
 
-  printf 1>&2 '%s\n' "Output dir: ${OUTPUT_DIR:?}"
+  log_empty_line
+  log_output "Output dir: ${OUTPUT_DIR?}"
 
-  status=0
   while test "$#" -gt 0; do
-    base_name="$(basename "${1:?}" || printf '%s\n' 'unknown')"
-    printf 1>&2 '\n%s\n' "Filename: ${base_name:?}"
+    reset_color
+    log_empty_line
+    base_name="$(basename "${1:-''}" || printf '%s\n' "${1:-''}" || :)"
+    log_output "Filename: ${base_name:?}"
 
-    show_status 'Using aapt...'
-    set_red_color
-    cmd_output="$("${AAPT_PATH:?}" dump permissions "${1:?}" | grep -F -e 'package: ' -e 'uses-permission: ')" || {
-      status=9
-      show_error "aapt failed"
+    log_status 'Using aapt...'
+    set_yellow_color
+    cmd_output="$("${AAPT_PATH?}" dump permissions "${1?}")" || {
+      log_err "Failed to extract package manifest metadata from '${1?}' (exit code: ${?})"
+      status="${EX_DATAERR?}"
       shift
       continue
     }
+    reset_color
 
-    pkg_name="$(printf '%s\n' "${cmd_output:?}" | grep -F -e 'package: ' | cut -d ':' -f '2-' -s | cut -b '2-')" || return 10
-    perm_list="$(printf '%s\n' "${cmd_output:?}" | grep -F -e 'uses-permission: ' | cut -d "'" -f '2' -s | LC_ALL=C sort)" || return 11
+    pkg_name="$(printf '%s\n' "${cmd_output:?}" | grep -F -e 'package: ' | cut -d ':' -f '2-' -s | cut -b '2-')" || pkg_name=''
+    if test -z "${pkg_name?}"; then
+      log_err "Failed to parse package name from metadata for '${1?}'"
+      status="${EX_DATAERR?}"
+      shift
+      continue
+    fi
+
+    perm_list="$(printf '%s\n' "${cmd_output?}" | grep -F -e 'uses-permission:' | cut -d "'" -f '2' -s | LC_ALL='C.UTF-8' sort)" || {
+      log_warn 'This APK file does NOT request any permissions'
+      shift
+      continue
+    }
     cmd_output=''
 
     if test "${NO_CERT_DIGEST:?}" = 'false'; then
-      cert_sha256="$(get_apk_cert_sha256 "${1:?}")" || {
-        status=12
-        show_error "get_apk_cert_sha256() failed"
+      cert_sha256="$(get_apk_cert_sha256 "${1?}")" || {
+        log_err "Failed to extract certificate SHA-256 fingerprint from '${1?}' (exit code: ${?})"
+        status="${EX_DATAERR?}"
         shift
         continue
       }
     fi
 
-    show_status 'Parsing...'
-    printf '%s\n' "${perm_list:?}" | parse_perms_and_generate_xml_files "${base_name:?}" "${pkg_name:?}" "${cert_sha256?}" || {
+    log_status 'Parsing...'
+    printf '%s\n' "${perm_list:?}" | parse_perms_and_generate_xml_files "${base_name?}" "${pkg_name?}" "${cert_sha256?}" || {
+      # NOTE: Reserved error codes for this function => 3-19
       status="${?}"
-      show_error "Parsing failed"
+      log_err "Failed to parse and generate XML files for package '${pkg_name?}' (exit code: ${status?})"
     }
 
     shift
@@ -607,6 +706,7 @@ main()
 # @section CLI ARGUMENTS PARSING ----
 #region
 execute_script='true'
+no_pause=0
 STATUS=0
 SCRIPT_VERBOSE='false'
 PLACEHOLDERS='false'
@@ -616,6 +716,7 @@ while test "$#" -gt 0; do
   case "${1?}" in
     -V | --version)
       execute_script='false'
+      no_pause=1
       # REUSE-IgnoreStart
       printf '%s\n' "${SCRIPT_NAME:?}, version ${SCRIPT_VERSION:?}"
       printf '%s\n' "Copyright (C) ${SCRIPT_YEAR:?} ${SCRIPT_AUTHOR:?}"
@@ -628,6 +729,9 @@ while test "$#" -gt 0; do
     --use-placeholders) PLACEHOLDERS='true' ;;
     --no-cert-digest) NO_CERT_DIGEST='true' ;;
 
+    --no-pause)
+      no_pause=1
+      ;;
     -) # Read from STDIN (implies end of options)
       break
       ;;
@@ -637,11 +741,13 @@ while test "$#" -gt 0; do
       ;;
     --*)
       execute_script='false'
+      no_pause=1
       STATUS=2
       printf 1>&2 '%s\n' "${SCRIPT_SHORTNAME?}: unrecognized option '${1}'"
       ;;
     -*)
       execute_script='false'
+      no_pause=1
       STATUS=2
       printf 1>&2 '%s\n' "${SCRIPT_SHORTNAME?}: invalid option -- '${1#-}'"
       ;;
@@ -655,7 +761,8 @@ done
 # @section EXECUTION ENTRY POINT ----
 #region
 if test "${execute_script:?}" = 'true'; then
-  show_status "${SCRIPT_NAME:?} v${SCRIPT_VERSION:?} by ${SCRIPT_AUTHOR:?}"
+  init
+  log_status "${SCRIPT_NAME:?} v${SCRIPT_VERSION:?} by ${SCRIPT_AUTHOR:?}"
 
   test "$#" -ne 0 || set -- ''
   main "${@}" || STATUS="${?}"
