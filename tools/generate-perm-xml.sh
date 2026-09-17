@@ -168,19 +168,24 @@ pause_if_needed()
 #region
 set_android_sdk_path_if_unset()
 {
-  test -z "${ANDROID_HOME-}" || return
+  ANDROID_HOME="${ANDROID_HOME:-${ANDROID_SDK_ROOT-}}"
+  test -z "${ANDROID_HOME?}" || return
 
   # Set the path of Android SDK if not already set
-  if test -n "${LOCALAPPDATA-}" && test -d "${LOCALAPPDATA?}/Android/Sdk"; then
+  if test -n "${LOCALAPPDATA-}" && test -d "${LOCALAPPDATA}/Android/Sdk"; then
     ANDROID_HOME="${LOCALAPPDATA?}/Android/Sdk" # Windows
-  elif test -n "${HOME-}" && test -d "${HOME?}/Library/Android/sdk"; then
+  elif test -n "${HOME-}" && test -d "${HOME}/Library/Android/sdk"; then
     ANDROID_HOME="${HOME?}/Library/Android/sdk" # macOS
-  elif test -n "${HOME-}" && test -d "${HOME?}/.local/share/android/sdk"; then
-    ANDROID_HOME="${HOME?}/.local/share/android/sdk" # Linux (XDG)
-  elif test -n "${HOME-}" && test -d "${HOME?}/Android/Sdk"; then
+  elif test -n "${HOME-}" && test -d "${HOME}/.local/share/android/sdk"; then
+    ANDROID_HOME="${HOME?}/.local/share/android/sdk" # Linux (XDG standard)
+  elif test -n "${HOME-}" && test -d "${HOME}/Android/Sdk"; then
     ANDROID_HOME="${HOME?}/Android/Sdk" # Linux (Standard)
+  elif test -d '/opt/android-sdk'; then
+    ANDROID_HOME='/opt/android-sdk' # Linux (Global)
   elif test -d '/usr/lib/android-sdk'; then
-    ANDROID_HOME='/usr/lib/android-sdk' # Linux (APT)
+    ANDROID_HOME='/usr/lib/android-sdk' # Linux (apt)
+  elif test -d '/usr/local/lib/android/sdk'; then
+    ANDROID_HOME='/usr/local/lib/android/sdk' # FreeBSD / Linux (Global alternative)
   fi
 }
 
@@ -576,9 +581,10 @@ main()
   local backup_ifs="${IFS-unset}"
   local status=0 base_name='' cmd_output='' pkg_name='' perm_list='' cert_sha256=''
 
-  # BEGIN: Global config (overridable via env)
-  export ANDROID_HOME="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
   set_android_sdk_path_if_unset
+
+  # BEGIN: Global config (overridable via env)
+  export ANDROID_HOME
   export AAPT_PATH="${AAPT_PATH:-$(find_android_build_tool 'aapt2' || find_android_build_tool 'aapt' || :)}"
   export APKSIGNER_PATH="${APKSIGNER_PATH-}"
   export KEYTOOL_PATH="${KEYTOOL_PATH-}"

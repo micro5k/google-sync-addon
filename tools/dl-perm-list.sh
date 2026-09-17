@@ -20,13 +20,19 @@
 #region
 readonly SCRIPT_NAME='AOSP system permissions downloader'
 readonly SCRIPT_SHORTNAME='SysPermDl'
-readonly SCRIPT_VERSION='0.3.18'
+readonly SCRIPT_VERSION='0.3.22'
 readonly SCRIPT_AUTHOR='ale5000'
 readonly SCRIPT_YEAR='2025'
 
 readonly MAX_API=37
 readonly PERMS_DATA_PREFIX='base-permissions-api'
 readonly BASE_URL='https://android.googlesource.com/platform/frameworks/base/'
+
+readonly EX_USAGE=64
+readonly EX_UNAVAILABLE=69
+readonly EX_SOFTWARE=70
+readonly EX_TEMPFAIL=75
+readonly EX_CONFIG=78
 
 # shellcheck disable=SC2034
 {
@@ -217,8 +223,8 @@ create_and_return_data_dir()
 
 clean_perms_dir_if_empty()
 {
-  if test -n "${DATA_DIR-}" && test -d "${DATA_DIR?}/perms"; then
-    rmdir 2> /dev/null -- "${DATA_DIR?}/perms" || :
+  if test -n "${DATA_DIR-}" && test -d "${DATA_DIR}/perms"; then
+    rmdir "${DATA_DIR:?}/perms" 2> /dev/null || :
   fi
 }
 #endregion
@@ -262,7 +268,7 @@ fetch_and_extract_manifest_permissions_with_retry()
     __fn_attempts_left="$((__fn_attempts_left - 1))" || return "${?}"
     test "${__fn_attempts_left}" -gt 0 || break
 
-    log_warn "Failed to download or parse API ${1?} XML. Retrying in ${RETRY_DELAY?} seconds (attempts left: ${__fn_attempts_left?})..."
+    log_warn "Failed to download (or parse) API ${1?} XML. Retrying in ${RETRY_DELAY?} seconds (attempts left: ${__fn_attempts_left?})..."
     sleep "${RETRY_DELAY:?}" || return "${?}"
   done
 
@@ -289,38 +295,66 @@ main()
     if test "${CI:-false}" = 'false'; then RETRY_DELAY='5'; else RETRY_DELAY='15'; fi
   fi
 
-  DATA_DIR="$(find_data_dir || create_and_return_data_dir)" || return 1
+  case "${REQUEST_DELAY?}" in
+    0 | *[!0-9.]* | *.*.* | .*)
+      log_err "REQUEST_DELAY must be a strictly positive integer or decimal, got: '${REQUEST_DELAY?}'"
+      return "${EX_USAGE?}"
+      ;;
+    *)
+      if test "${REQUEST_DELAY%.*}" != "${REQUEST_DELAY}"; then
+        sleep '0.01' 1> /dev/null 2>&1 || {
+          REQUEST_DELAY="$((${REQUEST_DELAY%.*} + 1))" || return 20
+          log_warn "System sleep does NOT support decimals. Rounding up REQUEST_DELAY to: '${REQUEST_DELAY}'"
+        }
+      fi
+      ;;
+  esac
 
-  command 1> /dev/null -v "${WGET_CMD:?}" || {
-    log_err 'Missing: wget'
-    return 255
+  case "${RETRY_DELAY?}" in
+    0 | *[!0-9]*)
+      log_err "RETRY_DELAY must be a strictly positive integer, got: '${RETRY_DELAY?}'"
+      return "${EX_USAGE?}"
+      ;;
+    *) ;;
+  esac
+
+  command -v "${WGET_CMD:?}" 1> /dev/null 2>&1 || {
+    log_err 'wget is required'
+    return "${EX_UNAVAILABLE?}"
   }
 
-  test -d "${DATA_DIR:?}/perms" || mkdir -p -- "${DATA_DIR:?}/perms" || return 1
+  if DATA_DIR="$(find_data_dir || create_and_return_data_dir)"; then
+    :
+  else
+    log_err 'Unable to create the required data directory'
+    return "${EX_CONFIG?}"
+  fi
+
+  test -d "${DATA_DIR:?}/perms" || mkdir -p -- "${DATA_DIR:?}/perms" || return 3
 
   log_empty_line
   log_output 'Downloading...'
   log_scope_begin
-  rm -f -- "${DATA_DIR:?}/perms/.completed"
-  rm -f -- "${DATA_DIR:?}/perms/${PERMS_DATA_PREFIX:?}"-*.xml
+  rm -f -- "${DATA_DIR:?}/perms/.completed" || return 4
+  rm -f -- "${DATA_DIR:?}/perms/${PERMS_DATA_PREFIX:?}"-*.xml || return 5
 
   for api in $(seq -- 23 "${MAX_API:?}"); do
-    tag="$(eval " printf '%s\n' \"\${TAG_API_${api?}?}\" ")" || {
-      log_err "Failed to get tag for API ${api?}"
-      return 4
+    tag="$(eval " printf '%s\n' \"\${TAG_API_${api}?}\" ")" || {
+      log_err "Failed to read tag name for API ${api?}"
+      return "${EX_SOFTWARE?}"
     }
     log_output "API ${api?}: ${tag?}"
     log_scope_begin
     fetch_and_extract_manifest_permissions_with_retry "${api:?}" "${tag:?}" || {
-      log_err "Failed to download or parse API ${api?} XML"
-      rm -f -- "${DATA_DIR:?}/perms/${PERMS_DATA_PREFIX?}-${api:?}.xml"
-      return 5
+      log_err "Failed to download (or parse) API ${api?} XML"
+      rm -f -- "${DATA_DIR?}/perms/${PERMS_DATA_PREFIX?}-${api?}.xml" || :
+      return "${EX_TEMPFAIL?}"
     }
     log_scope_end
-    sleep "${REQUEST_DELAY:?}" || return "${?}"
+    sleep "${REQUEST_DELAY:?}" || return 6
   done
 
-  touch -- "${DATA_DIR:?}/perms/.completed" || return "${?}"
+  touch -- "${DATA_DIR?}/perms/.completed" || return 7
   log_scope_end
   log_output 'Done.'
 }
