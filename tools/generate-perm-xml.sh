@@ -22,7 +22,7 @@
 #region
 readonly SCRIPT_NAME='Android ROM permissions XML generator'
 readonly SCRIPT_SHORTNAME='PermXmlGen'
-readonly SCRIPT_VERSION='0.3.38'
+readonly SCRIPT_VERSION='0.4.5'
 readonly SCRIPT_AUTHOR='ale5000'
 readonly SCRIPT_YEAR='2025'
 
@@ -63,35 +63,58 @@ fix_posix_emulation_if_needed()
       case "${PATH-}" in '/usr/bin:'*) ;; *) PATH="/usr/bin:${PATH:-/bin}" ;; esac
     fi
 
-    # Resolve an issue where dragging and dropping a file onto the script inexplicably resets the
-    #  working directory to 'C:\WINDOWS\system32'
-    # shellcheck disable=SC3028 # IGNORE: In POSIX sh, BASH_SOURCE is undefined
+    # NOTE: Fixes an issue where dragging and dropping a file onto the script inexplicably resets the working directory to 'C:\WINDOWS\system32'
+    # shellcheck disable=SC3028,SC2128 # IGNORE: In POSIX sh, BASH_SOURCE is undefined / Expanding an array without an index only gives the first element
     if test "$(/usr/bin/cygpath -m -- "${PWD:?}" || :)" = "$(/usr/bin/cygpath -m -S || :)" && test -n "${BASH_SOURCE-}"; then
-      cd "${BASH_SOURCE:?}/.." || printf 1>&2 '%s\n' 'ERROR: Failed to set the correct working directory'
+      cd "${BASH_SOURCE}/.." || printf 1>&2 '%s\n' 'ERROR: Failed to set the correct working directory'
     fi
   fi
+  return 0
 }
 
 color_init()
 {
-  CLR_RESET=''
-  CLR_RED=''
-  CLR_GREEN=''
-  CLR_YELLOW_PLAIN=''
-  CLR_YELLOW=''
-  CLR_CYAN=''
-  CLR_LINE=''
+  CLR_RESET='' CLR_RED='' CLR_GREEN_PLAIN='' CLR_GREEN='' CLR_YELLOW_PLAIN='' CLR_YELLOW='' CLR_YELLOW_BG_BLUE='' CLR_MAGENTA='' CLR_CYAN='' CLR_LINE=''
+  CLRO_RESET='' CLRO_RED='' CLRO_GREEN_PLAIN='' CLRO_GREEN='' CLRO_YELLOW_PLAIN='' CLRO_YELLOW='' CLRO_YELLOW_BG_BLUE='' CLRO_MAGENTA='' CLRO_CYAN='' CLRO_LINE=''
 
   # shellcheck disable=SC2034 # IGNORE: 'foo' appears unused
   if test -z "${NO_COLOR-}" && test -t 2; then
     CLR_RESET='\033[0m'
     CLR_RED='\033[1;31m'
+    CLR_GREEN_PLAIN='\033[32m'
     CLR_GREEN='\033[1;32m'
-    CLR_YELLOW_PLAIN='\033[0;33m'
+    CLR_YELLOW_PLAIN='\033[33m'
     CLR_YELLOW='\033[1;33m'
+    CLR_YELLOW_BG_BLUE='\033[1;33;44m'
+    CLR_MAGENTA='\033[1;35m'
     CLR_CYAN='\033[1;36m'
     CLR_LINE='\r        \r'
   fi
+  # shellcheck disable=SC2034 # IGNORE: 'foo' appears unused
+  if test -z "${NO_COLOR-}" && test -t 1; then
+    CLRO_RESET='\033[0m'
+    CLRO_RED='\033[1;31m'
+    CLRO_GREEN_PLAIN='\033[32m'
+    CLRO_GREEN='\033[1;32m'
+    CLRO_YELLOW_PLAIN='\033[33m'
+    CLRO_YELLOW='\033[1;33m'
+    CLRO_YELLOW_BG_BLUE='\033[1;33;44m'
+    CLRO_MAGENTA='\033[1;35m'
+    CLRO_CYAN='\033[1;36m'
+    CLRO_LINE='\r        \r'
+  fi
+  return 0
+}
+
+set_yellow_color()
+{
+  printf 1>&2 '%b' "${CLR_YELLOW}"
+  return 0
+}
+
+reset_color()
+{
+  printf 1>&2 '%b' "${CLR_RESET}"
   return 0
 }
 
@@ -115,46 +138,58 @@ log_scope_end()
   return 0
 }
 
-set_yellow_color()
-{
-  printf 1>&2 '%b' "${CLR_YELLOW}"
-}
-
-reset_color()
-{
-  printf 1>&2 '%b' "${CLR_RESET}"
-}
-
-log_empty_line()
+# shellcheck disable=SC2329 # NOTE: Standard boilerplate function; may not be executed in this specific script
+log_stdout_blank()
 {
   printf '\n'
+  return 0
 }
 
-log_output()
+# shellcheck disable=SC2329 # NOTE: Standard boilerplate function; may not be executed in this specific script
+log_stderr_blank()
 {
-  printf '%*s%s\n' "${LOG_LEVEL}" '' "${1}"
+  printf 1>&2 '\n'
+  return 0
 }
 
 log_status()
 {
   printf 1>&2 '%b%s%b\n' "${CLR_GREEN}" "${1}" "${CLR_RESET}"
+  return 0
+}
+
+log_stdout()
+{
+  printf '%*s%s\n' "${LOG_LEVEL}" '' "${1}"
+  return 0
 }
 
 log_warn()
 {
   printf 1>&2 '%b%*s%s%b\n' "${CLR_YELLOW_PLAIN}" "${LOG_LEVEL}" '' "WARNING: ${1}" "${CLR_RESET}"
+  return 0
+}
+
+log_non_fatal()
+{
+  printf 1>&2 '%b%*s%s%b\n' "${CLR_MAGENTA}" "${LOG_LEVEL}" '' "NON-FATAL ERROR: ${1}" "${CLR_RESET}"
+  return 0
 }
 
 log_err()
 {
   printf 1>&2 '\n%b%s%b\n' "${CLR_RED}" "ERROR: ${1}" "${CLR_RESET}"
+  return 0
 }
 
 init()
 {
   fix_posix_emulation_if_needed
+  export LANG='en_US.UTF-8'
+
   color_init
   log_scope_init
+  return 0
 }
 
 pause_if_needed()
@@ -231,14 +266,13 @@ resolve_data_dir()
     : # NOTE: Index omitted intentionally; we explicitly want the first element only
   elif test -n "${0-}" && test -f "${0}" && __fn_path="$(dirname "${0}")/data"; then
     :
-  elif __fn_path='./data'; then
-    :
   else
-    return 1
+    __fn_path='./data'
   fi
 
-  __fn_path="$(realpath 2> /dev/null "${__fn_path:?}" || readlink -f "${__fn_path:?}")" || return 3
+  __fn_path="$(realpath 2> /dev/null "${__fn_path:?}" || readlink -f "${__fn_path:?}")" || return 1
   printf '%s\n' "${__fn_path:?}"
+  return 0
 }
 #endregion
 
@@ -275,8 +309,10 @@ get_apk_cert_sha256()
 is_system_permission()
 {
   case "${1:?}" in
+    com.android.chrome.* | com.android.vending.*) return 1 ;;
+    android.permission.READ_APP_BADGE) return 1 ;;
+
     # https://android.googlesource.com/platform/frameworks/base/+/HEAD/core/res/AndroidManifest.xml
-    com.android.vending.*) return 1 ;;
     android.permission.* | com.android.permission.* | com.android.*.permission.*) return 0 ;;
     android.intent.category.MASTER_CLEAR.permission.C2D_MESSAGE) return 0 ;;
 
@@ -308,20 +344,42 @@ map_permission_group_to_label()
     'android.permission-group.SMS') printf '%s\n' 'SMS' ;;
     'android.permission-group.STORAGE') printf '%s\n' 'Storage / Files' ;;
 
-    *) printf '%s\n' "${1:?}" ;;
+    *) printf '%s\n' "${1}" ;;
   esac
-}
-
-get_permission_declaration()
-{
-  grep -m 1 -F -e "android:name=\"${1:?}\"" -- "${DATA_DIR:?}/perms/${PERMS_DATA_PREFIX?}-${2:?}.xml" || return 1
 }
 
 get_custom_permission_declaration()
 {
   grep -H -F -e "android:name=\"${1:?}\"" 0<< 'EOF'
-    # packages/providers/DownloadProvider
-    <permission android:name="android.permission.DOWNLOAD_WITHOUT_NOTIFICATION" android:permissionGroup="android.permission-group.NETWORK" android:protectionLevel="normal"/>
+    <!-- https://android.googlesource.com/platform/packages/providers/DownloadProvider/+/HEAD/AndroidManifest.xml -->
+    <permission android:name="android.permission.ACCESS_ALL_DOWNLOADS" android:protectionLevel="signature"/>
+    <permission android:name="android.permission.ACCESS_DOWNLOAD_MANAGER" android:protectionLevel="signatureOrSystem"/>
+    <permission android:name="android.permission.ACCESS_DOWNLOAD_MANAGER_ADVANCED" android:protectionLevel="signatureOrSystem"/>
+    <permission android:name="android.permission.DOWNLOAD_CACHE_NON_PURGEABLE" android:protectionLevel="signatureOrSystem"/>
+    <permission android:name="android.permission.DOWNLOAD_WITHOUT_NOTIFICATION" android:protectionLevel="normal" android:permissionGroup="android.permission-group.NETWORK"/>
+    <permission android:name="android.permission.SEND_DOWNLOAD_COMPLETED_INTENTS" android:protectionLevel="signature"/>
+
+    <!-- https://android.googlesource.com/platform/packages/modules/AdServices/+/HEAD/adservices/apk/AndroidManifest.xml -->
+    <permission android:name="android.permission.ACCESS_ADSERVICES_AD_ID" android:protectionLevel="normal"/>
+    <permission android:name="android.permission.ACCESS_ADSERVICES_AD_SELECTION" android:protectionLevel="normal"/>
+    <permission android:name="android.permission.ACCESS_ADSERVICES_ATTRIBUTION" android:protectionLevel="normal"/>
+    <permission android:name="android.permission.ACCESS_ADSERVICES_CUSTOM_AUDIENCE" android:protectionLevel="normal"/>
+    <permission android:name="android.permission.ACCESS_ADSERVICES_MANAGER" android:protectionLevel="signature"/>
+    <permission android:name="android.permission.ACCESS_ADSERVICES_PROTECTED_SIGNALS" android:protectionLevel="normal"/>
+    <permission android:name="android.permission.ACCESS_ADSERVICES_STATE" android:protectionLevel="signature|configurator"/>
+    <permission android:name="android.permission.ACCESS_ADSERVICES_TOPICS" android:protectionLevel="normal"/>
+    <permission android:name="android.permission.ACCESS_PRIVILEGED_AD_ID" android:protectionLevel="signature"/>
+    <permission android:name="android.permission.ACCESS_PRIVILEGED_ADSERVICES_COBALT_UPLOAD" android:protectionLevel="signature"/>
+    <permission android:name="android.permission.ACCESS_PRIVILEGED_APP_SET_ID" android:protectionLevel="signature"/>
+    <permission android:name="android.permission.MODIFY_ADSERVICES_STATE" android:protectionLevel="signature|configurator"/>
+    <permission android:name="android.permission.UPDATE_PRIVILEGED_AD_ID" android:protectionLevel="signature|configurator"/>
+
+    <!-- Non-existent but widespread permissions -->
+    <permission android:name="android.permission.ACCESS_COARSE_UPDATES" android:protectionLevel="invalid"/>
+
+    <!-- Custom / OEM permissions (not native AOSP), despite the "android.permission" prefix -->
+    <permission android:name="android.permission.READ_APP_BADGE" android:protectionLevel="normal"/>
+
     # GSF
     <permission android:name="com.google.android.c2dm.permission.RECEIVE" android:protectionLevel="normal"/>
     <permission android:name="com.google.android.c2dm.permission.SEND" android:protectionLevel="signatureOrSystem"/>
@@ -331,6 +389,7 @@ get_custom_permission_declaration()
     <permission android:name="com.google.android.providers.gsf.permission.WRITE_GSERVICES" android:protectionLevel="signature"/>
     <permission android:name="com.google.android.providers.settings.permission.READ_GSETTINGS" android:protectionLevel="signature"/>
     <permission android:name="com.google.android.providers.settings.permission.WRITE_GSETTINGS" android:protectionLevel="signature"/>
+
     # GM
     <permission android:name="com.google.android.gm.email.permission.ACCESS_PROVIDER" android:protectionLevel="signature"/>
     <permission android:name="com.google.android.gm.email.permission.GET_WIDGET_UPDATE" android:protectionLevel="signature"/>
@@ -344,6 +403,24 @@ get_custom_permission_declaration()
 EOF
 
   # <permission-tree android:name="com.google.android.googleapps.permission.GOOGLE_AUTH"/>
+}
+
+load_permission_groups()
+{
+  PERMISSION_TO_GROUP_XML="$(grep -F -e 'android:permissionGroup' -- "${DATA_DIR:?}/perms/${PERMS_DATA_PREFIX}-28.xml" | LC_ALL=C tr -d '\\$\140\0')"
+  return "$?"
+}
+
+get_group_permission_declaration()
+{
+  grep -m 1 -F -e "android:name=\"${1}\"" 0<< EOF
+    ${PERMISSION_TO_GROUP_XML?}
+    <permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" android:permissionGroup="android.permission-group.LOCATION">
+    <permission android:name="android.permission.BLUETOOTH_ADVERTISE" android:permissionGroup="android.permission-group.NEARBY_DEVICES">
+    <permission android:name="android.permission.BLUETOOTH_CONNECT" android:permissionGroup="android.permission-group.NEARBY_DEVICES">
+    <permission android:name="android.permission.BLUETOOTH_SCAN" android:permissionGroup="android.permission-group.NEARBY_DEVICES">
+    <permission android:name="android.permission.POST_NOTIFICATIONS" android:permissionGroup="android.permission-group.NOTIFICATIONS">
+EOF
 }
 
 begin_xml()
@@ -376,20 +453,17 @@ begin_xml()
 
 append_perm_to_xml()
 {
-  local _xml_compat_info
+  local _xml_compat_info=''
 
-  case "${2:?}" in '23') _xml_compat_info='' ;; *) _xml_compat_info=" <!-- MinApi: ${2:?} -->" ;; esac
-  if test -n "${4?}" && test "${4:?}" != "${LAST_PERM_GROUP?}" && LAST_PERM_GROUP="${4:?}"; then printf '%s\n' "        <!-- ${4#"z)"} -->"; fi
+  if test -n "${4?}" && test "${4}" != "${LAST_PERM_GROUP?}" && LAST_PERM_GROUP="${4}"; then printf '%s\n' "        <!-- ${4#"z)"} -->"; fi
 
   case "${3:?}" in
     'privapp-permissions')
-      if test "${1:?}" = 'android.permission.FAKE_PACKAGE_SIGNATURE' && test "${PLACEHOLDERS:?}" = 'true'; then
-        printf '%s\n' "        <!-- %${1#"android.permission."}% -->${_xml_compat_info?}"
-      else
-        printf '%s\n' "        <permission name=\"${1:?}\" />${_xml_compat_info?}"
-      fi
+      case "${2}" in 23 | 24 | 25 | 26) ;; *) _xml_compat_info=" <!-- MinApi: ${2:?} -->" ;; esac
+      printf '%s\n' "        <permission name=\"${1:?}\" />${_xml_compat_info?}"
       ;;
     'default-permissions')
+      case "${2}" in 23) ;; *) _xml_compat_info=" <!-- MinApi: ${2:?} -->" ;; esac
       if {
         test -n "${_xml_compat_info?}" || test "${1:?}" = 'android.permission.FAKE_PACKAGE_SIGNATURE'
       } && test "${PLACEHOLDERS:?}" = 'true'; then
@@ -421,9 +495,9 @@ parse_perms_and_generate_xml_files()
 {
   local _backup_ifs="${IFS-}"
   local _filename _base_name _pkg_name _cert_sha256 _input _perm _api
-  local _perm_decl_all _perm_decl _perm_prot_level _perm_flags _perm_whitelist _no_api_difference _perm_group _perm_after _perm_min_api
-  local _perm_is_privileged _perm_is_dangerous _perm_type_found _perm_fake_sign
-  local _privileged_perm_list _dangerous_perm_list
+  local _perm_decl_all _perm_decl='' _perm_prot_level _perm_flags _perm_whitelist _no_api_difference _perm_group _perm_after _perm_min_api
+  local _privileged_perms='' _dangerous_perms=''
+  local _is_privileged _is_dangerous _is_fake_sign=0
 
   _base_name="${1%".apk"}"
   _pkg_name="${2:?}"
@@ -449,115 +523,124 @@ parse_perms_and_generate_xml_files()
   # - https://android.googlesource.com/platform/frameworks/base/+/refs/heads/main/core/java/android/permission/Permissions.md
   # - https://developer.android.com/reference/android/R.attr#protectionLevel
 
-  _privileged_perm_list=''
-  _dangerous_perm_list=''
-  _perm_fake_sign='false'
-
   for _perm in "${@}"; do
     _perm_min_api=''
-    _perm_is_privileged='false'
-    _perm_is_dangerous='false'
+    _is_privileged='false'
+    _is_dangerous='false'
     _perm_whitelist='false'
 
-    test "${SCRIPT_VERBOSE:?}" = 'false' || printf 1>&2 '%s\n' "${_perm?}:"
-
     case "${_perm:?}" in
-      *'.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION')
+      *.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION)
         continue
         ;;
-      'android.permission.FAKE_PACKAGE_SIGNATURE')
-        _perm_fake_sign='true'
+      android.permission.FAKE_PACKAGE_SIGNATURE)
+        _is_fake_sign=1
+        case "${VERBOSE}" in 0) ;; *) log_stdout "${_perm}" ;; esac
         continue
         ;;
       *) ;;
     esac
 
+    case "${VERBOSE}" in
+      0) ;;
+      *)
+        log_stdout "${_perm}"
+        log_scope_begin
+        ;;
+    esac
+
     _no_api_difference='false'
-    if _perm_decl_all="$(grep -r -H -m 1 -F -e "android:name=\"${_perm:?}\"" -- "${DATA_DIR:?}/perms")"; then
+    if _perm_decl_all="$(grep -r -H -m 1 -F -e "android:name=\"${_perm}\"" -- "${DATA_DIR:?}/perms")"; then
       :
-    elif _perm_decl_all="$(get_custom_permission_declaration "${_perm:?}")"; then
+    elif _perm_decl_all="$(get_custom_permission_declaration "${_perm}")"; then
       _no_api_difference='true'
     else
-      log_warn "Unknown permission: ${_perm?}" # The permission cannot be found in any API, skip it
-      continue
+      if is_system_permission "${_perm}"; then
+        log_non_fatal "Unknown permission: ${_perm}"
+      else
+        log_warn "Unknown permission: ${_perm}"
+      fi
+
+      case "${VERBOSE}" in 0) ;; *) log_scope_end ;; esac
+      continue # The permission cannot be found in any API, skip it
     fi
 
     for _api in $(seq -- 23 "${MAX_API:?}"); do
       _perm_decl="$(printf '%s\n' "${_perm_decl_all:?}" | grep -F -e "perms/${PERMS_DATA_PREFIX?}-${_api:?}.xml:" -e '(standard input):')" || {
-        test "${SCRIPT_VERBOSE:?}" = 'false' || log_warn "The '${_perm?}' permission cannot be found on API ${_api?}"
+        case "${VERBOSE}" in 0) ;; *) log_warn "The '${_perm?}' permission cannot be found on API ${_api?}" ;; esac
         continue
       }
-      : "${_perm_min_api:=${_api:?}}" # Set min API for this permission
+      : "${_perm_min_api:=${_api}}" # Set min API for this permission
       _perm_prot_level="$(printf '%s\n' "${_perm_decl:?}" | grep -o -e 'android:protectionLevel="[^"]*"' | cut -d '"' -f '2' -s)" || {
         log_err "Failed to the parse protection level of '${_perm?}' on API ${_api?}"
         continue
       }
 
-      _perm_type_found='false'
-      case "|${_perm_prot_level?}|" in *'|normal|'* | *'|preinstalled|'*) _perm_type_found='true' ;; *) ;; esac
+      case "|${_perm_prot_level}|" in
+        *'|privileged|'* | *'|system|'* | *'|signatureOrSystem|'*)
+          # NOTE: Exclude privileged permissions that were privileged only in APIs < 26, as privileged permission XMLs were introduced in API 26
+          if test "${_api:?}" -ge 26 || test "${_no_api_difference:?}" = 'true'; then _is_privileged='true'; fi
+          ;;
 
-      case "|${_perm_prot_level?}|" in *'|privileged|'* | *'|system|'* | *'|signatureOrSystem|'*)
-        _perm_type_found='true'
-        # The XML files for privileged permissions only exist from API 26 onwards, so if a permission is only privileged in older versions, we exclude it.
-        if test "${_api:?}" -ge 26 || test "${_no_api_difference:?}" = 'true'; then _perm_is_privileged='true'; fi
-        ;;
-      *) ;;
+        *'|dangerous|'*)
+          # NOTE: Default runtime permission XMLs were introduced in API 23
+          _is_dangerous='true'
+          _perm_flags="$(printf '%s\n' "${_perm_decl:?}" | grep -o -e 'android:permissionFlags="[^"]*"' | cut -d '"' -f '2' -s)" || _perm_flags=''
+          case "|${_perm_flags?}|" in *'|hardRestricted|'* | *'|softRestricted|'*) _perm_whitelist='true' ;; *) ;; esac
+          ;;
+
+        *'|normal|'* | *'|preinstalled|'* | *'|invalid|'*) ;;
+
+        *)
+          case "${VERBOSE}" in
+            0) ;;
+            *) log_warn "Unknown protection level for '${_perm?}'$(test "${_no_api_difference:?}" = 'true' || printf '%s\n' " on API ${_api?}" || :) => ${_perm_prot_level?}" ;;
+          esac
+          ;;
       esac
 
-      case "|${_perm_prot_level?}|" in *'|dangerous|'*)
-        _perm_type_found='true'
-        _perm_is_dangerous='true'
-
-        _perm_flags="$(printf '%s\n' "${_perm_decl:?}" | grep -o -e 'android:permissionFlags="[^"]*"' | cut -d '"' -f '2' -s)" || _perm_flags=''
-        case "|${_perm_flags?}|" in *'|hardRestricted|'* | *'|softRestricted|'*) _perm_whitelist='true' ;; *) ;; esac
-        ;;
-      *) ;;
-      esac
-
-      case "${_perm_type_found?}" in
-        'true') ;;
-        *) log_warn "Unknown protection level for '${_perm?}'$(test "${_no_api_difference:?}" = 'true' || printf '%s\n' " on API ${_api?}" || :)$(test "${SCRIPT_VERBOSE:?}" = 'false' || printf '%s\n' " => ${_perm_prot_level?}" || :)" ;;
-      esac
       test "${_no_api_difference:?}" = 'false' || break
     done
 
-    test "${SCRIPT_VERBOSE:?}" = 'false' || printf 1>&2 '%s\n' "Min API ${_perm_min_api?}"
-
-    if test "${_perm_is_privileged?}" = 'true' && is_system_permission "${_perm:?}"; then
-      _privileged_perm_list="${_privileged_perm_list?}${_perm:?}|${_perm_min_api:?}${NL:?}"
+    if test "${_is_privileged?}" = 'true' && is_system_permission "${_perm:?}"; then
+      _privileged_perms="${_privileged_perms?}${_perm:?}|${_perm_min_api:?}${NL:?}"
     fi
 
-    if test "${_perm_is_dangerous?}" = 'true'; then
-      _perm_decl="$(get_permission_declaration "${_perm:?}" 28)" || _perm_decl=''
-      _perm_group="$(printf '%s\n' "${_perm_decl?}" | grep -o -e 'android:permissionGroup="[^"]*"' | cut -d '"' -f '2' -s)" || _perm_group=''
-      if test -z "${_perm_group?}"; then
-        case "${_perm:?}" in
-          'android.permission.ACCESS_BACKGROUND_LOCATION') _perm_group='android.permission-group.LOCATION' ;;
-          'android.permission.BLUETOOTH_ADVERTISE' | 'android.permission.BLUETOOTH_CONNECT' | 'android.permission.BLUETOOTH_SCAN') _perm_group='android.permission-group.NEARBY_DEVICES' ;;
-          'android.permission.POST_NOTIFICATIONS') _perm_group='android.permission-group.NOTIFICATIONS' ;;
-          *) ;;
-        esac
-      fi
+    if test "${_is_dangerous?}" = 'true'; then
+      _perm_group="$(get_group_permission_declaration "${_perm}" | grep -o -e 'android:permissionGroup="[^"]*"' | cut -d '"' -f '2' -s || :)"
       _perm_group="$(map_permission_group_to_label "${_perm_group?}" || :)"
       case "${_perm:?}" in
         'android.permission.ACCESS_BACKGROUND_LOCATION') _perm_after='android.permission.ACCESS_FINE_LOCATION+' ;;
         *) _perm_after="${_perm:?} " ;;
       esac
-      _dangerous_perm_list="${_dangerous_perm_list?}${_perm_group:?}|${_perm_after:?}|${_perm:?}|${_perm_whitelist:?}|${_perm_min_api:?}${NL:?}"
+      _dangerous_perms="${_dangerous_perms?}${_perm_group}|${_perm_after:?}|${_perm:?}|${_perm_whitelist:?}|${_perm_min_api:?}${NL:?}"
     fi
+
+    case "${VERBOSE}" in
+      0) ;;
+      *)
+        if test "${_no_api_difference}" != 'true'; then
+          log_stdout "Min API ${_perm_min_api}"
+        fi
+        log_scope_end
+        ;;
+    esac
   done
 
-  if test "${_perm_fake_sign:?}" = 'true'; then
-    _privileged_perm_list="${_privileged_perm_list?}android.permission.FAKE_PACKAGE_SIGNATURE|23${NL:?}"
-    _dangerous_perm_list="${_dangerous_perm_list?}z)Signature spoofing||android.permission.FAKE_PACKAGE_SIGNATURE|false|23${NL:?}"
-  fi
+  case "${_is_fake_sign}" in
+    1)
+      _privileged_perms="${_privileged_perms?}android.permission.FAKE_PACKAGE_SIGNATURE|23${NL:?}"
+      _dangerous_perms="${_dangerous_perms?}z)Signature spoofing||android.permission.FAKE_PACKAGE_SIGNATURE|false|23${NL:?}"
+      ;;
+    *) ;;
+  esac
 
-  if test -n "${_privileged_perm_list?}"; then
+  if test -n "${_privileged_perms}"; then
     _filename="privapp-permissions-${_base_name:?}.xml"
     {
       begin_xml "${_pkg_name:?}" "${_cert_sha256?}" 'privapp-permissions'
-      printf '%s' "${_privileged_perm_list:?}" | while IFS='|' read -r NAME MIN_API; do
-        append_perm_to_xml "${NAME:?}" "${MIN_API:?}" 'privapp-permissions' '' '' || {
+      printf '%s' "${_privileged_perms}" | while IFS='|' read -r NAME MIN_API; do
+        append_perm_to_xml "${NAME:?}" "${MIN_API}" 'privapp-permissions' '' '' || {
           log_err "Failed to append the '${NAME?}' permission on '${_filename?}'"
           return 6
         }
@@ -566,13 +649,13 @@ parse_perms_and_generate_xml_files()
     } 1> "${OUTPUT_DIR:?}/${_filename:?}"
   fi
 
-  if test -n "${_dangerous_perm_list?}"; then
+  if test -n "${_dangerous_perms}"; then
     _filename="default-permissions-${_base_name:?}.xml"
     {
       begin_xml "${_pkg_name:?}" "${_cert_sha256?}" 'default-permissions'
       LAST_PERM_GROUP=''
-      printf '%s' "${_dangerous_perm_list:?}" | LC_ALL='C.UTF-8' sort | while IFS='|' read -r GROUP _ NAME WHITELIST MIN_API; do
-        append_perm_to_xml "${NAME:?}" "${MIN_API:?}" 'default-permissions' "${GROUP:?}" "${WHITELIST:?}" || {
+      printf '%s' "${_dangerous_perms}" | LC_ALL=C sort | while IFS='|' read -r GROUP _ NAME WHITELIST MIN_API; do
+        append_perm_to_xml "${NAME:?}" "${MIN_API}" 'default-permissions' "${GROUP:?}" "${WHITELIST:?}" || {
           log_err "Failed to append the '${NAME?}' permission on '${_filename?}'"
           return 7
         }
@@ -598,6 +681,7 @@ main()
   export APKSIGNER_PATH="${APKSIGNER_PATH-}"
   export KEYTOOL_PATH="${KEYTOOL_PATH-}"
 
+  export TOOLS_DATA_DIR
   export OUTPUT_DIR="${OUTPUT_DIR-}"
   # END: Global config
 
@@ -642,7 +726,7 @@ main()
 
   case "${1-}" in
     '')
-      log_err 'Missing required argument. Please specify one or more APK file paths to process'
+      log_err 'Missing required argument. Please specify one or more files to process'
       return "${EX_USAGE?}"
       ;;
     '__CAT_FAILED__')
@@ -657,14 +741,16 @@ main()
   test -n "${OUTPUT_DIR?}" || OUTPUT_DIR="${BASE_DIR:?}/output"
   test -d "${OUTPUT_DIR:?}" || mkdir -p -- "${OUTPUT_DIR:?}" || return 21
 
-  log_empty_line
-  log_output "Output dir: ${OUTPUT_DIR?}"
+  log_stdout_blank
+  log_stdout "Output dir: ${OUTPUT_DIR?}"
+
+  load_permission_groups
 
   while test "$#" -gt 0; do
     reset_color
-    log_empty_line
+    log_stdout_blank
     base_name="$(basename "${1:-''}" || printf '%s\n' "${1:-''}" || :)"
-    log_output "Filename: ${base_name:?}"
+    log_stdout "Filename: ${base_name:?}"
 
     log_status 'Using aapt...'
     set_yellow_color
@@ -684,7 +770,7 @@ main()
       continue
     fi
 
-    perm_list="$(printf '%s\n' "${cmd_output?}" | grep -F -e 'uses-permission:' | cut -d "'" -f '2' -s | LC_ALL='C.UTF-8' sort)" || {
+    perm_list="$(printf '%s\n' "${cmd_output?}" | grep -F -e 'uses-permission:' | cut -d "'" -f '2' -s | LC_ALL=C sort)" || {
       log_warn 'This APK file does NOT request any permissions'
       shift
       continue
@@ -701,11 +787,13 @@ main()
     fi
 
     log_status 'Parsing...'
+    log_scope_begin
     printf '%s\n' "${perm_list:?}" | parse_perms_and_generate_xml_files "${base_name?}" "${pkg_name?}" "${cert_sha256?}" || {
       # NOTE: Reserved error codes for this function => 3-19
       status="${?}"
       log_err "Failed to parse and generate XML files for package '${pkg_name?}' (exit code: ${status?})"
     }
+    log_scope_end
 
     shift
   done
@@ -719,7 +807,7 @@ main()
 execute_script='true'
 no_pause=0
 STATUS=0
-SCRIPT_VERBOSE='false'
+VERBOSE=0
 PLACEHOLDERS='false'
 NO_CERT_DIGEST='false'
 
@@ -736,7 +824,7 @@ while test "$#" -gt 0; do
       # REUSE-IgnoreEnd
       ;;
 
-    -v) SCRIPT_VERBOSE='true' ;;
+    -v | --verbose) VERBOSE="$((VERBOSE + 1))" ;;
     --use-placeholders) PLACEHOLDERS='true' ;;
     --no-cert-digest) NO_CERT_DIGEST='true' ;;
 

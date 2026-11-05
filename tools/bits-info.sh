@@ -71,34 +71,45 @@ fix_posix_emulation_if_needed()
       case "${PATH-}" in '/usr/bin:'*) ;; *) PATH="/usr/bin:${PATH:-/bin}" ;; esac
     fi
 
-    # Resolve an issue where dragging and dropping a file onto the script inexplicably resets the
-    #  working directory to 'C:\WINDOWS\system32'
-    # shellcheck disable=SC3028 # IGNORE: In POSIX sh, BASH_SOURCE is undefined
+    # NOTE: Fixes an issue where dragging and dropping a file onto the script inexplicably resets the working directory to 'C:\WINDOWS\system32'
+    # shellcheck disable=SC3028,SC2128 # IGNORE: In POSIX sh, BASH_SOURCE is undefined / Expanding an array without an index only gives the first element
     if test "$(/usr/bin/cygpath -m -- "${PWD:?}" || :)" = "$(/usr/bin/cygpath -m -S || :)" && test -n "${BASH_SOURCE-}"; then
-      cd "${BASH_SOURCE:?}/.." || printf 1>&2 '%s\n' 'ERROR: Failed to set the correct working directory'
+      cd "${BASH_SOURCE}/.." || printf 1>&2 '%s\n' 'ERROR: Failed to set the correct working directory'
     fi
   fi
+  return 0
 }
 
 color_init()
 {
-  CLR_RESET=''
-  CLR_RED=''
-  CLR_GREEN=''
-  CLR_YELLOW_PLAIN=''
-  CLR_YELLOW=''
-  CLR_CYAN=''
-  CLR_LINE=''
+  CLR_RESET='' CLR_RED='' CLR_GREEN_PLAIN='' CLR_GREEN='' CLR_YELLOW_PLAIN='' CLR_YELLOW='' CLR_YELLOW_BG_BLUE='' CLR_MAGENTA='' CLR_CYAN='' CLR_LINE=''
+  CLRO_RESET='' CLRO_RED='' CLRO_GREEN_PLAIN='' CLRO_GREEN='' CLRO_YELLOW_PLAIN='' CLRO_YELLOW='' CLRO_YELLOW_BG_BLUE='' CLRO_MAGENTA='' CLRO_CYAN='' CLRO_LINE=''
 
   # shellcheck disable=SC2034 # IGNORE: 'foo' appears unused
   if test -z "${NO_COLOR-}" && test -t 2; then
     CLR_RESET='\033[0m'
     CLR_RED='\033[1;31m'
+    CLR_GREEN_PLAIN='\033[32m'
     CLR_GREEN='\033[1;32m'
-    CLR_YELLOW_PLAIN='\033[0;33m'
+    CLR_YELLOW_PLAIN='\033[33m'
     CLR_YELLOW='\033[1;33m'
+    CLR_YELLOW_BG_BLUE='\033[1;33;44m'
+    CLR_MAGENTA='\033[1;35m'
     CLR_CYAN='\033[1;36m'
     CLR_LINE='\r        \r'
+  fi
+  # shellcheck disable=SC2034 # IGNORE: 'foo' appears unused
+  if test -z "${NO_COLOR-}" && test -t 1; then
+    CLRO_RESET='\033[0m'
+    CLRO_RED='\033[1;31m'
+    CLRO_GREEN_PLAIN='\033[32m'
+    CLRO_GREEN='\033[1;32m'
+    CLRO_YELLOW_PLAIN='\033[33m'
+    CLRO_YELLOW='\033[1;33m'
+    CLRO_YELLOW_BG_BLUE='\033[1;33;44m'
+    CLRO_MAGENTA='\033[1;35m'
+    CLRO_CYAN='\033[1;36m'
+    CLRO_LINE='\r        \r'
   fi
   return 0
 }
@@ -123,14 +134,24 @@ log_scope_end()
   return 0
 }
 
-log_empty_line()
+# shellcheck disable=SC2329 # NOTE: Standard boilerplate function; may not be executed in this specific script
+log_stdout_blank()
 {
   printf '\n'
+  return 0
 }
 
-log_output()
+# shellcheck disable=SC2329 # NOTE: Standard boilerplate function; may not be executed in this specific script
+log_stderr_blank()
+{
+  printf 1>&2 '\n'
+  return 0
+}
+
+log_stdout()
 {
   printf '%*s%s\n' "${LOG_LEVEL}" '' "${1}"
+  return 0
 }
 
 log_warn()
@@ -140,6 +161,7 @@ log_warn()
   else
     printf 1>&2 '%b%*s%s%b\n' "${CLR_YELLOW_PLAIN}" "${LOG_LEVEL}" '' "WARNING: ${1}" "${CLR_RESET}"
   fi
+  return 0
 }
 
 log_err()
@@ -149,13 +171,16 @@ log_err()
   else
     printf 1>&2 '\n%b%s%b\n' "${CLR_RED}" "ERROR: ${1}" "${CLR_RESET}"
   fi
+  return 0
 }
 
 init()
 {
   fix_posix_emulation_if_needed
+
   color_init
   log_scope_init
+  return 0
 }
 
 pause_if_needed()
@@ -832,7 +857,7 @@ detect_bitness_of_files()
 
   case "${1-}" in
     '')
-      log_err 'Missing required argument. Please specify one or more file paths to process'
+      log_err 'Missing required argument. Please specify one or more files to process'
       return 195
       ;;
     '__CAT_FAILED__')
@@ -851,8 +876,8 @@ detect_bitness_of_files()
       detect_bitness_of_single_file "${1}" || ret_code="$((ret_code + 1))"
       shift
     done
-    log_empty_line
-    log_output "Unidentified files: ${ret_code}"
+    log_stdout_blank
+    log_stdout "Unidentified files: ${ret_code}"
   else
     detect_bitness_of_single_file "${1-}" || ret_code="${?}"
   fi
@@ -1206,7 +1231,7 @@ code_timeout()
   shift 2
 
   "${_func_name}" 2>&3 "${@}" &
-  _pid="${!}"
+  _pid="$!"
   if test -z "${_pid}" || test "${_pid}" = "${$}" || test "${_pid}" -le 1; then return 126; fi # Seriously broken shell
 
   while test "$((_sec_limit = _sec_limit - 1))" -ge 0; do
@@ -1539,6 +1564,8 @@ main()
   printf '%s %s\n' "Version of date:" "$(get_version 'date' || :)"
   printf '%s%s\n' "Bits of 'TZ=CET-1 date' timestamp: ${date_bit}" "$(test "${date_timezone_bug}" = 'false' || printf ' %s\n' '(with time zone BUG)' || :)"
   printf '%s\n' "Bits of 'date -u' timestamp: ${date_u_bit}"
+
+  return 0
 }
 
 init_env()

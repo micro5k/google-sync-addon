@@ -51,13 +51,13 @@ fix_posix_emulation_if_needed()
       case "${PATH-}" in '/usr/bin:'*) ;; *) PATH="/usr/bin:${PATH:-/bin}" ;; esac
     fi
 
-    # Resolve an issue where dragging and dropping a file onto the script inexplicably resets the
-    #  working directory to 'C:\WINDOWS\system32'
-    # shellcheck disable=SC3028 # IGNORE: In POSIX sh, BASH_SOURCE is undefined
+    # NOTE: Fixes an issue where dragging and dropping a file onto the script inexplicably resets the working directory to 'C:\WINDOWS\system32'
+    # shellcheck disable=SC3028,SC2128 # IGNORE: In POSIX sh, BASH_SOURCE is undefined / Expanding an array without an index only gives the first element
     if test "$(/usr/bin/cygpath -m -- "${PWD:?}" || :)" = "$(/usr/bin/cygpath -m -S || :)" && test -n "${BASH_SOURCE-}"; then
-      cd "${BASH_SOURCE:?}/.." || printf 1>&2 '%s\n' 'ERROR: Failed to set the correct working directory'
+      cd "${BASH_SOURCE}/.." || printf 1>&2 '%s\n' 'ERROR: Failed to set the correct working directory'
     fi
   fi
+  return 0
 }
 
 pause_if_needed()
@@ -1390,6 +1390,42 @@ find_android_build_tool()
   printf '%s\n' "${__fn_tool_path:?}"
 }
 
+reg_query()
+{
+  RET_VAL="$(reg.exe 2> /dev/null query "${1?}" /v "${2?}" | grep -o -e "${3?}[[:space:]][[:space:]]*[^[:cntrl:]]*")" || {
+    RET_VAL=''
+    return 1
+  }
+  RET_VAL="${RET_VAL#"${3}"}"
+  RET_VAL="${RET_VAL#"${RET_VAL%%[![:space:]]*}"}"
+  return 0
+}
+
+find_tortoise_ssh()
+{
+  local __fn_retval='' _target=''
+
+  for _target in 'HKCU\SOFTWARE\TortoiseGit' 'HKLM\SOFTWARE\TortoiseGit' 'fallback'; do
+    case "${_target}" in
+      'fallback')
+        __fn_retval="$(command -v TortoiseGitPlink 2> /dev/null)" || __fn_retval=''
+        ;;
+      *)
+        if reg_query "${_target}" 'SSH' 'REG_SZ' && test -n "${RET_VAL?}"; then
+          __fn_retval="$(command -v "${RET_VAL}" 2> /dev/null)" || __fn_retval=''
+        fi
+        ;;
+    esac
+
+    test -z "${__fn_retval}" || {
+      printf '%s\n' "${__fn_retval}"
+      return 0
+    }
+  done
+
+  return 1
+}
+
 init_base()
 {
   local _main_dir
@@ -1542,14 +1578,19 @@ init_cmdline()
   fi
   unset KILL_PPID
 
-  if test "${PLATFORM:?}" = 'win'; then unset JAVA_HOME; fi
+  if test "${PLATFORM?}" = 'win'; then
+    export BB_OVERRIDE_APPLETS='; make'
+    export MSYS='winsymlinks:nativestrict'
+    unset JAVA_HOME
+
+    : "${GIT_SSH:=$(find_tortoise_ssh || :)}"
+    test -z "${GIT_SSH}" || export GIT_SSH
+  fi
 
   # Set environment variables
   readonly UTILS_DIR="${MAIN_DIR:?}/utils"
   readonly UTILS_DATA_DIR="${UTILS_DIR:?}/data"
   export UTILS_DIR UTILS_DATA_DIR
-
-  if test -n "${GIT_SSH:="$(command 2> /dev/null -v 'TortoiseGitPlink' || :)"}"; then export GIT_SSH; else unset GIT_SSH; fi
 
   set_android_sdk_path_if_unset
   if test -n "${ANDROID_HOME-}"; then
@@ -1565,9 +1606,7 @@ init_cmdline()
   export AAPT_PATH="${AAPT_PATH:-$(find_android_build_tool 'aapt2' || find_android_build_tool 'aapt' || :)}"
   export APKSIGNER_PATH="${APKSIGNER_PATH:-$(find_android_build_tool 'apksigner' || command -v 'apksigner.bat' 2> /dev/null || :)}"
 
-  if test "${PLATFORM:?}" = 'win'; then
-    export BB_OVERRIDE_APPLETS='; make'
-  fi
+  export PYTHONUTF8=1
 
   if command 1> /dev/null 2>&1 -v 'alias'; then
     alias 'dir'='ls'

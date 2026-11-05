@@ -20,7 +20,7 @@
 #region
 readonly SCRIPT_NAME='AOSP system permissions downloader'
 readonly SCRIPT_SHORTNAME='SysPermDl'
-readonly SCRIPT_VERSION='0.3.24'
+readonly SCRIPT_VERSION='0.3.25'
 readonly SCRIPT_AUTHOR='ale5000'
 readonly SCRIPT_YEAR='2025'
 
@@ -81,34 +81,45 @@ fix_posix_emulation_if_needed()
       case "${PATH-}" in '/usr/bin:'*) ;; *) PATH="/usr/bin:${PATH:-/bin}" ;; esac
     fi
 
-    # Resolve an issue where dragging and dropping a file onto the script inexplicably resets the
-    #  working directory to 'C:\WINDOWS\system32'
-    # shellcheck disable=SC3028 # IGNORE: In POSIX sh, BASH_SOURCE is undefined
+    # NOTE: Fixes an issue where dragging and dropping a file onto the script inexplicably resets the working directory to 'C:\WINDOWS\system32'
+    # shellcheck disable=SC3028,SC2128 # IGNORE: In POSIX sh, BASH_SOURCE is undefined / Expanding an array without an index only gives the first element
     if test "$(/usr/bin/cygpath -m -- "${PWD:?}" || :)" = "$(/usr/bin/cygpath -m -S || :)" && test -n "${BASH_SOURCE-}"; then
-      cd "${BASH_SOURCE:?}/.." || printf 1>&2 '%s\n' 'ERROR: Failed to set the correct working directory'
+      cd "${BASH_SOURCE}/.." || printf 1>&2 '%s\n' 'ERROR: Failed to set the correct working directory'
     fi
   fi
+  return 0
 }
 
 color_init()
 {
-  CLR_RESET=''
-  CLR_RED=''
-  CLR_GREEN=''
-  CLR_YELLOW_PLAIN=''
-  CLR_YELLOW=''
-  CLR_CYAN=''
-  CLR_LINE=''
+  CLR_RESET='' CLR_RED='' CLR_GREEN_PLAIN='' CLR_GREEN='' CLR_YELLOW_PLAIN='' CLR_YELLOW='' CLR_YELLOW_BG_BLUE='' CLR_MAGENTA='' CLR_CYAN='' CLR_LINE=''
+  CLRO_RESET='' CLRO_RED='' CLRO_GREEN_PLAIN='' CLRO_GREEN='' CLRO_YELLOW_PLAIN='' CLRO_YELLOW='' CLRO_YELLOW_BG_BLUE='' CLRO_MAGENTA='' CLRO_CYAN='' CLRO_LINE=''
 
   # shellcheck disable=SC2034 # IGNORE: 'foo' appears unused
   if test -z "${NO_COLOR-}" && test -t 2; then
     CLR_RESET='\033[0m'
     CLR_RED='\033[1;31m'
+    CLR_GREEN_PLAIN='\033[32m'
     CLR_GREEN='\033[1;32m'
-    CLR_YELLOW_PLAIN='\033[0;33m'
+    CLR_YELLOW_PLAIN='\033[33m'
     CLR_YELLOW='\033[1;33m'
+    CLR_YELLOW_BG_BLUE='\033[1;33;44m'
+    CLR_MAGENTA='\033[1;35m'
     CLR_CYAN='\033[1;36m'
     CLR_LINE='\r        \r'
+  fi
+  # shellcheck disable=SC2034 # IGNORE: 'foo' appears unused
+  if test -z "${NO_COLOR-}" && test -t 1; then
+    CLRO_RESET='\033[0m'
+    CLRO_RED='\033[1;31m'
+    CLRO_GREEN_PLAIN='\033[32m'
+    CLRO_GREEN='\033[1;32m'
+    CLRO_YELLOW_PLAIN='\033[33m'
+    CLRO_YELLOW='\033[1;33m'
+    CLRO_YELLOW_BG_BLUE='\033[1;33;44m'
+    CLRO_MAGENTA='\033[1;35m'
+    CLRO_CYAN='\033[1;36m'
+    CLRO_LINE='\r        \r'
   fi
   return 0
 }
@@ -133,36 +144,52 @@ log_scope_end()
   return 0
 }
 
-log_empty_line()
+# shellcheck disable=SC2329 # NOTE: Standard boilerplate function; may not be executed in this specific script
+log_stdout_blank()
 {
   printf '\n'
+  return 0
 }
 
-log_output()
+# shellcheck disable=SC2329 # NOTE: Standard boilerplate function; may not be executed in this specific script
+log_stderr_blank()
 {
-  printf '%*s%s\n' "${LOG_LEVEL}" '' "${1}"
+  printf 1>&2 '\n'
+  return 0
 }
 
 log_status()
 {
   printf 1>&2 '%b%s%b\n' "${CLR_GREEN}" "${1}" "${CLR_RESET}"
+  return 0
+}
+
+log_stdout()
+{
+  printf '%*s%s\n' "${LOG_LEVEL}" '' "${1}"
+  return 0
 }
 
 log_warn()
 {
   printf 1>&2 '%b%*s%s%b\n' "${CLR_YELLOW_PLAIN}" "${LOG_LEVEL}" '' "WARNING: ${1}" "${CLR_RESET}"
+  return 0
 }
 
 log_err()
 {
   printf 1>&2 '\n%b%s%b\n' "${CLR_RED}" "ERROR: ${1}" "${CLR_RESET}"
+  return 0
 }
 
 init()
 {
   fix_posix_emulation_if_needed
+  export LANG='en_US.UTF-8'
+
   color_init
   log_scope_init
+  return 0
 }
 
 pause_if_needed()
@@ -192,21 +219,22 @@ resolve_data_dir()
     : # NOTE: Index omitted intentionally; we explicitly want the first element only
   elif test -n "${0-}" && test -f "${0}" && __fn_path="$(dirname "${0}")/data"; then
     :
-  elif __fn_path='./data'; then
-    :
   else
-    return 1
+    __fn_path='./data'
   fi
 
-  __fn_path="$(realpath 2> /dev/null "${__fn_path:?}" || readlink -f "${__fn_path:?}")" || return 3
+  __fn_path="$(realpath 2> /dev/null "${__fn_path:?}" || readlink -f "${__fn_path:?}")" || return 1
   printf '%s\n' "${__fn_path:?}"
+  return 0
 }
 
-clean_perms_dir_if_empty()
+final_cleanup()
 {
   if test -n "${DATA_DIR-}" && test -d "${DATA_DIR}/perms"; then
+    # Clean perms dir if empty
     rmdir "${DATA_DIR:?}/perms" 2> /dev/null || :
   fi
+  return 0
 }
 #endregion
 
@@ -214,7 +242,8 @@ clean_perms_dir_if_empty()
 #region
 dl()
 {
-  "${WGET_CMD:?}" -q -t 1 -O "${2:?}" -U "${DL_UA:?}" --header "${DL_ACCEPT_HEADER:?}" --header "${DL_ACCEPT_LANG_HEADER:?}" -- "${1:?}" || return "${?}"
+  "${WGET_CMD:?}" -q -t 1 -O "${2:?}" -U "${DL_UA:?}" --header "${DL_ACCEPT_HEADER:?}" --header "${DL_ACCEPT_LANG_HEADER:?}" -- "${1:?}"
+  return "${?}"
 }
 
 fetch_and_extract_manifest_permissions()
@@ -264,6 +293,8 @@ main()
   local api='' tag=''
 
   # BEGIN: Global config (overridable via env)
+  export TOOLS_DATA_DIR
+
   export REQUEST_DELAY="${REQUEST_DELAY-}" # Delay to wait after a successful request
   export RETRY_DELAY="${RETRY_DELAY-}"     # Delay to wait after a failed request before a retry
   export MAX_ATTEMPTS="${MAX_ATTEMPTS:-3}" # Maximum number of total attempts allowed (per API level)
@@ -311,8 +342,8 @@ main()
     return "${EX_CONFIG?}"
   fi
 
-  log_empty_line
-  log_output 'Downloading...'
+  log_stdout_blank
+  log_stdout 'Downloading...'
   log_scope_begin
   rm -f -- "${DATA_DIR:?}/perms/.completed" || return 20
   rm -f -- "${DATA_DIR:?}/perms/${PERMS_DATA_PREFIX:?}"-*.xml || return 21
@@ -322,7 +353,7 @@ main()
       log_err "Failed to read tag name for API ${api?}"
       return "${EX_SOFTWARE?}"
     }
-    log_output "API ${api?}: ${tag?}"
+    log_stdout "API ${api?}: ${tag?}"
     log_scope_begin
     fetch_and_extract_manifest_permissions_with_retry "${api:?}" "${tag:?}" || {
       log_err "Failed to download (or parse) API ${api?} XML"
@@ -335,7 +366,9 @@ main()
 
   touch -- "${DATA_DIR?}/perms/.completed" || return 23
   log_scope_end
-  log_output 'Done.'
+  log_stdout 'Done.'
+
+  return 0
 }
 #endregion
 
@@ -393,9 +426,8 @@ if test "${execute_script:?}" = 'true'; then
   init
   log_status "${SCRIPT_NAME:?} v${SCRIPT_VERSION:?} by ${SCRIPT_AUTHOR:?}"
 
-  test "$#" -ne 0 || set -- ''
-  main "${@}" || STATUS="${?}"
-  clean_perms_dir_if_empty
+  main || STATUS="${?}"
+  final_cleanup
 fi
 
 pause_if_needed "${STATUS:?}"
