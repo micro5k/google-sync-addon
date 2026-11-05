@@ -10,7 +10,7 @@ Google sync add-on
 :Author:
    `ale5000 <https://github.com/ale5000-git>`_
 
-.. image:: https://app.readthedocs.org/projects/google-sync-addon/badge/?version=latest
+.. image:: https://app.readthedocs.org/projects/google-sync-addon/badge/?version=latest&style=flat
    :alt: Documentation status
    :target: https://google-sync-addon.readthedocs.io/en/latest/
 
