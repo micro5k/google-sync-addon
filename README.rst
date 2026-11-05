@@ -30,8 +30,11 @@ Google sync add-on is a flashable zip created by ale5000 for a simple
 installation of Google sync adapters on Android from 4.4 to 16 (excluding
 Android 6.x).
 
-No in-depth Android knowledge needed — the installer takes care of the hard
-parts. ✨
+No in-depth Android knowledge needed, the installer takes care of the hard parts
+anyway. ✨
+
+The installer automatically cleans up conflicting GApps and only the conflicting
+ones because it's polite like that. 🎩
 
 This project is available on GitHub_, on GitLab_, as well as on XDA_.
 
@@ -51,8 +54,8 @@ Although you may find various references to *Magisk* in the code, support is
 
 .. _readme-download:
 
-Download
-========
+Download & Installation
+=======================
 
 Grab the latest stable release or, if you like to live dangerously, the nightly
 build. The badges below show the current version and download statistics.
@@ -61,8 +64,8 @@ build. The badges below show the current version and download statistics.
    :alt: GitHub: latest release version
    :target: ./docs/INSTRUCTIONS.rst
 
-`Read before you flash <./docs/INSTRUCTIONS.rst>`_ *(ten minutes of reading
-beats one hour of re-flashing)*
+`Read the installation instructions before you flash <./docs/INSTRUCTIONS.rst>`_
+*(ten minutes of reading beats one hour of re-flashing)*
 
 
 Code analysis
@@ -134,12 +137,23 @@ development!
    faster.)*
 
 
+Commercial use notice
+=====================
+
+Commercial use, commercial redistribution, and corporate deployment of this
+software are permitted. Thanks to the **Archive Packaging Exception** applied to
+the core installer files, you can safely bundle those components inside your own
+installable archives (such as recovery-flashable ZIPs, ROMs, or compressed
+packages) without the GPLv3 copyleft terms extending to your independent,
+non-derived modules.
+
+
 License
 =======
 
 This project is licensed under the **GNU General Public License v3 or later**
-(GPLv3+), with the **Archive Packaging Exception** to facilitate distribution in
-compressed packages.
+(GPLv3+), with the **Archive Packaging Exception** to facilitate safe
+redistribution in compressed packages.
 
 -  **Core license**: The full text of the GPLv3 can be found in `LICENSE.rst
    <./LICENSE.rst>`__.
@@ -151,12 +165,15 @@ archives (such as flashable ZIPs or tarballs) alongside proprietary or
 differently licensed modules, provided those modules are independent and not
 derived from this software.
 
-**Note for developers:** The following SPDX identifier is used in this project's
-source files to enable the archive packaging exception:
+**Note for developers:** The following SPDX identifier is used in the core
+installer files to enable the archive packaging exception:
 
-.. code:: yaml
+.. code:: http
 
    SPDX-License-Identifier: GPL-3.0-or-later WITH LicenseRef-Archive-packaging-exception
+
+Other components within this repository remain subject to their respective
+upstream licenses.
 
 
 Copyright
