@@ -428,7 +428,7 @@ _get_mount_info()
 
   local _mount_result
   if _mount_result="$(mount 2> /dev/null)" || {
-    test -n "${DEVICE_MOUNT:-}" && _mount_result="$("${DEVICE_MOUNT:?}")"
+    test -n "${DEVICE_MOUNT-}" && _mount_result="$("${DEVICE_MOUNT}")"
   }; then
     if printf '%s\n' "${_mount_result:?}" | grep -e '[[:blank:]]'"${1:?}"'[[:blank:]]'; then return 0; fi
     return 1
@@ -1049,10 +1049,10 @@ parse_setting()
   fi
 
   # Fallback to the last choice
-  if test "${_sett_use_prev_choice:?}" = 'true' && _var="$(simple_file_getprop "${_sett_name:?}" "${SYS_PATH:?}/etc/zips/${MODULE_ID:?}.prop")" && test -n "${_var?}"; then
+  if test "${_sett_use_prev_choice:?}" = 'true' && _var="$(simple_file_getprop "${_sett_name:?}" "${TMP_PATH?}/cache/${MODULE_ID?}.prop")" && test -n "${_var?}"; then
     printf '%s\n' "${_var:?}"
     return
-  elif test "${_sett_use_prev_choice:?}" = 'custom' && _var="$(simple_file_getprop "${5:?}" "${SYS_PATH:?}/etc/zips/${MODULE_ID:?}.prop")" && test -n "${_var?}"; then
+  elif test "${_sett_use_prev_choice:?}" = 'custom' && _var="$(simple_file_getprop "${5:?}" "${TMP_PATH?}/cache/${MODULE_ID?}.prop")" && test -n "${_var?}"; then
     case "${_var:?}" in
       "${6:?}") printf '%s\n' '1' ;;
       *) printf '%s\n' '0' ;;
@@ -1427,10 +1427,10 @@ _set_android_env_vars()
   export ANDROID_ROOT="${SYS_PATH:?}"
 
   if test -n "${APEX_PATH?}"; then
-    if ANDROID_RUNTIME_ROOT="$(_find_apex 'com.android.runtime' "${APEX_PATH:?}")"; then export ANDROID_RUNTIME_ROOT; else unset ANDROID_RUNTIME_ROOT; fi
-    if ANDROID_ART_ROOT="$(_find_apex 'com.android.art' "${APEX_PATH:?}")"; then export ANDROID_ART_ROOT; else unset ANDROID_ART_ROOT; fi
-    if ANDROID_I18N_ROOT="$(_find_apex 'com.android.i18n' "${APEX_PATH:?}")"; then export ANDROID_I18N_ROOT; else unset ANDROID_I18N_ROOT; fi
-    if ANDROID_TZDATA_ROOT="$(_find_apex 'com.android.tzdata' "${APEX_PATH:?}")"; then export ANDROID_TZDATA_ROOT; else unset ANDROID_TZDATA_ROOT; fi
+    if ANDROID_RUNTIME_ROOT="$(_find_apex 'com.android.runtime' "${APEX_PATH?}")"; then export ANDROID_RUNTIME_ROOT; else unset ANDROID_RUNTIME_ROOT; fi
+    if ANDROID_ART_ROOT="$(_find_apex 'com.android.art' "${APEX_PATH?}")"; then export ANDROID_ART_ROOT; else unset ANDROID_ART_ROOT; fi
+    if ANDROID_I18N_ROOT="$(_find_apex 'com.android.i18n' "${APEX_PATH?}")"; then export ANDROID_I18N_ROOT; else unset ANDROID_I18N_ROOT; fi
+    if ANDROID_TZDATA_ROOT="$(_find_apex 'com.android.tzdata' "${APEX_PATH?}")"; then export ANDROID_TZDATA_ROOT; else unset ANDROID_TZDATA_ROOT; fi
   fi
 
   unset LD_PRELOAD
@@ -1457,7 +1457,9 @@ reset_unmount_vars()
 
 initialize()
 {
-  local _raw_arch_list _additional_data_mountpoint
+  local _raw_arch_list
+  local _additional_data_mountpoint=''
+  local _search_path=''
 
   reset_unmount_vars
 
@@ -1467,7 +1469,7 @@ initialize()
   ODM_PATH=''
   SYS_DLKM_PATH=''
   APEX_PATH=''
-  DATA_PATH='/data'
+  DATA_PATH=''
 
   VENDOR_RW='false'
   PRODUCT_RW='false'
@@ -1499,11 +1501,14 @@ initialize()
 
   _get_local_settings
 
-  DRY_RUN="$(parse_setting 'general' 'DRY_RUN' "${DRY_RUN:?}" 'false')"
-  KEY_TEST_ONLY="$(parse_setting 'general' 'KEY_TEST_ONLY' "${KEY_TEST_ONLY:?}" 'false')"
+  # IMPORTANT: Since the previous settings file is not cached yet, it is only safe to call parse_setting here with the fourth parameter set to "false"
+  {
+    DRY_RUN="$(parse_setting 'general' 'DRY_RUN' "${DRY_RUN:?}" 'false')"
+    KEY_TEST_ONLY="$(parse_setting 'general' 'KEY_TEST_ONLY' "${KEY_TEST_ONLY:?}" 'false')"
 
-  LIVE_SETUP_DEFAULT="$(parse_setting 'general' 'LIVE_SETUP_DEFAULT' "${LIVE_SETUP_DEFAULT:?}" 'false')"
-  LIVE_SETUP_TIMEOUT="$(parse_setting 'general' 'LIVE_SETUP_TIMEOUT' "${LIVE_SETUP_TIMEOUT:?}" 'false')"
+    LIVE_SETUP_DEFAULT="$(parse_setting 'general' 'LIVE_SETUP_DEFAULT' "${LIVE_SETUP_DEFAULT:?}" 'false')"
+    LIVE_SETUP_TIMEOUT="$(parse_setting 'general' 'LIVE_SETUP_TIMEOUT' "${LIVE_SETUP_TIMEOUT:?}" 'false')"
+  }
 
   case "${KEY_TEST_ONLY?}" in 0 | 1) ;; *) KEY_TEST_ONLY=1 ;; esac
   if test "${KEY_TEST_ONLY:?}" -eq 1; then DRY_RUN=2; fi
@@ -1589,9 +1594,72 @@ initialize()
 
   _find_and_mount_system
   ui_debug ''
-  _timeout_check
 
-  cp -pf "${SYS_PATH:?}/build.prop" "${TMP_PATH:?}/build.prop" # Cache the file for faster access
+  if mount_partition_if_possible 'vendor' "${SLOT_SUFFIX:+vendor}${SLOT_SUFFIX-}${NL:?}vendor${NL:?}"; then
+    VENDOR_PATH="${LAST_MOUNTPOINT:?}"
+    UNMOUNT_VENDOR="${LAST_PARTITION_MUST_BE_UNMOUNTED:?}"
+  fi
+  if mount_partition_if_possible 'product' "${SLOT_SUFFIX:+product}${SLOT_SUFFIX-}${NL:?}product${NL:?}"; then
+    PRODUCT_PATH="${LAST_MOUNTPOINT:?}"
+    UNMOUNT_PRODUCT="${LAST_PARTITION_MUST_BE_UNMOUNTED:?}"
+  fi
+  if mount_partition_if_possible 'system_ext' "${SLOT_SUFFIX:+system_ext}${SLOT_SUFFIX-}${NL:?}system_ext${NL:?}"; then
+    SYS_EXT_PATH="${LAST_MOUNTPOINT:?}"
+    UNMOUNT_SYS_EXT="${LAST_PARTITION_MUST_BE_UNMOUNTED:?}"
+  fi
+
+  if mount_partition_if_possible 'odm' "${SLOT_SUFFIX:+odm}${SLOT_SUFFIX-}${NL:?}odm${NL:?}"; then
+    ODM_PATH="${LAST_MOUNTPOINT:?}"
+    UNMOUNT_ODM="${LAST_PARTITION_MUST_BE_UNMOUNTED:?}"
+  fi
+  if mount_partition_if_possible 'system_dlkm' "${SLOT_SUFFIX:+system_dlkm}${SLOT_SUFFIX-}${NL:?}system_dlkm${NL:?}"; then
+    SYS_DLKM_PATH="${LAST_MOUNTPOINT:?}"
+    UNMOUNT_SYS_DLKM="${LAST_PARTITION_MUST_BE_UNMOUNTED:?}"
+  fi
+  if mount_apex_if_possible; then
+    APEX_PATH="${LAST_MOUNTPOINT:?}"
+    UNMOUNT_APEX="${LAST_PARTITION_MUST_BE_UNMOUNTED:?}"
+  fi
+  readonly VENDOR_PATH PRODUCT_PATH SYS_EXT_PATH ODM_PATH SYS_DLKM_PATH APEX_PATH
+  export VENDOR_PATH PRODUCT_PATH SYS_EXT_PATH ODM_PATH SYS_DLKM_PATH APEX_PATH
+
+  _set_android_env_vars
+
+  if test -n "${ANDROID_DATA-}" && test "${ANDROID_DATA:?}" != '/data'; then _additional_data_mountpoint="${ANDROID_DATA:?}"; fi
+  if mount_partition_if_possible 'data' "userdata${NL:?}DATAFS${NL:?}" "$(generate_mountpoint_list 'data' "${_additional_data_mountpoint?}" || :)"; then
+    DATA_PATH="${LAST_MOUNTPOINT:?}"
+    UNMOUNT_DATA="${LAST_PARTITION_MUST_BE_UNMOUNTED:?}"
+  else
+    ui_warning "The data partition cannot be mounted; I suggest to manually performing a factory reset after flashing this ZIP."
+  fi
+  #readonly DATA_PATH
+  export DATA_PATH
+
+  ui_debug ''
+  ui_debug "LD_LIBRARY_PATH='${LD_LIBRARY_PATH-}'"
+  ui_debug ''
+
+  # Cache files for faster access
+  {
+    create_dir "${TMP_PATH?}/cache"
+
+    cp -p -f -- "${SYS_PATH:?}/build.prop" "${TMP_PATH?}/build.prop"
+
+    for _search_path in "${SYS_PATH?}" "${SYS_EXT_PATH?}" "${PRODUCT_PATH?}" "${DATA_PATH?}"; do
+      case "${_search_path}" in
+        '') continue ;;
+        "${DATA_PATH}") _search_path="${_search_path}/local/.zips" ;;
+        *) _search_path="${_search_path}/etc/zips" ;;
+      esac
+
+      if test -f "${_search_path}/${MODULE_ID:?}.prop"; then
+        cp -p -f -- "${_search_path}/${MODULE_ID?}.prop" "${TMP_PATH?}/cache/${MODULE_ID?}.prop" || ui_error "Failed to cache '${MODULE_ID?}.prop' from '${_search_path}'"
+        ui_debug "Found: ${_search_path}/${MODULE_ID?}.prop"
+        ui_debug ''
+        break
+      fi
+    done
+  }
 
   PREV_INSTALL_FAILED='false'
   if test -f "${SYS_PATH:?}/etc/zips/${MODULE_ID:?}.failed"; then
@@ -1603,7 +1671,7 @@ initialize()
   export PREV_INSTALL_FAILED
 
   # Previously installed version code (0 if not already installed or broken)
-  PREV_MODULE_VERCODE="$(simple_file_getprop 'install.version.code' "${SYS_PATH:?}/etc/zips/${MODULE_ID:?}.prop")" || PREV_MODULE_VERCODE=''
+  PREV_MODULE_VERCODE="$(simple_file_getprop 'install.version.code' "${TMP_PATH?}/cache/${MODULE_ID?}.prop")" || PREV_MODULE_VERCODE=''
   case "${PREV_MODULE_VERCODE?}" in
     '') PREV_MODULE_VERCODE='0' ;; # Empty (not installed)
     *[!0-9]*)                      # Broken data
@@ -1663,6 +1731,7 @@ initialize()
   readonly PRIVAPP_DIRNAME
   export PRIVAPP_DIRNAME
 
+  _timeout_check
   live_setup_choice
 
   test "${MODULE_VERCODE:?}" -gt 0 || ui_error 'Invalid version code'
@@ -1685,38 +1754,6 @@ initialize()
   readonly SETUP_TYPE
   export SETUP_TYPE
 
-  if mount_partition_if_possible 'vendor' "${SLOT_SUFFIX:+vendor}${SLOT_SUFFIX-}${NL:?}vendor${NL:?}"; then
-    VENDOR_PATH="${LAST_MOUNTPOINT:?}"
-    UNMOUNT_VENDOR="${LAST_PARTITION_MUST_BE_UNMOUNTED:?}"
-  fi
-  if mount_partition_if_possible 'product' "${SLOT_SUFFIX:+product}${SLOT_SUFFIX-}${NL:?}product${NL:?}"; then
-    PRODUCT_PATH="${LAST_MOUNTPOINT:?}"
-    UNMOUNT_PRODUCT="${LAST_PARTITION_MUST_BE_UNMOUNTED:?}"
-  fi
-  if mount_partition_if_possible 'system_ext' "${SLOT_SUFFIX:+system_ext}${SLOT_SUFFIX-}${NL:?}system_ext${NL:?}"; then
-    SYS_EXT_PATH="${LAST_MOUNTPOINT:?}"
-    UNMOUNT_SYS_EXT="${LAST_PARTITION_MUST_BE_UNMOUNTED:?}"
-  fi
-
-  if mount_partition_if_possible 'odm' "${SLOT_SUFFIX:+odm}${SLOT_SUFFIX-}${NL:?}odm${NL:?}"; then
-    ODM_PATH="${LAST_MOUNTPOINT:?}"
-    UNMOUNT_ODM="${LAST_PARTITION_MUST_BE_UNMOUNTED:?}"
-  fi
-  if mount_partition_if_possible 'system_dlkm' "${SLOT_SUFFIX:+system_dlkm}${SLOT_SUFFIX-}${NL:?}system_dlkm${NL:?}"; then
-    SYS_DLKM_PATH="${LAST_MOUNTPOINT:?}"
-    UNMOUNT_SYS_DLKM="${LAST_PARTITION_MUST_BE_UNMOUNTED:?}"
-  fi
-  if mount_apex_if_possible; then
-    APEX_PATH="${LAST_MOUNTPOINT:?}"
-    UNMOUNT_APEX="${LAST_PARTITION_MUST_BE_UNMOUNTED:?}"
-  fi
-
-  _set_android_env_vars
-
-  ui_debug ''
-  ui_debug "LD_LIBRARY_PATH='${LD_LIBRARY_PATH-}'"
-  ui_debug ''
-
   _disable_write_locks
   _execute_system_remount
 
@@ -1731,22 +1768,13 @@ initialize()
   if test -n "${SYS_EXT_PATH?}"; then
     remount_read_write_if_possible "${SYS_EXT_PATH:?}" false && SYS_EXT_RW='true'
   fi
-  readonly VENDOR_PATH PRODUCT_PATH SYS_EXT_PATH ODM_PATH SYS_DLKM_PATH APEX_PATH
-  export VENDOR_PATH PRODUCT_PATH SYS_EXT_PATH ODM_PATH SYS_DLKM_PATH APEX_PATH
   export VENDOR_RW PRODUCT_RW SYS_EXT_RW
 
-  _additional_data_mountpoint=''
-  if test -n "${ANDROID_DATA-}" && test "${ANDROID_DATA:?}" != '/data'; then _additional_data_mountpoint="${ANDROID_DATA:?}"; fi
-
-  if mount_partition_if_possible 'data' "userdata${NL:?}DATAFS${NL:?}" "$(generate_mountpoint_list 'data' "${_additional_data_mountpoint?}" || :)"; then
-    DATA_PATH="${LAST_MOUNTPOINT:?}"
-    UNMOUNT_DATA="${LAST_PARTITION_MUST_BE_UNMOUNTED:?}"
-    remount_read_write_if_possible "${LAST_MOUNTPOINT:?}" false || ui_warning "The data partition cannot be remounted as read-write; I suggest to manually performing a factory reset after flashing this ZIP."
+  if test -n "${DATA_PATH?}"; then
+    remount_read_write_if_possible "${DATA_PATH?}" false || ui_warning "The data partition cannot be remounted as read-write; I suggest to manually performing a factory reset after flashing this ZIP."
   else
-    ui_warning "The data partition cannot be mounted; I suggest to manually performing a factory reset after flashing this ZIP."
+    DATA_PATH='/data' # ToDO: Remove once all the code is fixed to handle the empty value
   fi
-  readonly DATA_PATH
-  export DATA_PATH
 
   display_basic_info
   test "${DEBUG_LOG_ENABLED:?}" -ne 1 || display_info
@@ -2046,7 +2074,7 @@ _do_rollback_last_app_internal()
   _wait_free_space_changes '' "${_initial_free_space:?}" # Reclaiming free space may take some time
   ui_debug ''
 
-  sed -ie '$ d' "${TMP_PATH:?}/processed-${1:?}s.log" || ui_error "Failed to remove the last line from processed-${1?}s.log"
+  sed -i -e '$ d' "${TMP_PATH:?}/processed-${1:?}s.log" || ui_error "Failed to remove the last line from processed-${1?}s.log"
 
   if command 1> /dev/null -v 'rollback_complete_callback'; then
     export CURRENTLY_ROLLING_BACK='true'
@@ -2235,6 +2263,26 @@ verify_disk_space()
   return 1
 }
 
+prepare_zips_config_dirs()
+{
+  export ZIPS_SYS_CONF_DIR="${DEST_PATH:?}/etc/zips"
+  if test ! -d "${ZIPS_SYS_CONF_DIR?}"; then
+    mkdir -p "${ZIPS_SYS_CONF_DIR?}" || ui_error "Cannot create directory '${ZIPS_SYS_CONF_DIR?}'"
+    set_perm 0 0 0750 "${ZIPS_SYS_CONF_DIR?}"
+  fi
+
+  export ZIPS_DATA_CONF_DIR="${DATA_PATH?}/local/.zips"
+  if test -n "${DATA_PATH}" && test -d "${ZIPS_DATA_CONF_DIR?}"; then
+    :
+  elif test -n "${DATA_PATH}" && test -f "${DATA_PATH}/system/packages.xml" && test -d "${DATA_PATH}/local"; then
+    mkdir -p "${ZIPS_DATA_CONF_DIR?}" || ui_error "Cannot create directory '${ZIPS_DATA_CONF_DIR?}'"
+    chown 2000:2000 "${ZIPS_DATA_CONF_DIR?}" || ui_warning "Cannot set shell ownership on '${ZIPS_DATA_CONF_DIR?}'"
+    chmod 0770 "${ZIPS_DATA_CONF_DIR?}" || ui_warning "Cannot set permissions on '${ZIPS_DATA_CONF_DIR?}'"
+  else
+    ZIPS_DATA_CONF_DIR=''
+  fi
+}
+
 perform_secure_copy_to_device()
 {
   if test ! -d "${TMP_PATH:?}/files/${1:?}"; then return 0; fi
@@ -2292,13 +2340,16 @@ perform_installation()
   ui_msg 'Installing...'
   test "${DRY_RUN:?}" -eq 0 || return
 
-  if test ! -d "${SYS_PATH:?}/etc/zips"; then
-    mkdir -p "${SYS_PATH:?}/etc/zips" || ui_error "Failed to create the dir '${SYS_PATH:?}/etc/zips'"
-    set_perm 0 0 0750 "${SYS_PATH:?}/etc/zips"
-  fi
-  set_perm 0 0 0640 "${TMP_PATH:?}/files/etc/zips/${MODULE_ID:?}.prop"
+  prepare_zips_config_dirs
 
-  perform_secure_copy_to_device 'etc/zips'
+  set_perm 0 0 0640 "${TMP_PATH:?}/files/etc/zips/${MODULE_ID:?}.prop"
+  cp -p -f -- "${TMP_PATH:?}/files/etc/zips/${MODULE_ID:?}.prop" "${ZIPS_SYS_CONF_DIR?}/${MODULE_ID:?}.prop" || ui_error "Failed to copy 'etc/zips/${MODULE_ID:?}.prop' to the device (${ZIPS_SYS_CONF_DIR?})"
+  if test -n "${ZIPS_DATA_CONF_DIR?}"; then
+    cp -p -f -- "${TMP_PATH:?}/files/etc/zips/${MODULE_ID:?}.prop" "${ZIPS_DATA_CONF_DIR?}/${MODULE_ID:?}.prop" || ui_error "Failed to copy 'etc/zips/${MODULE_ID:?}.prop' to the device (${ZIPS_DATA_CONF_DIR?})"
+    chown 2000:2000 "${ZIPS_DATA_CONF_DIR?}/${MODULE_ID:?}.prop" || ui_warning "Cannot set shell ownership on '${ZIPS_DATA_CONF_DIR?}/${MODULE_ID:?}.prop'"
+    chmod 0660 "${ZIPS_DATA_CONF_DIR?}/${MODULE_ID:?}.prop" || ui_warning "Cannot set permissions on '${ZIPS_DATA_CONF_DIR?}/${MODULE_ID:?}.prop'"
+  fi
+
   perform_secure_copy_to_device 'etc/permissions'
 
   local _entry
@@ -3081,7 +3132,7 @@ input_device_listener_start()
   mkdir -p "${TMP_PATH:?}/working-files/input/input-events" || ui_error 'Failed to create the folder for input events'
   for _device_path in "${@}"; do
     cat 1>> "${TMP_PATH:?}/working-files/input/input-events/0" -u -- "${_device_path:?}" &
-    printf '%s\n' "${!}" 1>> "${TMP_PATH:?}/working-files/input/pids-to-kill.dat"
+    printf '%s\n' "$!" 1>> "${TMP_PATH:?}/working-files/input/pids-to-kill.dat"
   done
 }
 
@@ -3636,7 +3687,7 @@ choose_inputevent()
 {
   local _key _status _last_key_pressed _key_desc _ret
 
-  test "${#}" -le 1 || ui_error "Key detection (input event) - too many arguments"
+  test "$#" -le 1 || ui_error "Key detection (input event) - too many arguments"
 
   input_device_listener_start || {
     ui_msg_empty_line
@@ -3687,7 +3738,7 @@ choose_inputevent()
 
     if test "${_key?}" = "${INPUT_CODE_POWER:-116}" && test "${KEY_TEST_ONLY:?}" -eq 0; then continue; fi # Power key (ignored completely)
 
-    test "${#}" -eq 0 || shift # Remove timeout after the first successful key press / release event (excluding power key)
+    test "$#" -eq 0 || shift # Remove timeout after the first successful key press / release event (excluding power key)
 
     if test "${KEY_TEST_ONLY:?}" -eq 1; then
       ui_msg "Event { Event type: 1, Key code: ${_key?}, Action: $((_status - 10)) }"
