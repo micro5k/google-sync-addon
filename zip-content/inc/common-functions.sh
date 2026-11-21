@@ -94,6 +94,15 @@ ui_error()
   _error_code=91
   test -z "${2-}" || _error_code="${2:?}"
 
+  if test "${DRY_RUN:-0}" -eq 0 && test -n "${MODULE_ID-}"; then
+    if test -n "${ZIPS_SYS_CONF_DIR-}"; then
+      touch 2> /dev/null "${ZIPS_SYS_CONF_DIR}/${MODULE_ID}.failed" || :
+    fi
+    if test -n "${ZIPS_DATA_CONF_DIR-}" && test "${DATA_RW-}" = 'true'; then
+      touch 2> /dev/null "${ZIPS_DATA_CONF_DIR}/${MODULE_ID}.failed" || :
+    fi
+  fi
+
   if test "${BASIC_INFO_DISPLAYED-}" != 'true' && test "${BASIC_INFO_READY-}" = 'true'; then
     display_basic_info
   fi
@@ -1320,6 +1329,65 @@ is_architecture_still_supported_by_Android()
   return 1
 }
 
+prepare_zips_config_dirs()
+{
+  export ZIPS_SYS_CONF_DIR="${DEST_PATH:?}/etc/zips"
+  if test ! -d "${ZIPS_SYS_CONF_DIR?}"; then
+    mkdir -p "${ZIPS_SYS_CONF_DIR?}" || ui_error "Cannot create directory '${ZIPS_SYS_CONF_DIR?}'"
+    set_perm 0 0 0750 "${ZIPS_SYS_CONF_DIR?}"
+  fi
+
+  export ZIPS_DATA_CONF_DIR="${DATA_PATH?}/local/.zips"
+  if test -n "${DATA_PATH}" && test -d "${ZIPS_DATA_CONF_DIR?}"; then
+    :
+  elif test "${DATA_RW?}" = 'true'; then
+    mkdir -p "${ZIPS_DATA_CONF_DIR?}" || ui_error "Cannot create directory '${ZIPS_DATA_CONF_DIR?}'"
+    chown 2000:2000 "${ZIPS_DATA_CONF_DIR?}" || ui_warning "Cannot set shell ownership on '${ZIPS_DATA_CONF_DIR?}'"
+    chmod 0770 "${ZIPS_DATA_CONF_DIR?}" || ui_warning "Cannot set permissions on '${ZIPS_DATA_CONF_DIR?}'"
+  else
+    ZIPS_DATA_CONF_DIR=''
+  fi
+}
+
+find_or_cache_zip_config()
+{
+  local _search_path=''
+
+  for _search_path in "${SYS_PATH?}" "${SYS_EXT_PATH?}" "${PRODUCT_PATH?}" "${DATA_PATH?}"; do
+    case "${_search_path}" in
+      '') continue ;;
+      "${DATA_PATH}") _search_path="${_search_path}/local/.zips" ;;
+      *) _search_path="${_search_path}/etc/zips" ;;
+    esac
+
+    if test -f "${_search_path}/${1}"; then
+      if test "${2:-true}" = 'true'; then
+        cp -p -f -- "${_search_path}/${1}" "${TMP_PATH?}/cache/${1}" || ui_error "Failed to cache '${1}' from '${_search_path}'"
+        ui_debug "Found: ${_search_path}/${1}"
+        ui_debug ''
+      fi
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+delete_zip_config()
+{
+  local _search_path=''
+
+  for _search_path in "${DATA_PATH?}" "${PRODUCT_PATH?}" "${SYS_EXT_PATH?}" "${SYS_PATH?}"; do
+    case "${_search_path}" in
+      '') continue ;;
+      "${DATA_PATH}") _search_path="${_search_path}/local/.zips" ;;
+      *) _search_path="${_search_path}/etc/zips" ;;
+    esac
+    test "${DRY_RUN:?}" -ne 0 || delete "${_search_path}/${1:?}"
+  done
+  return 0
+}
+
 append_to_ld_library_path()
 {
   if test -d "${1:?}"; then
@@ -1459,7 +1527,6 @@ initialize()
 {
   local _raw_arch_list
   local _additional_data_mountpoint=''
-  local _search_path=''
 
   reset_unmount_vars
 
@@ -1474,6 +1541,7 @@ initialize()
   VENDOR_RW='false'
   PRODUCT_RW='false'
   SYS_EXT_RW='false'
+  DATA_RW='false'
 
   # Make sure that the commands are still overridden here (most shells don't have the ability to export functions)
   if test "${TEST_INSTALL:-false}" != 'false' && test -f "${RS_OVERRIDE_SCRIPT:?}"; then
@@ -1593,7 +1661,6 @@ initialize()
   fi
 
   _find_and_mount_system
-  ui_debug ''
 
   if mount_partition_if_possible 'vendor' "${SLOT_SUFFIX:+vendor}${SLOT_SUFFIX-}${NL:?}vendor${NL:?}"; then
     VENDOR_PATH="${LAST_MOUNTPOINT:?}"
@@ -1644,25 +1711,11 @@ initialize()
     create_dir "${TMP_PATH?}/cache"
 
     cp -p -f -- "${SYS_PATH:?}/build.prop" "${TMP_PATH?}/build.prop"
-
-    for _search_path in "${SYS_PATH?}" "${SYS_EXT_PATH?}" "${PRODUCT_PATH?}" "${DATA_PATH?}"; do
-      case "${_search_path}" in
-        '') continue ;;
-        "${DATA_PATH}") _search_path="${_search_path}/local/.zips" ;;
-        *) _search_path="${_search_path}/etc/zips" ;;
-      esac
-
-      if test -f "${_search_path}/${MODULE_ID:?}.prop"; then
-        cp -p -f -- "${_search_path}/${MODULE_ID?}.prop" "${TMP_PATH?}/cache/${MODULE_ID?}.prop" || ui_error "Failed to cache '${MODULE_ID?}.prop' from '${_search_path}'"
-        ui_debug "Found: ${_search_path}/${MODULE_ID?}.prop"
-        ui_debug ''
-        break
-      fi
-    done
+    find_or_cache_zip_config "${MODULE_ID?}.prop" || :
   }
 
   PREV_INSTALL_FAILED='false'
-  if test -f "${SYS_PATH:?}/etc/zips/${MODULE_ID:?}.failed"; then
+  if find_or_cache_zip_config "${MODULE_ID?}.failed" 'false'; then
     PREV_INSTALL_FAILED='true'
     ui_warning 'The previous installation has failed!!!'
     ui_msg_empty_line
@@ -1760,20 +1813,30 @@ initialize()
   remount_read_write "${SYS_MOUNTPOINT:?}" || ui_error "Remounting '${SYS_MOUNTPOINT?}' failed!!!" 30
 
   if test -n "${VENDOR_PATH?}"; then
-    remount_read_write_if_possible "${VENDOR_PATH:?}" false && VENDOR_RW='true'
+    remount_read_write_if_possible "${VENDOR_PATH}" false && VENDOR_RW='true'
   fi
   if test -n "${PRODUCT_PATH?}"; then
-    remount_read_write_if_possible "${PRODUCT_PATH:?}" false && PRODUCT_RW='true'
+    remount_read_write_if_possible "${PRODUCT_PATH}" false && PRODUCT_RW='true'
   fi
   if test -n "${SYS_EXT_PATH?}"; then
-    remount_read_write_if_possible "${SYS_EXT_PATH:?}" false && SYS_EXT_RW='true'
+    remount_read_write_if_possible "${SYS_EXT_PATH}" false && SYS_EXT_RW='true'
   fi
   export VENDOR_RW PRODUCT_RW SYS_EXT_RW
 
   if test -n "${DATA_PATH?}"; then
-    remount_read_write_if_possible "${DATA_PATH?}" false || ui_warning "The data partition cannot be remounted as read-write; I suggest to manually performing a factory reset after flashing this ZIP."
+    # NOTE: Only modify the data partition if Android has booted at least once and was decrypted properly; otherwise, modifying it is unsafe.
+    if
+      test -f "${DATA_PATH}/system/packages.xml" &&
+        test -d "${DATA_PATH}/local" &&
+        remount_read_write_if_possible "${DATA_PATH}" false &&
+        test -w "${DATA_PATH}"
+    then
+      DATA_RW='true'
+    else
+      ui_warning "The data partition cannot be remounted as read-write or it is empty."
+    fi
   else
-    DATA_PATH='/data' # ToDO: Remove once all the code is fixed to handle the empty value
+    DATA_PATH='/data' # TODO: Remove once all the code is fixed to handle the empty value
   fi
 
   display_basic_info
@@ -1851,7 +1914,7 @@ deinitialize()
 
 clean_previous_installations()
 {
-  local _initial_free_space
+  local _initial_free_space=''
 
   if test "${SETUP_TYPE?}" != 'uninstall'; then
     ui_msg_empty_line
@@ -1868,7 +1931,7 @@ clean_previous_installations()
   # shellcheck source=SCRIPTDIR/../scripts/uninstall.sh
   command . "${TMP_PATH:?}/uninstall.sh" || ui_error "Sourcing uninstall script failed with error: ${?}"
 
-  delete "${SYS_PATH:?}/etc/zips/${MODULE_ID:?}.prop"
+  delete_zip_config "${MODULE_ID?}.prop"
 
   if test "${SETUP_TYPE?}" != 'uninstall'; then
     _wait_free_space_changes 5 "${_initial_free_space:?}" # Reclaiming free space may take some time
@@ -2263,26 +2326,6 @@ verify_disk_space()
   return 1
 }
 
-prepare_zips_config_dirs()
-{
-  export ZIPS_SYS_CONF_DIR="${DEST_PATH:?}/etc/zips"
-  if test ! -d "${ZIPS_SYS_CONF_DIR?}"; then
-    mkdir -p "${ZIPS_SYS_CONF_DIR?}" || ui_error "Cannot create directory '${ZIPS_SYS_CONF_DIR?}'"
-    set_perm 0 0 0750 "${ZIPS_SYS_CONF_DIR?}"
-  fi
-
-  export ZIPS_DATA_CONF_DIR="${DATA_PATH?}/local/.zips"
-  if test -n "${DATA_PATH}" && test -d "${ZIPS_DATA_CONF_DIR?}"; then
-    :
-  elif test -n "${DATA_PATH}" && test -f "${DATA_PATH}/system/packages.xml" && test -d "${DATA_PATH}/local"; then
-    mkdir -p "${ZIPS_DATA_CONF_DIR?}" || ui_error "Cannot create directory '${ZIPS_DATA_CONF_DIR?}'"
-    chown 2000:2000 "${ZIPS_DATA_CONF_DIR?}" || ui_warning "Cannot set shell ownership on '${ZIPS_DATA_CONF_DIR?}'"
-    chmod 0770 "${ZIPS_DATA_CONF_DIR?}" || ui_warning "Cannot set permissions on '${ZIPS_DATA_CONF_DIR?}'"
-  else
-    ZIPS_DATA_CONF_DIR=''
-  fi
-}
-
 perform_secure_copy_to_device()
 {
   if test ! -d "${TMP_PATH:?}/files/${1:?}"; then return 0; fi
@@ -2311,8 +2354,6 @@ perform_secure_copy_to_device()
       fi
     done
   fi
-
-  touch 2> /dev/null "${SYS_PATH:?}/etc/zips/${MODULE_ID:?}.failed" || :
 
   ui_debug ''
   display_free_space "${DEST_PATH:?}" "$(get_free_disk_space_of_partition "${DEST_PATH:?}" || :)" 'true'
@@ -2344,7 +2385,7 @@ perform_installation()
 
   set_perm 0 0 0640 "${TMP_PATH:?}/files/etc/zips/${MODULE_ID:?}.prop"
   cp -p -f -- "${TMP_PATH:?}/files/etc/zips/${MODULE_ID:?}.prop" "${ZIPS_SYS_CONF_DIR?}/${MODULE_ID:?}.prop" || ui_error "Failed to copy 'etc/zips/${MODULE_ID:?}.prop' to the device (${ZIPS_SYS_CONF_DIR?})"
-  if test -n "${ZIPS_DATA_CONF_DIR?}"; then
+  if test -n "${ZIPS_DATA_CONF_DIR?}" && test "${DATA_RW?}" = 'true'; then
     cp -p -f -- "${TMP_PATH:?}/files/etc/zips/${MODULE_ID:?}.prop" "${ZIPS_DATA_CONF_DIR?}/${MODULE_ID:?}.prop" || ui_error "Failed to copy 'etc/zips/${MODULE_ID:?}.prop' to the device (${ZIPS_DATA_CONF_DIR?})"
     chown 2000:2000 "${ZIPS_DATA_CONF_DIR?}/${MODULE_ID:?}.prop" || ui_warning "Cannot set shell ownership on '${ZIPS_DATA_CONF_DIR?}/${MODULE_ID:?}.prop'"
     chmod 0660 "${ZIPS_DATA_CONF_DIR?}/${MODULE_ID:?}.prop" || ui_warning "Cannot set permissions on '${ZIPS_DATA_CONF_DIR?}/${MODULE_ID:?}.prop'"
@@ -2385,12 +2426,12 @@ perform_installation()
 
 finalize_correctly()
 {
-  test "${DRY_RUN:?}" -ne 0 || rm -f -- "${SYS_PATH:?}/etc/zips/${MODULE_ID:?}.failed" || :
+  delete_zip_config "${MODULE_ID?}.failed"
 
   case "${SETUP_TYPE?}" in
     'install') ui_msg 'Installation finished.' ;;
     'uninstall')
-      delete_dir_if_empty "${SYS_PATH:?}/etc/zips"
+      test "${DRY_RUN:?}" -ne 0 || test ! -d "${SYS_PATH?}/etc/zips" || rmdir --ignore-fail-on-non-empty -- "${SYS_PATH?}/etc/zips" || :
       ui_msg 'Uninstallation finished.'
       ;;
     *) ui_error 'Invalid setup type' ;;
@@ -2398,6 +2439,7 @@ finalize_correctly()
 
   deinitialize
   touch "${TMP_PATH:?}/installed"
+  return "$?"
 }
 
 # Error checking functions
@@ -2616,7 +2658,7 @@ reset_gms_data_of_all_apps()
 {
   test "${DRY_RUN:?}" -eq 0 || return
 
-  if test -n "${DATA_PATH?}" && test -e "${DATA_PATH:?}/data"; then
+  if test -n "${DATA_PATH?}" && test -e "${DATA_PATH?}/data"; then
     ui_debug 'Resetting GMS data of all apps...'
     find "${DATA_PATH:?}"/data/*/shared_prefs -name 'com.google.android.gms.*.xml' -delete
     validate_return_code_warning "$?" 'Failed to reset GMS data of all apps'
@@ -2686,9 +2728,9 @@ move_dir_content()
 delete()
 {
   for filename in "${@}"; do
-    if test -e "${filename?}"; then
-      ui_debug "Deleting '${filename?}'..."
-      rm -rf -- "${filename:?}" || ui_error 'Failed to delete files/folders in delete()' 103
+    if test -e "${filename}"; then
+      ui_debug "Deleting '${filename}'..."
+      rm -r -f -- "${filename:?}" || ui_error 'Failed to delete files/folders in delete()' 103
     fi
   done
 }
